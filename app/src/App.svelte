@@ -27,30 +27,41 @@
   let gateReady = $state(false);
 
   let gateApi: Awaited<ReturnType<typeof createApi>> | null = null;
+  let setupNote = $state<string | null>(null);
+  let alive = true;
+
+  function startStore() {
+    if (store || !gateApi || !alive) return;
+    store = new Store(gateApi);
+    store.start();
+  }
 
   async function checkGate(api: Awaited<ReturnType<typeof createApi>>) {
     gateApi = api;
-    try { if (shouldShowSetup(await api.fabricSettingsRead())) setupOpen = true; }
-    catch { /* an older backend without settings keeps the todo views */ }
+    try {
+      if (shouldShowSetup(await api.fabricSettingsRead())) setupOpen = true;
+    } catch {
+      setupOpen = true;
+      setupNote = 'Could not read your settings. Finish setup to continue.';
+    }
     gateReady = true;
+    if (!setupOpen) startStore();
   }
 
   async function setupDone() {
-    try { if (gateApi && shouldShowSetup(await gateApi.fabricSettingsRead())) return; }
-    catch { /* fall through and open the tasks view */ }
+    let read;
+    try { read = await gateApi!.fabricSettingsRead(); }
+    catch (e) { setupNote = `Could not confirm your settings: ${(e as Error).message}`; return; }
+    if (shouldShowSetup(read)) { setupNote = 'Setup is not finished yet. Complete the remaining steps to continue.'; return; }
+    setupNote = null;
     setupOpen = false;
     fabricOpen = true;
+    startStore();
   }
 
   onMount(() => {
-    let s: Store | null = null;
-    createApi().then(async (api) => {
-      await checkGate(api);
-      s = new Store(api);
-      store = s;
-      s.start();
-    });
-    return () => s?.stop();
+    createApi().then(checkGate);
+    return () => { alive = false; store?.stop(); };
   });
 
   function fit() {
@@ -99,6 +110,7 @@
 <svelte:window {onkeydown} />
 
 {#if gateReady && setupOpen}
+  {#if setupNote}<p class="gate-note" role="alert">{setupNote}</p>{/if}
   <SetupWizard ondone={setupDone} />
 {:else if store}
   <div class="app" class:app--panel={!!store.panel}>
@@ -129,3 +141,7 @@
   <AddNodesSheet {store} />
   <Shortcuts open={helpOpen} onclose={() => (helpOpen = false)} />
 {/if}
+
+<style>
+  .gate-note { margin: 0; padding: 12px 16px; color: var(--red); font-size: var(--fs-13, 13px); text-align: center; }
+</style>

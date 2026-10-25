@@ -85,7 +85,7 @@
     }
   }
 
-  const checkFolder = () => run(() => src!.check('folder', { path: folder.trim() }), () => persist({ default_folder: folder.trim() }, 'folder'));
+  const checkFolder = () => run(() => src!.check('folder', { path: folder.trim() }), async () => { await persist({ default_folder: folder.trim() }, 'folder'); folder = settings!.default_folder; });
 
   const checkKey = () => run(async () => {
     secrets = await src!.writeSecrets({ anthropic_api_key: apiKey });

@@ -11,6 +11,9 @@ describe('shouldShowSetup', () => {
   it('shows setup when setup is not completed', () => {
     expect(shouldShowSetup({ exists: true, settings: emptySettings() })).toBe(true);
   });
+  it('shows setup when the settings read failed', () => {
+    expect(shouldShowSetup(null)).toBe(true);
+  });
   it('skips setup when completed', () => {
     expect(shouldShowSetup({ exists: true, settings: done() })).toBe(false);
   });

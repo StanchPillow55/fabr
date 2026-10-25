@@ -9,7 +9,7 @@ export function backendState(heartbeatAt: string | null, now: Date | string, int
 }
 
 export const BACKEND_LABEL: Record<BackendState, string> = {
-  connected: 'Backend connected',
-  stale: 'Backend stale',
-  absent: 'Backend not connected',
+  connected: 'Agent backend connected',
+  stale: 'Agent backend not responding',
+  absent: 'Agent backend not connected',
 };

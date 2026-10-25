@@ -1,4 +1,5 @@
 use crate::error::FabrError;
+use crate::paths::expand_home;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::io::Write;
@@ -153,7 +154,7 @@ pub fn settings_read(ctx: &Ctx) -> Result<SettingsRead, FabrError> {
     let mut s = FabricSettings::defaults(&ctx.home);
     let Some(doc) = load_doc(&ctx.settings_path())? else { return Ok(SettingsRead { exists: false, settings: s }) };
     if let Some(v) = doc.get("default_folder").and_then(Item::as_str) {
-        s.default_folder = v.into();
+        s.default_folder = expand_home(v, &ctx.home).to_string_lossy().into_owned();
     }
     if let Some(v) = doc.get("model").and_then(Item::as_str) {
         s.model = v.into();
@@ -183,7 +184,7 @@ pub fn settings_write(ctx: &Ctx, req: SettingsWriteReq) -> Result<SettingsRead, 
     }
     let path = ctx.settings_path();
     let mut doc = load_doc(&path)?.unwrap_or_default();
-    doc["default_folder"] = value(s.default_folder);
+    doc["default_folder"] = value(expand_home(&s.default_folder, &ctx.home).to_string_lossy().into_owned());
     doc["model"] = value(s.model);
     match s.telegram_user_id {
         Some(id) => doc["telegram_user_id"] = value(id),
@@ -273,11 +274,7 @@ pub fn check_folder(ctx: &Ctx, path: &str) -> Value {
     if let Err(e) = std::fs::create_dir_all(&space) {
         return fail(&format!("Could not create {}: {}.", space.display(), e.kind()));
     }
-    let p = match path.strip_prefix("~/") {
-        Some(rest) => ctx.home.join(rest),
-        None if path == "~" => ctx.home.clone(),
-        None => PathBuf::from(path),
-    };
+    let p = expand_home(path, &ctx.home);
     if !p.exists() {
         return fail("That folder does not exist.");
     }
@@ -527,6 +524,19 @@ mod tests {
             use std::os::unix::fs::PermissionsExt;
             assert_eq!(std::fs::metadata(c.secrets_path()).unwrap().permissions().mode() & 0o777, 0o600);
         }
+    }
+
+    #[test]
+    fn tilde_default_folder_is_stored_and_read_absolute() {
+        let d = tempfile::tempdir().unwrap();
+        let c = Ctx::new(d.path().join("home"));
+        let mut s = settings_read(&c).unwrap().settings;
+        s.default_folder = "~/".into();
+        let w = settings_write(&c, SettingsWriteReq { settings: s }).unwrap();
+        assert_eq!(Path::new(&w.settings.default_folder), c.home);
+        assert!(!std::fs::read_to_string(c.settings_path()).unwrap().contains('~'));
+        std::fs::write(c.settings_path(), "default_folder = \"~/x\"\n").unwrap();
+        assert_eq!(Path::new(&settings_read(&c).unwrap().settings.default_folder), c.home.join("x"));
     }
 
     #[test]

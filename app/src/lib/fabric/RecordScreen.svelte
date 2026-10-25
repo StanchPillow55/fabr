@@ -8,6 +8,7 @@
   import { describeAnswer } from './answer';
   import { splitContext } from './parse';
   import QuestionPanel from './QuestionPanel.svelte';
+  import { BACKEND_LABEL } from './backend';
   import { backendSilent, pendingRequests, requestFor, type RequestKey } from './requests';
   import StateRibbon from './StateRibbon.svelte';
   import type { TaskRecord } from './types';
@@ -66,7 +67,7 @@
           <Button variant={wanted === 'cancel' ? 'danger' : 'primary'} disabled={busy} onclick={() => ask(wanted)}>{labels[wanted]}</Button>
         {/if}
         {#each queued as k (k)}<span class="req__queued">{labels[k]}: queued</span>{/each}
-        {#if silent}<span class="req__silent">agent backend not connected</span>{/if}
+        {#if silent}<span class="req__silent">{BACKEND_LABEL.absent}</span>{/if}
         {#if reqError}<span class="req__err">{reqError}</span>{/if}
       </div>
     {/if}

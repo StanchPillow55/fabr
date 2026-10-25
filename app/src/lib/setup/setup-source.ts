@@ -36,8 +36,8 @@ export function emptySettings(): FabricSettings {
 const OK: Record<StubKey, FabricCheckResult> = {
   folder: { ok: true },
   api_key: { ok: true },
-  model: { ok: true, reply: 'Hello from the stub.' },
-  telegram_token: { ok: true, bot_name: 'fabr_stub_bot' },
+  model: { ok: true, reply: 'Hello.' },
+  telegram_token: { ok: true, bot_name: 'test_bot' },
   telegram_link: { ok: true, user_id: 123456789 },
 };
 

@@ -101,9 +101,13 @@ fn walk(dir: &Path, out: &mut Vec<FileStamp>) {
 }
 
 pub fn list(req: &FabricListReq) -> Result<FabricListRes, FabrError> {
+    list_in(req, &crate::setup::Ctx::from_env().home)
+}
+
+pub fn list_in(req: &FabricListReq, user_home: &Path) -> Result<FabricListRes, FabrError> {
     let mut res = FabricListRes::default();
     if !req.root.is_empty() {
-        let root = Path::new(&req.root);
+        let root = &crate::paths::expand_home(&req.root, user_home);
         if !root.is_dir() {
             return Err(FabrError::NotFound(format!("not a folder: {}", req.root)));
         }
@@ -124,6 +128,10 @@ pub fn list(req: &FabricListReq) -> Result<FabricListRes, FabrError> {
 }
 
 pub fn stamp(req: &FabricStampReq) -> Result<String, FabrError> {
+    stamp_in(req, &crate::setup::Ctx::from_env().home)
+}
+
+pub fn stamp_in(req: &FabricStampReq, user_home: &Path) -> Result<String, FabrError> {
     let mut files: Vec<FileStamp> = Vec::new();
     let mut add = |l: FabricListRes| {
         files.extend(l.records);
@@ -132,7 +140,7 @@ pub fn stamp(req: &FabricStampReq) -> Result<String, FabrError> {
         files.extend(l.backend);
     };
     for (i, r) in req.roots.iter().enumerate() {
-        if let Ok(l) = list(&FabricListReq { root: r.clone(), home: if i == 0 { req.home.clone() } else { None } }) {
+        if let Ok(l) = list_in(&FabricListReq { root: r.clone(), home: if i == 0 { req.home.clone() } else { None } }, user_home) {
             add(l);
         }
     }
@@ -329,6 +337,18 @@ mod tests {
     }
 
     #[test]
+    fn tilde_roots_resolve_through_the_given_home() {
+        let (d, _root, _) = tree();
+        let uh = d.path();
+        let req = FabricListReq { root: "~/proj".into(), home: None };
+        assert!(list_in(&req, uh).unwrap().records.iter().any(|r| r.path.ends_with("a.md")));
+        assert!(list_in(&FabricListReq { root: "~".into(), home: None }, uh).is_ok());
+        assert!(list_in(&FabricListReq { root: "~/nope".into(), home: None }, uh).is_err());
+        let st = FabricStampReq { roots: vec!["~/proj".into()], home: None };
+        assert_ne!(stamp_in(&st, uh).unwrap(), stamp_in(&FabricStampReq { roots: vec![], home: None }, uh).unwrap());
+    }
+
+    #[test]
     fn list_without_root_returns_home_files_only() {
         let (_d, _root, home) = tree();
         let r = list(&FabricListReq { root: String::new(), home: Some(home) }).unwrap();
@@ -402,5 +422,15 @@ mod tests {
         write(&FabricWriteReq { path: path.clone(), text: text.clone(), expected_updated_at: cur.clone() }).unwrap();
         assert_eq!(read(&FabricReadReq { path: path.clone() }).unwrap().text, text);
         assert!(write(&FabricWriteReq { path, text, expected_updated_at: cur }).is_err());
+    }
+
+    #[test]
+    fn fixture_copy_under_default_folder_is_listed() {
+        let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/05-running/project");
+        let d = tempfile::tempdir().unwrap();
+        copy(&src, &d.path().join("work/errands"));
+        let l = list(&FabricListReq { root: d.path().to_string_lossy().into_owned(), home: None }).unwrap();
+        assert_eq!(l.records.len(), 1);
+        assert!(l.records[0].path.ends_with("work/errands/.fabric-space/tasks/2026-10-24-order-filament.md"));
     }
 }

@@ -40,6 +40,8 @@
   let readPosition = $state(0);
   let showNotices = $state(false);
   let now = $state(new Date());
+  let loaded = $state(false);
+  let defaultFolder = $state('');
   let actionError = $state<string | null>(null);
   const backend = $derived(backendState(heartbeat, now));
   const open = $derived(entries.find((e) => e.path === openPath) ?? null);
@@ -61,6 +63,7 @@
     events = parseEvents(await source.readEvents());
     readPosition = reconcileReadPosition(eventsKey, readPosition, events.length);
     heartbeat = await source.readBackendHeartbeat();
+    loaded = true;
   }
 
   const titleFor = (p: string) => findByTaskPath(entries, p)?.record.title;
@@ -115,7 +118,7 @@
         if (st !== last) { last = st; await load(); }
       } catch (e) { errors = [(e as Error).message]; }
     };
-    createApi().then((api) => api.fabricSettingsRead()).then((st) => createFabricSource(st)).then(
+    createApi().then((api) => api.fabricSettingsRead()).then((st) => { defaultFolder = st.exists ? st.settings.default_folder : ''; return createFabricSource(st); }).then(
       (src) => {
         if (dead) return;
         source = src;
@@ -151,7 +154,12 @@
           <NoticesBadge {events} {readPosition} onclick={() => (showNotices = !showNotices)} />
         </div>
       </div>
-      {#if view === 'board'}
+      {#if loaded && !entries.length && !errors.length && view !== 'agents'}
+        <div class="fv__empty">
+          <p class="fv__empty-title">No tasks yet.</p>
+          <p class="fv__empty-text">Add a reminder in any folder under <code>{defaultFolder}</code>, or wait for the organizer to write one.</p>
+        </div>
+      {:else if view === 'board'}
         <BoardScreen {entries} onopen={(e) => (openPath = e.path)} />
       {:else if view === 'agents'}
         <AgentsScreen entries={registry} {now} {titleFor} oncancel={cancelFromAgents} onopen={openByPath} />
@@ -175,6 +183,9 @@
   .fv__backend { color: var(--label-3); font-size: var(--fs-12); white-space: nowrap; }
   .fv__backend--connected { color: var(--green, var(--label-2)); }
   .fv__backend--stale { color: var(--orange, var(--label-2)); }
+  .fv__empty { padding: 28px 16px; text-align: center; }
+  .fv__empty-title { margin: 0 0 6px; color: var(--label-2); font-weight: 600; }
+  .fv__empty-text { margin: 0; color: var(--label-3); font-size: var(--fs-13, 13px); }
   .fv__quiet { margin: 0; color: var(--label-3); font-size: var(--fs-12); }
   .fv__err { margin: 0; color: var(--red); font-size: var(--fs-12); }
 </style>

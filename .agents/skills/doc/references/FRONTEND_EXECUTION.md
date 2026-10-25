@@ -162,3 +162,6 @@ Decisions M1 needed, both approved by the owner on 2026-10-24: one HTTP client c
 checks call Anthropic and Telegram; and a backend-presence signal for spec version 1.1, proposed
 as a heartbeat file at `~/.fabric-space/registry/_backend.yaml`. Until dev 2 agrees, the
 placeholder treats a request flag uncleared for a minute as "no backend".
+
+Status 2026-10-25: M1 reached. Open items: dev 2's review of the version 1.1 notes, the swap to
+their check command, the owner's visual review.

@@ -58,4 +58,23 @@ describe('mock api', () => {
     }
     expect(await api.fabricSettingsRead()).toMatchObject({ exists: true, settings: { setup: { completed: true } } });
   });
+
+  it('a fresh config opens on setup and the five steps open tasks', async () => {
+    const { shouldShowSetup } = await import('../lib/setup/gate');
+    const { ApiSetupSource } = await import('../lib/setup/setup-source');
+    const api = createMockApi({ today: '2026-10-19', latency: 0 });
+    const read = await api.fabricSettingsRead();
+    expect(read.exists).toBe(false);
+    expect(shouldShowSetup(read)).toBe(true);
+    const src = new ApiSetupSource(api);
+    let s = read.settings;
+    for (const [step, kind] of [['folder', 'folder'], ['api_key', 'api_key'], ['model', 'model'], ['telegram_bot', 'telegram_token']] as const) {
+      expect((await src.check(kind, { path: '~/' })).ok).toBe(true);
+      s = markStep(s, step);
+    }
+    expect((await src.telegramLink(5)).ok).toBe(true);
+    s = markStep(s, 'telegram_link');
+    expect(shouldShowSetup(await src.writeSettings(s))).toBe(false);
+    expect(shouldShowSetup(await api.fabricSettingsRead())).toBe(false);
+  });
 });

@@ -115,7 +115,7 @@ describe('RecordScreen request actions', async () => {
     const fresh = html(flagged, new Date('2026-10-24T19:00:10Z'));
     expect(fresh).toContain('queued');
     expect(buttons(fresh)).toEqual([]);
-    expect(fresh).not.toContain('agent backend not connected');
-    expect(html(flagged, new Date('2026-10-24T19:02:00Z'))).toContain('agent backend not connected');
+    expect(fresh).not.toContain('Agent backend not connected');
+    expect(html(flagged, new Date('2026-10-24T19:02:00Z'))).toContain('Agent backend not connected');
   });
 });
