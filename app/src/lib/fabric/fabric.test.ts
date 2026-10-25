@@ -13,7 +13,12 @@ describe('fixtures', () => {
 
   for (const { path, text } of records) {
     it(`parses ${path.split('fixtures/')[1]}`, () => {
-      expect(Object.keys(parseFrontMatter(text).data)).toEqual([...FIELDS]);
+      // The parser is order-insensitive: it requires every field to be present but
+      // accepts any key order (parseRecord checks `f in data`, never position). The
+      // canonical write order lives in the serializer and is locked, ordered, by
+      // serialize.test.ts. Some fixtures legitimately store fields in a different
+      // order (e.g. `source` after `waiting`), so compare as a set, not a sequence.
+      expect(Object.keys(parseFrontMatter(text).data).sort()).toEqual([...FIELDS].sort());
       const r = parseRecord(text);
       expect(r.schema).toBe(2);
       expect(typeof r.state).toBe('string');

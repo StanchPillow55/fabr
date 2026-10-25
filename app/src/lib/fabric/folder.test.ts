@@ -37,7 +37,9 @@ describe('groupByFolder and countsFor', () => {
       expect(Object.values(c.byColumn).reduce((a, b) => a + b, 0)).toBe(list.length);
       expect(c.total).toBe(list.length);
     }
-    expect(countsFor(folders.get('09-redelegated-pair')!)).toMatchObject({ byColumn: { task: 1, done: 1 } });
+    // 09-redelegated-pair holds the failed predecessor (done) and the defined successor,
+    // so no record is in the `task` column. Matches tasks.test.ts's store-level counts.
+    expect(countsFor(folders.get('09-redelegated-pair')!)).toMatchObject({ byColumn: { task: 0, defined: 1, done: 1 }, waiting: 1, total: 2 });
     expect(countsFor(entries).waiting).toBe(entries.filter((e) => e.record.waiting).length);
   });
 });

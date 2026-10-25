@@ -13,8 +13,10 @@
   import SetupWizard from './lib/setup/SetupWizard.svelte';
   import { shouldShowSetup } from './lib/setup/gate';
   import NoticesList from './lib/fabric/NoticesList.svelte';
+  import RecordScreen from './lib/fabric/RecordScreen.svelte';
+  import AgentsScreen from './lib/fabric/AgentsScreen.svelte';
   import { FabricStore, localRoots } from './lib/fabric/tasks.svelte';
-  import { folderOf } from './lib/fabric/folder';
+  import { folderName, folderOf } from './lib/fabric/folder';
   import Button from './lib/ui/Button.svelte';
   import Sheet from './lib/ui/Sheet.svelte';
   import Toolbar from './lib/Toolbar.svelte';
@@ -77,17 +79,33 @@
     }
   });
 
+  // The open record only when NO visible tree node hosts its folder. In that case TaskSection's
+  // folderOf(openRecord.path) === folder gate never matches, so the record would never mount; the
+  // standalone sheet below renders it instead. When a node does host the folder, TaskSection shows
+  // the in-tree sheet and this stays null to avoid a double sheet (preserve 3.3).
+  let standaloneRecord = $derived.by(() => {
+    const open = fabric?.openRecord;
+    if (!open) return null;
+    const folder = folderOf(open.path);
+    const hosted = store && [...store.byKey.values()].some((n) => fabric!.folderFor(store!.sourceOf(n.source), n.path) === folder);
+    return hosted ? null : open;
+  });
+
   function openNotice(taskPath: string) {
+    // `locate` is redelegation/path-form aware (view.ts findByTaskPath): `held` is the live target.
     const held = fabric?.locate(taskPath);
-    const folder = held ? folderOf(held.path) : null;
-    const node = folder && store ? [...store.byKey.values()].find((n) => fabric!.folderFor(store!.sourceOf(n.source), n.path) === folder) : undefined;
-    if (!held || !node) {
-      noticeError = held ? 'That folder is not in the tree.' : `No record found for ${taskPath}.`;
+    if (!held) {
+      // Genuine not-on-disk: a recoverable explanation with a next step, never a silent dead-end.
+      noticeError = `No record on disk for ${taskPath}. Try rescanning or check the folder.`;
       return;
     }
+    const folder = folderOf(held.path);
+    const node = store ? [...store.byKey.values()].find((n) => fabric!.folderFor(store!.sourceOf(n.source), n.path) === folder) : undefined;
     noticeError = null;
     noticesOpen = false;
-    store!.openPanel(nodeKey(node));
+    // In-tree: open the hosting node's panel exactly as before (preserve 3.3). Out-of-tree: no
+    // node hosts this folder, so the standalone record sheet mounts from fabric.openPath (task 6.2).
+    if (node) store!.openPanel(nodeKey(node));
     fabric!.open(held.path);
   }
 
@@ -144,7 +162,7 @@
       <div class="app__bar" bind:clientHeight={toolbarH}>
         <Toolbar bind:this={toolbar} {store} onrescan={rescan} onexpand={expandAll} oncollapse={collapseAll} onsearchenter={() => treeView?.nextMatch()} {fabric} onnotices={() => { noticeError = null; noticesOpen = true; }} />
       </div>
-      <Notice {store} insetTop={toolbarH} />
+      <Notice {store} {fabric} insetTop={toolbarH} />
       {#if needsOnboarding(store.tree)}
         <Onboarding {store} />
       {:else if store.view === 'tree'}
@@ -164,11 +182,35 @@
   <SettingsSheet {store} />
   <AddNodesSheet {store} />
   {#if fabric}
+    {@const nf = fabric}
     <Sheet open={noticesOpen} title="Notices" onclose={() => (noticesOpen = false)}>
-      <NoticesList events={fabric.events} readPosition={fabric.readPosition} titleFor={fabric.titleFor} onopen={openNotice} onmarkallread={() => fabric?.markAllRead()} />
+      <NoticesList events={fabric.events} readPosition={fabric.readPosition} titleFor={fabric.titleFor} outOfScope={(p: string) => { const h = nf.locate(p); return !!h && nf.scope.outOfScope.includes(h); }} onopen={openNotice} onmarkallread={() => fabric?.markAllRead()} />
       {#if noticeError}<p class="gate-note" role="alert">{noticeError}</p>{/if}
       {#snippet footer()}<Button variant="tint" onclick={() => (noticesOpen = false)}>Close</Button>{/snippet}
     </Sheet>
+    {#if standaloneRecord}
+      {@const f = fabric}
+      {@const h = standaloneRecord}
+      <Sheet open={true} title={h.record.title} width={720} onclose={() => f.open(null)}>
+        <RecordScreen
+          record={h.record}
+          name={folderName(folderOf(h.path))}
+          backLabel="Close"
+          now={f.now}
+          onback={() => f.open(null)}
+          onanswer={(a) => f.answer(h, a)}
+          onapprove={(d) => f.approve(h, d)}
+          onrequest={(k) => f.request(h, k)}
+          onreload={() => f.reload(h.path)}
+        >
+          {#snippet agent()}
+            {#if f.entryFor(h.path)}
+              <AgentsScreen entries={[f.entryFor(h.path)!]} now={f.now} titleFor={f.titleFor} oncancel={(p) => f.cancelTask(p)} />
+            {/if}
+          {/snippet}
+        </RecordScreen>
+      </Sheet>
+    {/if}
   {/if}
   <Shortcuts open={helpOpen} onclose={() => (helpOpen = false)} />
 {/if}

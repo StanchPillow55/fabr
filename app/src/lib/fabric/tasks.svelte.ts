@@ -4,7 +4,7 @@ import type { Source } from '../api/types';
 import type { AnswerInput } from './answer';
 import { submitApproval, type ApprovalDecision } from './approval';
 import { BACKEND_LABEL, backendState } from './backend';
-import { loadReadPosition, parseEvents, reconcileReadPosition, saveReadPosition, unreadCount, type FabricEvent } from './events';
+import { loadReadPosition, parseEvents, reconcileReadPosition, safeReadPosition, saveReadPosition, unreadCount, type FabricEvent } from './events';
 import { COLUMNS, columnOf, folderName, folderOf, nodeFolder, type ColumnId, type Entry } from './folder';
 import { createFabricSource } from './live';
 import { parseRecord } from './parse';
@@ -23,6 +23,19 @@ export function localRoots(sources: Source[] | undefined): string[] {
   return (sources ?? []).filter((s) => !s.host).map((s) => s.root);
 }
 
+const trimSlash = (p: string) => p.replace(/\/+$/, '');
+
+// Path-segment-aware containment: canonical `path` lives at or beneath canonical `root`.
+// Both are compared trailing-slash-trimmed so `/a/proj` is under `/a/proj` and `/a/proj/x`
+// but not under `/a/project`.
+export function under(root: string, path: string): boolean {
+  const r = trimSlash(root);
+  const p = trimSlash(path);
+  return p === r || p.startsWith(`${r}/`);
+}
+
+export type Scope = { workerRoot: string | null; openedRoots: string[]; outOfScope: Held[] };
+
 export class FabricStore {
   records = $state<Held[]>([]);
   registry = $state<RegistryEntry[]>([]);
@@ -35,6 +48,8 @@ export class FabricStore {
   actionError = $state<string | null>(null);
   openPath = $state<string | null>(null);
   home = $state<string | null>(null);
+  workerRoot = $state<string | null>(null);
+  openedRoots = $state<string[]>([]);
 
   #source: FabricSource | null = null;
   #timer: ReturnType<typeof setInterval> | null = null;
@@ -68,14 +83,41 @@ export class FabricStore {
   });
   openRecord = $derived(this.records.find((h) => h.path === this.openPath) ?? null);
 
+  // Read-only scope summary the toolbar/banner can read. `outOfScope` is the set of loaded
+  // records whose folder is not under any opened root. With no opened roots there is nothing
+  // to compare against, so it is empty (an injected-source/test run captures no scope).
+  scope = $derived.by<Scope>(() => {
+    const workerRoot = this.workerRoot;
+    const openedRoots = this.openedRoots;
+    const outOfScope = openedRoots.length
+      ? this.records.filter((h) => !openedRoots.some((r) => under(r, folderOf(h.path))))
+      : [];
+    return { workerRoot, openedRoots, outOfScope };
+  });
+
+  // The worker's presence (heartbeat/registry) lives under a space other than the opened
+  // project when a registry entry drives a record whose folder is not under any opened root.
+  // Observable from the registry paths that `listRegistry` returns; no record writes.
+  presenceElsewhere = $derived.by<boolean>(() => {
+    const roots = this.openedRoots;
+    if (!roots.length) return false;
+    return this.registry.some((e) => {
+      const held = findByTaskPath(this.records, e.task_path);
+      const folder = held ? folderOf(held.path) : folderOf(e.task_path);
+      return !roots.some((r) => under(r, folder));
+    });
+  });
+
   async start(treeRoots: string[] = []): Promise<void> {
     if (this.#timer) return;
     this.#dead = false;
+    this.openedRoots = treeRoots.map(trimSlash);
     this.#timer = setInterval(() => void this.tick(), 1000);
     try {
       if (!this.#source) {
         const api = await createApi();
         const settings = await api.fabricSettingsRead();
+        this.workerRoot = settings.exists ? trimSlash(settings.settings.default_folder) : null;
         this.#source = await createFabricSource(settings, treeRoots);
         if (isTauri()) this.home = (await (await import('@tauri-apps/api/path')).homeDir()).replace(/\/+$/, '');
       }
@@ -161,8 +203,15 @@ export class FabricStore {
     this.actionError = null;
   }
 
+  // Advance the local read position, but never past a still-actionable unread event so a
+  // required action is never hidden by mark-read (Bug B, 2.4). An event is still actionable when
+  // its resolved target record is waiting or has a pending approval. Touches only local
+  // read-position state — no record writes (preserves 3.4).
   markAllRead(): void {
-    this.readPosition = this.events.length;
+    this.readPosition = safeReadPosition(this.events, this.readPosition, (e) => {
+      const record = this.locate(e.taskPath)?.record;
+      return !!record && (record.waiting || record.approval?.status === 'pending');
+    });
     saveReadPosition(this.#eventsKey, this.readPosition);
   }
 

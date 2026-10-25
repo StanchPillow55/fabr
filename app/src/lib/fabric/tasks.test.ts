@@ -43,7 +43,7 @@ describe('FabricStore over the fixtures', () => {
   });
   it('counts the five states and waiting', async () => {
     const f = await fixtureStore();
-    expect(f.countsFor('09-redelegated-pair')).toMatchObject({ byColumn: { task: 1, done: 1, reminder: 0 }, total: 2 });
+    expect(f.countsFor('09-redelegated-pair')).toMatchObject({ byColumn: { task: 0, defined: 1, done: 1, reminder: 0 }, waiting: 1, total: 2 });
     expect(f.countsFor('02-open-question')).toMatchObject({ byColumn: { task: 1 }, waiting: 1, total: 1 });
     expect(Object.keys(f.countsFor('02-open-question').byColumn)).toEqual(['reminder', 'task', 'defined', 'in_progress', 'done']);
   });
