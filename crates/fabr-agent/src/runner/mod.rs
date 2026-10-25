@@ -254,41 +254,23 @@ impl Runner {
 
     /// The in-scope task-record paths the worker drives.
     ///
-    /// `default_folder` is a search root, so records live at any depth beneath
-    /// the canonical root (regression 3.5). This excludes records whose
-    /// canonical path escapes that root — a symlink or canonicalization surprise
-    /// pointing outside the opened scope — so `tick`/`process` drive only
-    /// in-root records (Requirement 1.2). Exclusion uses the same [`in_root`]
-    /// predicate `warn_out_of_root` reports on, so detection and exclusion
-    /// cannot drift. Un-canonicalizable paths are kept in-scope: a transient
-    /// stat failure must never silently drop a real in-root record, so only
-    /// genuine escapes are dropped. If the root itself cannot be canonicalized
-    /// the discovered set is returned unfiltered (nothing to compare against).
+    /// A path that cannot be canonicalized is kept in scope: a transient stat
+    /// failure must not drop a real record. Only a path that resolves outside
+    /// the canonical root is excluded.
     fn records(&self) -> Vec<PathBuf> {
         let listed = self.listed_records();
         let Ok(root) = self.root.canonicalize() else { return listed };
         listed.into_iter().filter(|path| in_root(&root, path)).collect()
     }
 
-    /// Warn once per record excluded for escaping the search root.
-    ///
-    /// `default_folder` is a search root: every discovered record is expected to
-    /// live beneath it. A symlink or canonicalization surprise can place a
-    /// record's real path outside the canonical root, which means the worker
-    /// would otherwise drive a task the user did not expect under that folder.
-    /// `records` already drops those escapes; surface each one once (deduped via
-    /// `bad_records`) so the exclusion is diagnosable (Requirement 8.3). The
-    /// in/out verdict comes from the same [`in_root`] predicate `records` uses,
-    /// so detection and exclusion cannot drift; records that cannot be
-    /// canonicalized are kept in-scope and left for `load` to report.
+    /// Warn once per record whose canonical path escapes the search root.
+    /// Shares `bad_records` with [`load`](Self::load).
     fn warn_out_of_root(&mut self) {
         let Ok(root) = self.root.canonicalize() else { return };
         for path in self.listed_records() {
             if in_root(&root, &path) {
                 continue;
             }
-            // `path` escapes the canonical root; `in_root` only returns false
-            // when the path canonicalizes, so this cannot fail in practice.
             let Ok(canon) = path.canonicalize() else { continue };
             if self.bad_records.insert(path.clone()) {
                 self.sink.warn(format!(
@@ -717,26 +699,6 @@ fn fold_answer(path: &Path) -> Result<(), FabrError> {
     .map(|_| ())
 }
 
-/// Whether `path` is contained by the already-canonical search root.
-///
-/// `default_folder` is a search root, so a record is in-scope when its
-/// canonical path lives beneath `root_canon` (at any depth — regression 3.5).
-/// This is the single predicate shared by [`Runner::records`] (which excludes
-/// the out-of-root ones) and [`Runner::warn_out_of_root`] (which warns on the
-/// excluded ones) so detection and exclusion cannot drift.
-///
-/// A path that cannot be canonicalized is treated as **in-scope** (returns
-/// `true`): a transient stat failure must never silently drop a real in-root
-/// record, so only genuine, resolvable escapes are excluded. `root_canon` is
-/// expected to already be canonical (the caller canonicalizes `self.root`
-/// once); comparing canonical-to-canonical is what `under(root, path)` means.
-fn in_root(root_canon: &Path, path: &Path) -> bool {
-    match path.canonicalize() {
-        Ok(canon) => canon.starts_with(root_canon),
-        Err(_) => true,
-    }
-}
-
 fn node_dir_of(record: &Path) -> PathBuf {
     record.parent().and_then(Path::parent).and_then(Path::parent).map(Path::to_path_buf).unwrap_or_default()
 }
@@ -823,6 +785,15 @@ fn event_keys(path: &Path, rec: &TaskRecord) -> Vec<EventKey> {
         _ => {}
     }
     out
+}
+
+/// A path that cannot be canonicalized stays in scope. A resolved path is in
+/// scope only when it lives under the already-canonical search root.
+fn in_root(root_canon: &Path, path: &Path) -> bool {
+    match path.canonicalize() {
+        Ok(canon) => canon.starts_with(root_canon),
+        Err(_) => true,
+    }
 }
 
 fn parse_failed_line(line: &str) -> Option<(String, String)> {

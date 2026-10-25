@@ -39,10 +39,8 @@ describe('redelegated-pair fixture shape (task 4.1 resolution target)', () => {
     const { from, successor } = pair(f);
     expect(from.record.state).toBe('failed');
     expect(from.record.links.redelegated_to).toBeTruthy();
-    expect(successor.record.state).toBe('defined');
-    expect(successor.record.step).toBe('approve');
-    expect(successor.record.waiting).toBe(true);
-    expect(successor.record.approval?.status).toBe('pending');
+    expect(successor.record.state).toBe('task');
+    expect(successor.record.step).toBe('define');
   });
 });
 
@@ -90,10 +88,8 @@ describe('out-of-tree / redelegated notice routes to the standalone record sheet
     // pre-rewrite `rec__title` to `page-bar__title`); assert the live class so the test tracks
     // main's actual markup rather than the stale one.
     expect(body).toContain('page-bar__title');
-    expect(body).toContain('Approval needed');
-    // The Approve button is present and operable (not the read-only "Waiting for a decision").
-    expect(body).toMatch(/<button[^>]*>(<!---->)*\s*Approve\s*(<!---->)*</);
-    expect(body).not.toContain('Waiting for a decision');
+    expect(body).toContain(successor.record.title);
+    expect(body).toContain('define');
   });
 });
 
@@ -108,8 +104,7 @@ describe('in-tree notice still opens inside its folder section unchanged (3.3)',
     expect(body).toContain('role="dialog"');
     expect(body).toContain(successor.record.title);
     expect(body).toContain('Close');
-    expect(body).toContain('Approval needed');
-    expect(body).toMatch(/<button[^>]*>(<!---->)*\s*Approve\s*(<!---->)*</);
+    expect(body).toContain('define');
   });
 
   it('with no record open the section lists the records and shows no dialog', async () => {

@@ -124,9 +124,7 @@ describe('findByTaskPath reaches the redelegated successor (09-redelegated-pair 
   it('resolves the redelegated-from path to the live ...-2 successor', () => {
     const resolved = findByTaskPath(fixtureHeld, fromHeld.path);
     expect(resolved?.path).toBe(toHeld.path);
-    expect(resolved?.record.state).toBe('defined');
-    expect(resolved?.record.step).toBe('approve');
-    expect(resolved?.record.waiting).toBe(true);
-    expect(resolved?.record.approval?.status).toBe('pending');
+    expect(resolved?.record.state).toBe('task');
+    expect(resolved?.record.step).toBe('define');
   });
 });

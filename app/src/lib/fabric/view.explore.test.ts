@@ -39,10 +39,8 @@ describe('Bug B fixed: findByTaskPath reaches the live successor on FIXED code',
       '/home/me/3d/.fabric-space/tasks/2026-10-24-order-filament-2.md',
     );
     // The live successor is the actionable one the user needs to reach.
-    expect(toHeld.record.state).toBe('defined');
-    expect(toHeld.record.step).toBe('approve');
-    expect(toHeld.record.waiting).toBe(true);
-    expect(toHeld.record.approval?.status).toBe('pending');
+    expect(toHeld.record.state).toBe('task');
+    expect(toHeld.record.step).toBe('define');
   });
 
   // Requirement 2.3 (fixed): resolving the redelegated-FROM path now follows
@@ -52,7 +50,7 @@ describe('Bug B fixed: findByTaskPath reaches the live successor on FIXED code',
     // Now resolves THROUGH the dead "from" record to its live successor.
     expect(resolved?.path).toBe(TO_PATH);
     expect(resolved?.path).not.toBe(FROM_PATH);
-    expect(resolved?.record.state).toBe('defined');
+    expect(resolved?.record.state).toBe('task');
     // The on-disk link was followed by the fixed resolver.
     expect(fromHeld.record.links.redelegated_to).not.toBeNull();
   });

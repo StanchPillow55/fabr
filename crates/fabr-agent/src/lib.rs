@@ -1,14 +1,18 @@
 pub mod board;
 pub mod caps;
+pub mod connectors;
+pub mod credentials;
 pub mod lifecycle;
 pub mod link;
 pub mod model;
 pub mod run;
 pub mod runner;
 pub mod settings;
+pub mod sponsor_tools;
 pub mod state;
 pub mod store;
-pub mod tools;
+pub mod tools_contract;
+pub mod toolset;
 pub mod verify;
 
 pub use caps::Harness;
