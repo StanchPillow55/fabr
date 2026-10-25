@@ -26,12 +26,14 @@ jobs:
         if: github.ref_type == 'tag'
         run: |
           v="${GITHUB_REF_NAME#v}"
+          v="${v%%-*}"
           test "$(jq -r .version app/package.json)" = "$v"
           test "$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[]|select(.name=="fabr-desktop").version')" = "$v"
       - name: Install npm packages
         working-directory: app
         run: npm ci
-      - uses: tauri-apps/tauri-action@v0
+      - id: tauri
+        uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
@@ -39,5 +41,12 @@ jobs:
           tagName: ${{ github.ref_type == 'tag' && github.ref_name || 'v0.0.0-manual' }}
           releaseName: Fabr ${{ github.ref_type == 'tag' && github.ref_name || 'v0.0.0-manual' }}
           releaseDraft: false
-          prerelease: false
+          prerelease: ${{ github.ref_type == 'tag' && contains(github.ref_name, '-') }}
           args: --target aarch64-apple-darwin --bundles app,dmg
+      - uses: actions/upload-artifact@v4
+        with:
+          name: fabr-macos
+          path: |
+            app/src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/*.dmg
+            app/src-tauri/target/aarch64-apple-darwin/release/bundle/macos/*.app
+          if-no-files-found: error
