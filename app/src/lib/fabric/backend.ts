@@ -1,3 +1,5 @@
+import { parseYaml } from './yaml';
+
 export type BackendState = 'connected' | 'stale' | 'absent';
 
 export function backendState(heartbeatAt: string | null, now: Date | string, intervalS = 10): BackendState {
@@ -13,3 +15,12 @@ export const BACKEND_LABEL: Record<BackendState, string> = {
   stale: 'Agent backend not responding',
   absent: 'Agent backend not connected',
 };
+
+export function heartbeatOf(text: string): string | null {
+  try {
+    const at = parseYaml(text).heartbeat_at;
+    return typeof at === 'string' && !Number.isNaN(Date.parse(at)) ? at : null;
+  } catch {
+    return null;
+  }
+}

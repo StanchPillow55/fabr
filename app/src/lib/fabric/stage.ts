@@ -90,9 +90,9 @@ export function activityOf(record: TaskRecord, entry?: RegistryEntry | null): Ac
   return record.state === 'in_progress' && entry ? 'tool' : 'model';
 }
 
-export function aliveOf(record: TaskRecord, entry: RegistryEntry | null | undefined, backend: BackendState, now: Date | string = new Date()): Alive {
+export function aliveOf(record: TaskRecord, entry: RegistryEntry | null | undefined, backend: BackendState, now: Date | string = new Date(), skewMs = 0): Alive {
   if (isFinished(record)) return 'idle';
-  if (entry) return isDead(entry, now) ? 'dead' : 'live';
+  if (entry) return isDead(entry, new Date(new Date(now).getTime() + skewMs)) ? 'dead' : 'live';
   return backend === 'connected' ? 'live' : 'backend-down';
 }
 
@@ -102,7 +102,7 @@ function tokensOf(usage: Record<string, StageUsage> | undefined): { input: numbe
   return { input: all.reduce((a, u) => a + u.input_tokens, 0), output: all.reduce((a, u) => a + u.output_tokens, 0) };
 }
 
-export function viewOf(held: Held, entry: RegistryEntry | null, backend: BackendState, now: Date | string = new Date(), phase: Phase = phaseOf(held.record, minuteOf(now))): AgentView | null {
+export function viewOf(held: Held, entry: RegistryEntry | null, backend: BackendState, now: Date | string = new Date(), phase: Phase = phaseOf(held.record, minuteOf(now)), skewMs = 0): AgentView | null {
   const r = held.record;
   const finished = isFinished(r) ? (r.state as 'succeeded' | 'failed') : null;
   const stage = stageOf(r, entry) ?? (finished ? 'notify' : null);
@@ -123,7 +123,7 @@ export function viewOf(held: Held, entry: RegistryEntry | null, backend: Backend
     cost: Math.max(r.cost_usd, entry?.cost_usd ?? 0),
     tokens: tokensOf(entry?.usage),
     stageUsage: entry?.usage ?? null,
-    alive: aliveOf(r, entry, backend, now),
+    alive: aliveOf(r, entry, backend, now, skewMs),
     lastError: entry?.last_error ?? null,
     retryInS: entry?.activity === 'retry' && typeof entry.retry_in_s === 'number' ? entry.retry_in_s : null,
     finished,
@@ -133,13 +133,13 @@ export function viewOf(held: Held, entry: RegistryEntry | null, backend: Backend
   };
 }
 
-export function buildAgents(records: Held[], entries: RegistryEntry[], backend: BackendState, now: Date | string = new Date(), phases?: Map<string, Phase>): Map<string, AgentView> {
+export function buildAgents(records: Held[], entries: RegistryEntry[], backend: BackendState, now: Date | string = new Date(), phases?: Map<string, Phase>, skewMs = 0): Map<string, AgentView> {
   const byRecord = entryMap(records, entries);
   const out = new Map<string, AgentView>();
   for (const h of records) {
     const phase = phases?.get(h.path) ?? phaseOf(h.record, minuteOf(now));
     if (isFinished(h.record) || phase === 'suspended') continue;
-    const v = viewOf(h, byRecord.get(h.path) ?? null, backend, now, phase);
+    const v = viewOf(h, byRecord.get(h.path) ?? null, backend, now, phase, skewMs);
     if (v) out.set(h.path, v);
   }
   return out;

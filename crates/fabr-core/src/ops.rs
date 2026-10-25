@@ -7,7 +7,7 @@ use crate::fabric::{self, FabricCreateReq, FabricListReq, FabricReadReq, FabricS
 use crate::settings::Settings;
 use crate::setup::{self, CheckReq, Ctx, LinkReq, SecretsWriteReq, SettingsWriteReq};
 use crate::sources::Source;
-use crate::workspace::Workspace;
+use crate::workspace::{RemoteCreateReq, RemoteSourceReq, RemoteWriteReq, Workspace};
 use serde::Serialize;
 use serde_json::Value;
 
@@ -80,6 +80,10 @@ ops! {
     fabric_read Post true (FabricReadReq) |_, r| json(fabric::read(&r)?);
     fabric_write Post true (FabricWriteReq) |_, r| json(fabric::write(&r)?);
     fabric_create Post true (FabricCreateReq) |_, r| json(fabric::create(&r)?);
+    fabric_remote_list Post true (RemoteSourceReq) |ws, r| json(ws.remote_tasks(&r)?);
+    fabric_remote_stamp Post true (RemoteSourceReq) |ws, r| json(ws.remote_task_stamp(&r)?);
+    fabric_remote_write Post true (RemoteWriteReq) |ws, r| json(ws.remote_task_write(&r)?);
+    fabric_remote_create Post true (RemoteCreateReq) |ws, r| json(ws.remote_task_create(&r)?);
     import_todos Post true (ImportTodosReq) |_, r| json(fabric::import_todos(&r)?);
     fabric_stamp Post true (FabricStampReq) |_, r| json(Stamp { stamp: fabric::stamp(&r)? });
     fabric_settings_read Post true (Empty) |_, _| json(setup::settings_read(&Ctx::from_env())?);

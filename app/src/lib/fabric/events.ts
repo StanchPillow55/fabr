@@ -5,6 +5,7 @@ export interface FabricEvent {
   kind: EventKind;
   taskPath: string;
   text: string;
+  source?: string | null;
 }
 
 const KINDS: readonly string[] = ['waiting', 'done', 'failed', 'stuck'];

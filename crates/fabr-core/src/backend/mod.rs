@@ -82,4 +82,12 @@ pub trait Backend: Send + Sync {
     fn truncated(&self) -> bool {
         false
     }
+    fn write_task(&self, folder: &str, file: &str, expected_updated_at: &str, bytes: &[u8]) -> Result<(), FabrError> {
+        let _ = (folder, file, expected_updated_at, bytes);
+        Err(FabrError::BadRequest("not a remote source".into()))
+    }
+    fn create_task(&self, folder: &str, file: &str, bytes: &[u8]) -> Result<bool, FabrError> {
+        let _ = (folder, file, bytes);
+        Err(FabrError::BadRequest("not a remote source".into()))
+    }
 }

@@ -141,6 +141,10 @@ export interface FabricCreateReq { folder: string; title: string; due?: string |
 export interface ImportTodosReq { path: string }
 export interface ImportTodosRes { created: number }
 export interface FabricCreateRes { path: string; id: string }
+export interface FabricRemoteFile { path: string; text: string }
+export interface FabricRemoteListRes { records: FabricRemoteFile[]; registry: { name: string; text: string }[]; events: string; backend: string | null; stamp: string }
+export interface FabricRemoteWriteReq { source: Source; path: string; text: string; expected_updated_at: string }
+export interface FabricRemoteCreateReq { source: Source; folder: string; title: string; due?: string | null; pri?: number; context?: string; spec?: string; success?: string }
 export interface FabricStampReq { roots: string[]; home?: string | null }
 
 export interface ErrorDto {

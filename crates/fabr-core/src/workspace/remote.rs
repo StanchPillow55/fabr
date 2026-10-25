@@ -135,6 +135,16 @@ impl RemoteCache {
         }
     }
 
+    pub(super) fn replace(&self, id: &str, fs: Arc<dyn Fs>, stamp: String) {
+        if let Some(c) = lock(&self.0).get_mut(id) {
+            c.fs = Some(fs);
+            c.stamp = stamp;
+            c.error = None;
+            c.at = Instant::now();
+            c.stale = false;
+        }
+    }
+
     pub(super) fn retain(&self, kept: &HashSet<String>) {
         lock(&self.0).retain(|id, _| kept.contains(id));
     }

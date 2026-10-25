@@ -213,7 +213,7 @@ fn task_markdown(p: &Path) -> bool {
 
 /// Keep fields the GUI does not own, then let the schema writer check
 /// `updated_at` and render the bytes.
-fn gui_record(disk: &TaskRecord, incoming: &TaskRecord) -> Result<TaskRecord, FabrError> {
+pub(crate) fn gui_record(disk: &TaskRecord, incoming: &TaskRecord) -> Result<TaskRecord, FabrError> {
     let by_hand = disk.state == State::Reminder && incoming.state == State::Succeeded;
     if incoming.state != disk.state && !by_hand {
         return Err(FabrError::BadRequest("the gui writes state only to mark a reminder done".into()));
@@ -375,7 +375,13 @@ pub fn create(req: &FabricCreateReq) -> Result<FabricCreateRes, FabrError> {
     create_in(req, &crate::setup::Ctx::from_env().home)
 }
 
-pub fn create_in(req: &FabricCreateReq, user_home: &Path) -> Result<FabricCreateRes, FabrError> {
+pub(crate) struct NewTask {
+    pub(crate) title: String,
+    due: Option<String>,
+    pri: u8,
+}
+
+pub(crate) fn validate_new(req: &FabricCreateReq) -> Result<NewTask, FabrError> {
     let title = req.title.trim();
     if title.is_empty() || title.contains('\n') {
         return Err(FabrError::BadRequest("a task needs a one-line title".into()));
@@ -390,6 +396,28 @@ pub fn create_in(req: &FabricCreateReq, user_home: &Path) -> Result<FabricCreate
     if pri > 3 {
         return Err(FabrError::BadRequest(format!("pri must be 0-3: {pri}")));
     }
+    Ok(NewTask { title: title.to_string(), due: due.map(String::from), pri })
+}
+
+pub(crate) fn new_task_base(title: &str, now: chrono::DateTime<chrono::Utc>) -> String {
+    format!("{}-{}", now.format("%Y-%m-%d"), slugify(title))
+}
+
+pub(crate) fn render_new(req: &FabricCreateReq, nt: &NewTask, id: &str, now: chrono::DateTime<chrono::Utc>) -> String {
+    let stamp = now.format("%Y-%m-%dT%H:%M:%SZ");
+    let pri = nt.pri;
+    format!(
+        "---\nschema: 5\nid: {id}\nsource: null\ntitle: {}\ndue: {}\npri: {pri}\nstate: reminder\nstep: null\nwaiting: false\npaused: false\nsuspended: false\nsuspend_until: null\ncreated_at: {stamp}\nupdated_at: {stamp}\nrequests: {{delegate: false, cancel: false, redelegate: false, pause: false, resume: false, complete: false}}\nquestion: null\nanswers: []\ngrants: {{requested: [], granted: []}}\nplan_meta: null\nassertions: []\napproval: null\nverdict: null\ncost_usd: 0\nlinks: {{redelegated_from: null, redelegated_to: null}}\n---\n## Context\n{}## Spec\n{}## Success\n{}## Plan\n## Log\n",
+        yaml_title(&nt.title),
+        nt.due.as_deref().unwrap_or("null"),
+        section_text(&req.context),
+        section_text(&req.spec),
+        section_text(&req.success),
+    )
+}
+
+pub fn create_in(req: &FabricCreateReq, user_home: &Path) -> Result<FabricCreateRes, FabrError> {
+    let nt = validate_new(req)?;
     let folder = crate::paths::expand_home(req.folder.trim(), user_home);
     if !folder.is_absolute() || !folder.is_dir() {
         return Err(FabrError::NotFound(format!("not a folder: {}", req.folder)));
@@ -398,8 +426,7 @@ pub fn create_in(req: &FabricCreateReq, user_home: &Path) -> Result<FabricCreate
     let io = |e: std::io::Error| FabrError::Io(format!("{}: {e}", dir.display()));
     std::fs::create_dir_all(&dir).map_err(io)?;
     let now = chrono::Utc::now();
-    let stamp = now.format("%Y-%m-%dT%H:%M:%SZ");
-    let base = format!("{}-{}", now.format("%Y-%m-%d"), slugify(title));
+    let base = new_task_base(&nt.title, now);
     let mut n = 1;
     loop {
         let id = if n == 1 { base.clone() } else { format!("{base}-{n}") };
@@ -408,14 +435,7 @@ pub fn create_in(req: &FabricCreateReq, user_home: &Path) -> Result<FabricCreate
             n += 1;
             continue;
         }
-        let text = format!(
-            "---\nschema: 5\nid: {id}\nsource: null\ntitle: {}\ndue: {}\npri: {pri}\nstate: reminder\nstep: null\nwaiting: false\npaused: false\nsuspended: false\nsuspend_until: null\ncreated_at: {stamp}\nupdated_at: {stamp}\nrequests: {{delegate: false, cancel: false, redelegate: false, pause: false, resume: false, complete: false}}\nquestion: null\nanswers: []\ngrants: {{requested: [], granted: []}}\nplan_meta: null\nassertions: []\napproval: null\nverdict: null\ncost_usd: 0\nlinks: {{redelegated_from: null, redelegated_to: null}}\n---\n## Context\n{}## Spec\n{}## Success\n{}## Plan\n## Log\n",
-            yaml_title(title),
-            due.unwrap_or("null"),
-            section_text(&req.context),
-            section_text(&req.spec),
-            section_text(&req.success),
-        );
+        let text = render_new(req, &nt, &id, now);
         let io = |e: std::io::Error| FabrError::Io(format!("{}: {e}", path.display()));
         let mut tmp = tempfile::Builder::new().prefix(".fabr-write-").suffix(".tmp").tempfile_in(&dir).map_err(io)?;
         tmp.write_all(text.as_bytes()).map_err(io)?;

@@ -1,6 +1,6 @@
 import type { Api } from '../api/commands';
 import type { CreateFields, FabricSource, RawRecord } from './source';
-import { parseYaml } from './yaml';
+import { heartbeatOf } from './backend';
 
 type FabricApi = Pick<Api, 'fabricList' | 'fabricRead' | 'fabricWrite' | 'fabricStamp' | 'fabricCreate'>;
 
@@ -47,8 +47,7 @@ export class TauriSource implements FabricSource {
     try {
       const l = await this.api.fabricList({ home: this.home });
       if (!l.backend) return null;
-      const at = parseYaml((await this.api.fabricRead(l.backend.path)).text).heartbeat_at;
-      return typeof at === 'string' && !Number.isNaN(Date.parse(at)) ? at : null;
+      return heartbeatOf((await this.api.fabricRead(l.backend.path)).text);
     } catch {
       return null;
     }

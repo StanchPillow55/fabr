@@ -97,3 +97,8 @@ export const LAB: Spec[] = [
   ['srv', null, null],
   ['srv/wiki', { name: 'wiki', kind: 'app' }, [['todo', 20, 'Migrate to static export']]],
 ];
+
+export const VM: Spec[] = [
+  ['', { name: 'sample', kind: 'server', show_depth: 1 }, [['todo', null, 'Check printer firmware'], ['working', null, 'Order filament']]],
+  ['app', { name: 'app', kind: 'project' }, [['needs_you', 2, 'Order filament spools', 1], ['needs_you', 5, 'Approve the release plan']]],
+];

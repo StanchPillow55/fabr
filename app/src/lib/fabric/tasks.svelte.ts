@@ -1,12 +1,14 @@
 import { isTauri } from '../api/env';
 import { createApi } from '../api/index';
+import type { Api } from '../api/commands';
 import type { Source } from '../api/types';
 import type { AnswerInput } from './answer';
 import { submitApproval, type ApprovalDecision } from './approval';
-import { BACKEND_LABEL, backendState } from './backend';
+import { BACKEND_LABEL, backendState, heartbeatOf, type BackendState } from './backend';
 import { loadReadPosition, parseEvents, reconcileReadPosition, saveReadPosition, unreadCount, type FabricEvent } from './events';
 import { folderName, folderOf, nodeFolder, type Entry } from './folder';
 import { createFabricSource } from './live';
+import { RemoteSource, type RemoteApi } from './remote-source';
 import { parseRecord } from './parse';
 import { submitDone } from './done';
 import { submitSuspend, submitUnsuspend } from './suspend';
@@ -19,7 +21,7 @@ import { entryMap, findByTaskPath, loadRegistry } from './view';
 import { submitAnswer } from './write';
 import type { RegistryEntry } from './agents';
 
-export type Held = Entry & { text: string };
+export type Held = Entry & { text: string; source: string | null };
 export type FolderCounts = { todo: number; active: number; needs_you: number; suspended: number; done: number; failed: number; total: number };
 
 const EMPTY: Held[] = [];
@@ -32,11 +34,19 @@ export function localRoots(sources: Source[] | undefined): string[] {
   return (sources ?? []).filter((s) => !s.host).map((s) => s.root);
 }
 
+export function remoteSources(sources: Source[] | undefined): Source[] {
+  return (sources ?? []).filter((s) => !!s.host);
+}
+
+interface Slice { records: Held[]; registry: RegistryEntry[]; events: FabricEvent[]; errors: string[] }
+interface Remote extends Slice { adapter: RemoteSource; sig: string; stamp: string; busy: boolean }
+
 export class FabricStore {
   records = $state<Held[]>([]);
   registry = $state<RegistryEntry[]>([]);
   events = $state<FabricEvent[]>([]);
   heartbeat = $state<string | null>(null);
+  heartbeats = $state<Record<string, string | null>>({});
   readPosition = $state(0);
   now = $state(new Date());
   loaded = $state(false);
@@ -53,9 +63,17 @@ export class FabricStore {
   #dead = false;
   #eventsKey = 'events';
   #itemsSig: string | null = null;
+  #local: Slice = { records: [], registry: [], events: [], errors: [] };
+  #remotes = new Map<string, Remote>();
+  #remoteApi: RemoteApi | Promise<RemoteApi> | null;
 
-  constructor(source: FabricSource | null = null) {
+  constructor(source: FabricSource | null = null, remoteApi: RemoteApi | null = null) {
     this.#source = source;
+    this.#remoteApi = remoteApi;
+  }
+
+  backendOf(source: string | null): BackendState {
+    return source === null ? this.backend : backendState(this.heartbeats[source] ?? null, this.now);
   }
 
   backend = $derived(backendState(this.heartbeat, this.now));
@@ -71,15 +89,56 @@ export class FabricStore {
     }
     return m;
   });
-  #entries = $derived(entryMap(this.records, this.registry));
-  agents = $derived(buildAgents(this.records, this.registry, this.backend, this.now, this.phases));
+  #entries = $derived.by(() => {
+    const m = new Map<string, RegistryEntry>();
+    for (const s of this.#sourceIds()) {
+      for (const [k, v] of entryMap(this.records.filter((h) => h.source === s), this.registry.filter((e) => (e.source ?? null) === s))) m.set(k, v);
+    }
+    return m;
+  });
+  agents = $derived.by(() => {
+    const m = new Map<string, AgentView>();
+    for (const s of this.#sourceIds()) {
+      for (const [k, v] of buildAgents(this.records.filter((h) => h.source === s), this.registry.filter((e) => (e.source ?? null) === s), this.backendOf(s), this.now, this.phases)) m.set(k, v);
+    }
+    return m;
+  });
   agentList = $derived(sortAgents([...this.agents.values()]));
   openRecord = $derived(this.records.find((h) => h.path === this.openPath) ?? null);
 
-  async start(treeRoots: string[] = []): Promise<void> {
+  #sourceIds(): (string | null)[] {
+    return [null, ...this.#remotes.keys()];
+  }
+
+  setSources(sources: Source[] | undefined): void {
+    const want = remoteSources(sources);
+    let changed = false;
+    for (const id of [...this.#remotes.keys()]) {
+      if (!want.some((s) => s.id === id)) { this.#remotes.delete(id); delete this.heartbeats[id]; changed = true; }
+    }
+    for (const s of want) {
+      const sig = JSON.stringify([s.host, s.root]);
+      if (this.#remotes.get(s.id)?.sig === sig) continue;
+      this.#remoteApi ??= createApi();
+      this.#remotes.set(s.id, { adapter: new RemoteSource(this.#remoteApi, s), sig, stamp: '', busy: false, records: [], registry: [], events: [], errors: [] });
+      changed = true;
+    }
+    if (changed) { this.#publish(); void this.#tickRemotes(); }
+  }
+
+  #publish(): void {
+    const slices = [this.#local, ...this.#remotes.values()];
+    this.records = slices.flatMap((s) => s.records);
+    this.registry = slices.flatMap((s) => s.registry);
+    this.events = slices.length === 1 ? this.#local.events : slices.flatMap((s) => s.events).sort((a, b) => (a.at < b.at ? 1 : a.at > b.at ? -1 : 0));
+    this.errors = slices.flatMap((s) => s.errors);
+  }
+
+  async start(treeRoots: string[] = [], sources: Source[] = []): Promise<void> {
     if (this.#timer) return;
     this.#dead = false;
     this.#timer = setInterval(() => void this.tick(), 1000);
+    this.setSources(sources);
     try {
       if (!this.#source) {
         const api = await createApi();
@@ -106,16 +165,62 @@ export class FabricStore {
 
   async tick(): Promise<void> {
     this.now = new Date();
-    if (!this.#source) return;
-    try {
-      const st = await this.#source.stamp();
-      if (st !== this.#last) {
-        this.#last = st;
-        await this.load();
+    const remotes = this.#tickRemotes();
+    if (this.#source) {
+      try {
+        const st = await this.#source.stamp();
+        if (st !== this.#last) {
+          this.#last = st;
+          await this.load();
+        }
+      } catch (e) {
+        this.#local.errors = [(e as Error).message];
+        this.#publish();
       }
-    } catch (e) {
-      this.errors = [(e as Error).message];
     }
+    await remotes;
+  }
+
+  async #tickRemotes(): Promise<void> {
+    await Promise.all([...this.#remotes.entries()].map(async ([id, r]) => {
+      if (r.busy) return;
+      r.busy = true;
+      try {
+        const st = await r.adapter.stamp();
+        if (st !== r.stamp) {
+          await this.#loadRemote(id);
+          r.stamp = st;
+        }
+      } catch (e) {
+        r.errors = [`${r.adapter.source.name}: ${(e as Error).message}`];
+        this.#publish();
+      } finally {
+        r.busy = false;
+      }
+    }));
+  }
+
+  async #loadRemote(id: string): Promise<void> {
+    const r = this.#remotes.get(id);
+    if (!r) return;
+    const snap = await r.adapter.snapshot();
+    if (this.#remotes.get(id) !== r) return;
+    const ok: Held[] = [];
+    const bad: string[] = [];
+    for (const { path, text } of snap.records) {
+      try { ok.push({ path, record: parseRecord(text), text, source: id }); }
+      catch (e) { bad.push(`${folderName(folderOf(path))}: ${(e as Error).message}`); }
+    }
+    r.records = ok;
+    r.errors = bad;
+    r.registry = loadRegistry(snap.registry.map(({ name, text }) => ({ path: name, text }))).entries.map((e) => ({ ...e, source: id }));
+    r.events = parseEvents(snap.events.split('\n')).map((e) => ({ ...e, source: id }));
+    this.heartbeats[id] = snap.backend ? heartbeatOf(snap.backend) : null;
+    this.#publish();
+    const sig = itemsSig(this.records, minuteOf(this.now));
+    const changed = this.#itemsSig !== null && sig !== this.#itemsSig;
+    this.#itemsSig = sig;
+    if (changed) this.onItemsChange?.();
   }
 
   async load(): Promise<void> {
@@ -124,16 +229,18 @@ export class FabricStore {
     const ok: Held[] = [];
     const bad: string[] = [];
     for (const { path, text } of await src.listRecords()) {
-      try { ok.push({ path, record: parseRecord(text), text }); }
+      try { ok.push({ path, record: parseRecord(text), text, source: null }); }
       catch (e) { bad.push(`${folderName(folderOf(path))}: ${(e as Error).message}`); }
     }
-    this.records = ok;
-    this.errors = bad;
-    const sig = itemsSig(ok, minuteOf(this.now));
+    this.#local = { ...this.#local, records: ok, errors: bad };
+    this.#publish();
+    const sig = itemsSig(this.records, minuteOf(this.now));
     const changed = this.#itemsSig !== null && sig !== this.#itemsSig;
     this.#itemsSig = sig;
-    this.registry = loadRegistry(await src.listRegistry()).entries;
-    this.events = parseEvents(await src.readEvents());
+    const registry = loadRegistry(await src.listRegistry()).entries;
+    const events = parseEvents(await src.readEvents());
+    this.#local = { records: ok, registry, events, errors: bad };
+    this.#publish();
     this.readPosition = reconcileReadPosition(this.#eventsKey, this.readPosition, this.events.length);
     this.heartbeat = await src.readBackendHeartbeat();
     this.loaded = true;
@@ -208,31 +315,59 @@ export class FabricStore {
     saveReadPosition(this.#eventsKey, this.readPosition);
   }
 
+  #heldAt(path: string): Held | undefined {
+    return this.records.find((h) => h.path === path);
+  }
+
+  #sourceFor(source: string | null): FabricSource {
+    if (source === null) return this.#source!;
+    const r = this.#remotes.get(source);
+    if (!r) throw new Error(`source ${source} is no longer configured`);
+    return r.adapter;
+  }
+
+  #sourceOfPath(path: string): FabricSource {
+    return this.#sourceFor(this.#heldAt(path)?.source ?? null);
+  }
+
+  #sourceIdOfFolder(folder: string): string | null {
+    const known = this.tasksFor(folder)[0];
+    if (known) return known.source;
+    let best: string | null = null;
+    let len = -1;
+    for (const [id, r] of this.#remotes) {
+      const root = r.adapter.source.root.trim().replace(/\/+$/, '');
+      if ((folder === root || folder.startsWith(`${root}/`)) && root.length > len) { best = id; len = root.length; }
+    }
+    return best;
+  }
+
   async #reread(path: string): Promise<void> {
-    const text = await this.#source!.readRecord(path);
-    const held = { path, record: parseRecord(text), text };
+    const old = this.#heldAt(path);
+    const text = await this.#sourceFor(old?.source ?? null).readRecord(path);
+    const held: Held = { path, record: parseRecord(text), text, source: old?.source ?? null };
     this.records = this.records.map((h) => (h.path === path ? held : h));
   }
 
   async answer(h: Held, input: AnswerInput): Promise<void> {
-    await submitAnswer(this.#source!, h.path, h.text, input);
+    await submitAnswer(this.#sourceFor(h.source), h.path, h.text, input);
     await this.#reread(h.path);
   }
 
   async approve(h: Held, d: ApprovalDecision): Promise<void> {
-    await submitApproval(this.#source!, h.path, h.text, d);
+    await submitApproval(this.#sourceFor(h.source), h.path, h.text, d);
     await this.#reread(h.path);
   }
 
   async request(h: Held, key: RequestKey): Promise<void> {
-    await submitRequest(this.#source!, h.path, h.text, key);
+    await submitRequest(this.#sourceFor(h.source), h.path, h.text, key);
     await this.#reread(h.path);
   }
 
   async markDone(path: string): Promise<void> {
-    const h = this.records.find((x) => x.path === path);
+    const h = this.#heldAt(path);
     if (!h) throw new Error(`no loaded record for ${path}`);
-    await submitDone(this.#source!, h.path, h.text);
+    await submitDone(this.#sourceFor(h.source), h.path, h.text);
     await this.#reread(h.path);
     this.#itemsSig = itemsSig(this.records, minuteOf(this.now));
     this.onItemsChange?.();
@@ -240,32 +375,33 @@ export class FabricStore {
 
   async complete(h: Held): Promise<void> {
     if (this.phaseFor(h) === 'todo') return this.markDone(h.path);
-    await submitRequest(this.#source!, h.path, await this.#fresh(h.path), 'complete');
+    await submitRequest(this.#sourceFor(h.source), h.path, await this.#fresh(h.path), 'complete');
     await this.#reread(h.path);
   }
 
   async #fresh(path: string): Promise<string> {
-    if (!this.records.some((x) => x.path === path)) throw new Error(`no loaded record for ${path}`);
-    return this.#source!.readRecord(path);
+    const h = this.#heldAt(path);
+    if (!h) throw new Error(`no loaded record for ${path}`);
+    return this.#sourceFor(h.source).readRecord(path);
   }
 
   async pause(path: string): Promise<void> {
-    await submitRequest(this.#source!, path, await this.#fresh(path), 'pause');
+    await submitRequest(this.#sourceOfPath(path), path, await this.#fresh(path), 'pause');
     await this.#reread(path);
   }
 
   async resume(path: string): Promise<void> {
-    await submitRequest(this.#source!, path, await this.#fresh(path), 'resume');
+    await submitRequest(this.#sourceOfPath(path), path, await this.#fresh(path), 'resume');
     await this.#reread(path);
   }
 
   async suspend(path: string, until: string | null): Promise<void> {
-    await submitSuspend(this.#source!, path, await this.#fresh(path), until);
+    await submitSuspend(this.#sourceOfPath(path), path, await this.#fresh(path), until);
     await this.#shelved(path);
   }
 
   async unsuspend(path: string): Promise<void> {
-    await submitUnsuspend(this.#source!, path, await this.#fresh(path));
+    await submitUnsuspend(this.#sourceOfPath(path), path, await this.#fresh(path));
     await this.#shelved(path);
   }
 
@@ -276,9 +412,11 @@ export class FabricStore {
   }
 
   async createTask(folder: string, fields: CreateFields): Promise<Held> {
-    const { path } = await this.#source!.createRecord(folder, fields);
-    await this.load();
-    const held = this.records.find((h) => h.path === path);
+    const sid = this.#sourceIdOfFolder(folder);
+    const { path } = await this.#sourceFor(sid).createRecord(folder, fields);
+    if (sid === null) await this.load();
+    else await this.#loadRemote(sid);
+    const held = this.#heldAt(path);
     if (!held) throw new Error(`created ${path} but could not read it back`);
     return held;
   }
@@ -297,6 +435,8 @@ export class FabricStore {
   }
 
   async reload(path: string): Promise<void> {
+    const source = this.#heldAt(path)?.source ?? null;
+    if (source !== null && this.#remotes.has(source)) return this.#loadRemote(source);
     await this.#reread(path);
   }
 }

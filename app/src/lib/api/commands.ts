@@ -1,6 +1,6 @@
 import type {
   Tree, Stamp, Node, NodeRef, RemoveNodeReq, SaveMetaReq, Source, TestResult, Settings, ListDirsReq, DirEntry,
-  InitChildrenReq, FabricListReq, FabricListRes, FabricReadRes, FabricWriteReq, FabricWriteRes, FabricStampReq, FabricCreateReq, FabricCreateRes, ImportTodosReq, ImportTodosRes, HostKey, TrustResult, PasswordState, InstallKeyReq, InstallKeyResult,
+  InitChildrenReq, FabricListReq, FabricListRes, FabricReadRes, FabricWriteReq, FabricWriteRes, FabricStampReq, FabricRemoteListRes, FabricRemoteWriteReq, FabricRemoteCreateReq, FabricCreateReq, FabricCreateRes, ImportTodosReq, ImportTodosRes, HostKey, TrustResult, PasswordState, InstallKeyReq, InstallKeyResult,
   FabricSettings, FabricSettingsRead, FabricSecretsWriteReq, FabricSecretsStatus, FabricCheckReq, FabricCheckResult, FabricAgentStatus,
 } from './types';
 
@@ -39,6 +39,10 @@ export const COMMANDS = {
   fabricCreate: op<[req: FabricCreateReq], FabricCreateRes>({ req: self }),
   importTodos: op<[req: ImportTodosReq], ImportTodosRes>({ req: self }),
   fabricStamp: op<[req: FabricStampReq], Stamp>({ req: self }),
+  fabricRemoteList: op<[source: Source], FabricRemoteListRes>({ req: (source) => ({ source: source.id }) }),
+  fabricRemoteStamp: op<[source: Source], { stamp: string }>({ req: (source) => ({ source: source.id }) }),
+  fabricRemoteWrite: op<[req: FabricRemoteWriteReq], FabricWriteRes>({ req: (r) => ({ ...r, source: r.source.id }) }),
+  fabricRemoteCreate: op<[req: FabricRemoteCreateReq], { path: string }>({ req: (r) => ({ ...r, source: r.source.id }) }),
   fabricSettingsRead: op<[], FabricSettingsRead>({}),
   fabricHome: op<[], string>({}),
   fabricSettingsWrite: op<[settings: FabricSettings], FabricSettingsRead>({ req: (settings) => ({ settings }) }),

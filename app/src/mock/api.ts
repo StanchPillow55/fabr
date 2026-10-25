@@ -2,8 +2,10 @@ import type { Api } from '../lib/api/index';
 import {
   ApiError, type Meta, type Node, type NodeRef, type Settings, type Source, type TestResult, type Tree, type DirEntry, type FabricSettings, type FabricSecretsStatus,
 } from '../lib/api/types';
-import { FixtureSource } from '../lib/fabric/source';
-import { buildSample, isoDay, LAB, SAMPLE } from './sample';
+import { FixtureSource, guardState, newRecord, taskSlug, updatedAtOf } from '../lib/fabric/source';
+import { parseRecord } from '../lib/fabric/parse';
+import { serializeRecord } from '../lib/fabric/serialize';
+import { buildSample, isoDay, LAB, SAMPLE, VM } from './sample';
 
 interface MockOpts {
   empty?: boolean;
@@ -19,7 +21,7 @@ export function createMockApi(opts: MockOpts = {}): Api {
   const latency = opts.latency ?? 60;
   let sources: Source[] = empty ? [] : [
     { id: 'local', name: 'Home', host: null, root: '~/fabr-sample', prune: null },
-    ...(multi ? [{ id: 'lab', name: 'Lab server', host: 'lab.local', root: '/srv/fabr', prune: null }] : []),
+    ...(multi ? [{ id: 'lab', name: 'Lab server', host: 'lab.local', root: '/srv/fabr', prune: null }, { id: 'vm', name: 'VM', host: 'vm', root: '~/sample', prune: null }] : []),
   ];
   let settings: Settings = { poll_ms: 2000, remote_poll_ms: 30000, search_depth: 6, full_rescan_ms: 30000, max_nodes: 10000, log_path: '/tmp/fabr/fabr.log' };
   let fabSettings: FabricSettings = {
@@ -30,8 +32,9 @@ export function createMockApi(opts: MockOpts = {}): Api {
   const fabSecrets: FabricSecretsStatus = { anthropic_api_key: false, telegram_bot_token: false };
   const fabric = new FixtureSource();
   const FAB_EVENTS = '/fixtures/home/.fabric-space/events.log';
+  const remote = remoteFixtures(today);
   let rev = 1;
-  const specs: Record<string, typeof SAMPLE> = { local: SAMPLE, lab: LAB };
+  const specs: Record<string, typeof SAMPLE> = { local: SAMPLE, lab: LAB, vm: VM };
   const PLAIN_DIRS = ['docs', 'notes', 'projects', 'node_modules'];
   const specFor = (src: Source): typeof SAMPLE =>
     specs[src.id] ?? [['', null, null], ...PLAIN_DIRS.map((d): (typeof SAMPLE)[number] => [d, null, null])];
@@ -217,6 +220,10 @@ export function createMockApi(opts: MockOpts = {}): Api {
     async importTodos() { throw new ApiError(501, 'import_todos is not available in the browser'); },
     async fabricStamp() { return { stamp: await fabric.stamp() }; },
     async fabricHome() { return '/home/mock'; },
+    async fabricRemoteList(source) { return remote.list(source); },
+    async fabricRemoteStamp(source) { remote.need(source); return { stamp: remote.stamp() }; },
+    async fabricRemoteWrite(req) { return remote.write(req.source, req.path, req.text, req.expected_updated_at); },
+    async fabricRemoteCreate(req) { return remote.create(req.source, req.folder, req); },
     async fabricSettingsRead() { await wait(); return { exists: fabSettingsExist, settings: clone(fabSettings) }; },
     async fabricSettingsWrite(s) { await wait(); fabSettings = clone(s); fabSettingsExist = true; return { exists: true, settings: clone(fabSettings) }; },
     async fabricSecretsWrite(req) {
@@ -260,4 +267,73 @@ export function createMockApi(opts: MockOpts = {}): Api {
     },
   };
   return api;
+}
+
+function remoteFixtures(today: string) {
+  const fx = new FixtureSource();
+  const PICK: [node: string, fixture: string, title: string][] = [
+    ['', '01-reminder', 'Check printer firmware'],
+    ['', '05-running', 'Order filament'],
+    ['app', '02-open-question', 'Order filament spools'],
+    ['app', '04-awaiting-approval', 'Approve the release plan'],
+  ];
+  const root = '~/sample';
+  const dirOf = (node: string) => `${root}${node ? `/${node}` : ''}/.fabric-space/tasks`;
+  const files = new Map<string, string>();
+  let registry: { name: string; text: string }[] = [];
+  let writes = 0;
+  const ready = (async () => {
+    const all = await fx.listRecords();
+    const regs = await fx.listRegistry();
+    for (const [node, fixture, title] of PICK) {
+      const src = all.find((r) => r.path.includes(`/${fixture}/`));
+      if (!src) continue;
+      const id = `${today}-${taskSlug(title)}`;
+      const path = `${dirOf(node)}/${id}.md`;
+      files.set(path, serializeRecord({ ...parseRecord(src.text), id, title }));
+      if (fixture === '05-running') {
+        const reg = regs.find((r) => r.path.includes('/05-running/'));
+        if (reg) registry = [{ name: `${id}--vm.yaml`, text: reg.text.replace(/^task_path:.*$/m, `task_path: ${path}`).replace(/^task_id:.*$/m, `task_id: ${id}`).replace(/^folder:.*$/m, `folder: ${root}`) }];
+      }
+    }
+  })();
+  const need = (s: Source) => { if (!s.host) throw new ApiError(400, `source ${s.id} is not remote`); };
+  return {
+    need,
+    stamp: () => `${writes}:${Math.floor(Date.now() / 5000)}`,
+    async list(s: Source) {
+      need(s);
+      await ready;
+      const at = new Date().toISOString();
+      return {
+        records: [...files.keys()].sort().map((path) => ({ path, text: files.get(path)! })),
+        registry: registry.map((r) => ({ ...r, text: r.text.replace(/^heartbeat_at:.*$/m, `heartbeat_at: ${at}`) })),
+        events: '',
+        backend: `heartbeat_at: ${at}\n`,
+        stamp: `${writes}`,
+      };
+    },
+    async write(s: Source, path: string, text: string, expected: string) {
+      need(s);
+      await ready;
+      const cur = files.get(path);
+      if (cur === undefined) throw new ApiError(404, `no record at ${path}`);
+      if (updatedAtOf(cur) !== expected) throw new ApiError(409, `${path} changed: updated_at is "${updatedAtOf(cur)}", expected "${expected}"`);
+      try { files.set(path, guardState(cur, text)); } catch (e) { throw new ApiError(403, (e as Error).message); }
+      writes += 1;
+      return { mtime: 0 };
+    },
+    async create(s: Source, folder: string, f: { title: string; due?: string | null; pri?: number; context?: string; spec?: string; success?: string }) {
+      need(s);
+      await ready;
+      if (!f.title.trim()) throw new ApiError(400, 'a task needs a title');
+      const base = `${today}-${taskSlug(f.title)}`;
+      let id = base;
+      for (let n = 2; files.has(`${folder.replace(/\/+$/, '')}/.fabric-space/tasks/${id}.md`); n++) id = `${base}-${n}`;
+      const path = `${folder.replace(/\/+$/, '')}/.fabric-space/tasks/${id}.md`;
+      files.set(path, serializeRecord(newRecord(id, f)));
+      writes += 1;
+      return { path };
+    },
+  };
 }

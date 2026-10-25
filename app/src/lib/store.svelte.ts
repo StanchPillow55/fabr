@@ -387,7 +387,6 @@ export class Store {
   activate(k: Key): void {
     if (!this.byKey.has(k)) return;
     this.selected = k;
-    this.toggleCollapse(k);
   }
 
   closeNodeSettings(): void {

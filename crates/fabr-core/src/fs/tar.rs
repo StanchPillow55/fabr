@@ -9,6 +9,19 @@ const MAX_FILE: u64 = 4 << 20;
 pub struct TarSnapshot {
     pub dirs: BTreeSet<String>,
     pub files: BTreeMap<String, Vec<u8>>,
+    pub home: BTreeMap<String, Vec<u8>>,
+}
+
+const HOME_EVENTS: &str = ".fabric-space/events.log";
+const HOME_REGISTRY: &str = ".fabric-space/registry/";
+const HOME_BACKEND: &str = "_backend.yaml";
+
+fn home_key(path: &str) -> Option<&str> {
+    if path == HOME_EVENTS {
+        return Some("events.log");
+    }
+    let name = path.strip_prefix(HOME_REGISTRY)?;
+    (!name.is_empty() && !name.contains('/') && name.ends_with(".yaml")).then_some(path.strip_prefix(".fabric-space/")?)
 }
 
 fn norm(p: &str) -> Option<String> {
@@ -28,6 +41,7 @@ impl TarSnapshot {
         let bad = |e: std::io::Error| FabrError::Remote(format!("bad snapshot stream: {e}"));
         let mut snap = TarSnapshot::default();
         let mut ar = tar::Archive::new(r);
+        ar.set_ignore_zeros(true);
         let mut n = 0usize;
         for entry in ar.entries().map_err(bad)? {
             let mut entry = entry.map_err(bad)?;
@@ -37,6 +51,9 @@ impl TarSnapshot {
             }
             let raw = entry.path_bytes();
             let Some(path) = std::str::from_utf8(&raw).ok().and_then(norm) else { continue };
+            if path == ".fabric-space/registry" {
+                continue;
+            }
             match entry.header().entry_type() {
                 tar::EntryType::Directory => snap.add_dir(&path),
                 tar::EntryType::Regular | tar::EntryType::Continuous => {
@@ -45,6 +62,10 @@ impl TarSnapshot {
                     }
                     let mut buf = Vec::with_capacity(entry.size() as usize);
                     entry.read_to_end(&mut buf).map_err(bad)?;
+                    if let Some(key) = home_key(&path) {
+                        snap.home.insert(key.to_string(), buf);
+                        continue;
+                    }
                     if let Some((parent, _)) = path.rsplit_once('/') {
                         snap.add_dir(parent);
                     } else {
@@ -86,11 +107,37 @@ impl TarSnapshot {
             h.update(format!("\0{}\0", b.len()).as_bytes());
             h.update(b);
         }
+        for (p, b) in &self.home {
+            h.update(b"h\0");
+            h.update(p.as_bytes());
+            h.update(format!("\0{}\0", b.len()).as_bytes());
+            h.update(b);
+        }
         h.digest().to_string()
+    }
+
+    pub fn home_registry(&self) -> Vec<(String, String)> {
+        self.home
+            .iter()
+            .filter_map(|(k, v)| k.strip_prefix("registry/").map(|n| (n, v)))
+            .filter(|(n, _)| *n != HOME_BACKEND)
+            .map(|(n, v)| (n.to_string(), String::from_utf8_lossy(v).into_owned()))
+            .collect()
+    }
+
+    pub fn home_events(&self) -> String {
+        self.home.get("events.log").map(|v| String::from_utf8_lossy(v).into_owned()).unwrap_or_default()
+    }
+
+    pub fn home_backend(&self) -> Option<String> {
+        self.home.get(&format!("registry/{HOME_BACKEND}")).map(|v| String::from_utf8_lossy(v).into_owned())
     }
 }
 
 impl Fs for TarSnapshot {
+    fn as_tar(&self) -> Option<&TarSnapshot> {
+        Some(self)
+    }
     fn is_dir(&self, rel: &str) -> bool {
         self.dirs.contains(rel)
     }

@@ -4,8 +4,8 @@ use crate::fs::{Fs, TarSnapshot};
 use crate::node::META_FILE;
 use crate::remote::askpass::AskpassServer;
 use crate::remote::script::{
-    EXIT_EXTRA_FILES, EXIT_IO, EXIT_MISMATCH, EXIT_NOT_NODE, init_script, list_script, node_script, parse_list, remove_script,
-    shell_command, snapshot_script, write_script,
+    EXIT_EXISTS, EXIT_EXTRA_FILES, EXIT_IO, EXIT_MISMATCH, EXIT_NOT_NODE, init_script, list_script, node_script, parse_list, remove_script,
+    shell_command, snapshot_script, task_create_script, task_write_script, write_script,
 };
 use crate::remote::ssh::{
     Auth, LOGIN_WAIT_TIMEOUT, SshCommand, collect, last_line, reset_master, run_command_full, ssh_command_opts, ssh_failed, timeout_error,
@@ -208,6 +208,28 @@ impl Backend for SshBackend {
             self.write_one(path, expected_version, META_FILE, b)?;
         }
         Ok(())
+    }
+
+    fn write_task(&self, folder: &str, file: &str, expected_updated_at: &str, bytes: &[u8]) -> Result<(), FabrError> {
+        let dir = self.node_dir(folder);
+        let (code, _, stderr) = self.run_script(&task_write_script(), &[&dir, expected_updated_at, file], Some(bytes.to_vec()))?;
+        let known = [
+            (EXIT_MISMATCH, Fail::Conflict("the task changed on the remote since you loaded it")),
+            (EXIT_IO, Fail::Io),
+            (EXIT_NOT_NODE, Fail::NotFound("no such task on the remote".into())),
+        ];
+        outcome(self.host(), "task write", code, &stderr, &[0], &known, FabrError::Remote)
+    }
+
+    fn create_task(&self, folder: &str, file: &str, bytes: &[u8]) -> Result<bool, FabrError> {
+        let dir = self.node_dir(folder);
+        let (code, _, stderr) = self.run_script(&task_create_script(), &[&dir, file], Some(bytes.to_vec()))?;
+        if code == EXIT_EXISTS {
+            return Ok(false);
+        }
+        let known = [(EXIT_IO, Fail::Io), (EXIT_NOT_NODE, Fail::NotFound("no such folder on the remote".into()))];
+        outcome(self.host(), "task create", code, &stderr, &[0], &known, FabrError::Remote)?;
+        Ok(true)
     }
 
     fn remove_node(&self, path: &str, expected_version: &str) -> Result<(), FabrError> {

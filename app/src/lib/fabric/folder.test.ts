@@ -22,6 +22,17 @@ describe('fixture folders', () => {
   });
 });
 
+describe('nodeFolder for a hosted source', () => {
+  const at = (root: string, path: string, home: string | null = '/home/me') => nodeFolder({ host: 'vm', root }, path, home);
+  it('keeps the root as configured, ~ unexpanded, and trims slashes', () => {
+    expect(at('/x', 'a')).toBe('/x/a');
+    expect(at('~/sample/', '/a/b/')).toBe('~/sample/a/b');
+    expect(at('~', '')).toBe('~');
+    expect(at('~/sample', '', null)).toBe('~/sample');
+    expect(at('/srv/p//', 'a')).toBe('/srv/p/a');
+  });
+});
+
 describe('nodeFolder', () => {
   const at = (root: string, path: string, home: string | null) => nodeFolder({ host: null, root }, path, home);
   it('expands ~ and ~/x with the home and trims slashes', () => {
@@ -31,10 +42,9 @@ describe('nodeFolder', () => {
     expect(at('/srv/p//', 'a', null)).toBe('/srv/p/a');
     expect(at('/', '', null)).toBe('/');
   });
-  it('is null for ~ without a home and for remote or missing sources', () => {
+  it('is null for ~ without a home and for a missing source', () => {
     expect(at('~', 'a', null)).toBeNull();
     expect(at('~/x', '', null)).toBeNull();
-    expect(nodeFolder({ host: 'h', root: '/x' }, 'a', '/home/me')).toBeNull();
     expect(nodeFolder(undefined, 'a')).toBeNull();
   });
 });

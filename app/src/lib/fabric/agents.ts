@@ -24,6 +24,7 @@ export interface RegistryEntry {
   retry_in_s?: number;
   last_error?: string;
   usage?: Record<string, StageUsage>;
+  source?: string | null;
 }
 
 const ACTIVITIES: readonly string[] = ['model', 'tool', 'check', 'parked', 'retry', 'queued', 'paused'];

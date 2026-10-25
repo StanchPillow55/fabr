@@ -1,5 +1,5 @@
 import { existsSync, readFileSync } from 'node:fs';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { render } from 'svelte/server';
 import { FixtureSource, type FabricSource } from './source';
 import { nodeFolder } from './folder';
@@ -7,7 +7,8 @@ import TaskSection from './TaskSection.svelte';
 import AgentsBadge from './AgentsBadge.svelte';
 import TaskStrip from './TaskStrip.svelte';
 import StateRibbon from './StateRibbon.svelte';
-import { FabricStore, localRoots } from './tasks.svelte';
+import { FabricStore, localRoots, remoteSources } from './tasks.svelte';
+import { createMockApi } from '../../mock/api';
 
 const read = (p: string) => readFileSync(new URL(p, import.meta.url), 'utf8');
 
@@ -126,8 +127,8 @@ describe('nodeFolder and roots', () => {
     expect(nodeFolder({ host: null, root: '~/notes' }, 'x', '/home/me')).toBe('/home/me/notes/x');
     expect(nodeFolder({ host: null, root: '~/notes' }, 'x')).toBeNull();
   });
-  it('gives remote nodes no folder and keeps local roots only', () => {
-    expect(nodeFolder({ host: 'box', root: '/srv' }, 'a')).toBeNull();
+  it('keeps local roots only and gives a missing source no folder', () => {
+    expect(nodeFolder({ host: 'box', root: '/srv' }, 'a')).toBe('/srv/a');
     expect(nodeFolder(undefined, 'a')).toBeNull();
     const s = (id: string, host: string | null, root: string) => ({ id, name: id, host, root, prune: null });
     expect(localRoots([s('a', null, '/x'), s('b', 'h', '/y')])).toEqual(['/x']);
@@ -237,5 +238,79 @@ describe('heldFor', () => {
     expect(f.openReadonly).toBe(true);
     f.open(h.path);
     expect(f.openReadonly).toBe(false);
+  });
+});
+
+describe('remote sources', () => {
+  const VM = { id: 'vm', name: 'VM', host: 'vm', root: '~/sample', prune: null };
+  async function mixed() {
+    const api = createMockApi({ today: '2026-10-25', latency: 0 });
+    const spy = {
+      fabricRemoteList: vi.fn(api.fabricRemoteList),
+      fabricRemoteStamp: vi.fn(api.fabricRemoteStamp),
+      fabricRemoteWrite: vi.fn(api.fabricRemoteWrite),
+      fabricRemoteCreate: vi.fn(api.fabricRemoteCreate),
+    };
+    const f = new FabricStore(new FixtureSource(), spy);
+    await f.load();
+    f.setSources([VM]);
+    await vi.waitFor(() => expect(f.records.some((h) => h.source === 'vm')).toBe(true));
+    return { f, spy };
+  }
+
+  it('picks hosted sources', () => {
+    expect(remoteSources([VM, { ...VM, id: 'l', host: null }]).map((s) => s.id)).toEqual(['vm']);
+  });
+
+  it('loads local and remote records, tags the source and keeps the backends apart', async () => {
+    const { f } = await mixed();
+    expect(f.records.filter((h) => h.source === null).length).toBe(12);
+    expect(f.records.filter((h) => h.source === 'vm').length).toBe(4);
+    expect(f.backendOf(null)).toBe('absent');
+    expect(f.backendOf('vm')).toBe('connected');
+    expect(f.registry.filter((e) => e.source === 'vm').length).toBe(1);
+  });
+
+  it('resolves a remote record by its unexpanded folder and shows its agent', async () => {
+    const { f } = await mixed();
+    const folder = nodeFolder(VM, 'app')!;
+    expect(folder).toBe('~/sample/app');
+    expect(f.tasksFor(folder).length).toBe(2);
+    const h = f.heldFor(folder, 'app', '2026-10-25-order-filament-spools')!;
+    expect(h.source).toBe('vm');
+    expect(f.countsFor(folder).total).toBe(2);
+    const root = f.heldFor('~/sample', '', '2026-10-25-order-filament')!;
+    expect(f.agents.get(root.path)?.alive).toBe('live');
+    expect(f.entryFor(root.path)?.source).toBe('vm');
+  });
+
+  it('writes a remote record through fabric_remote_write with the source', async () => {
+    const { f, spy } = await mixed();
+    const h = f.heldFor('~/sample', '', '2026-10-25-check-printer-firmware')!;
+    await f.complete(h);
+    expect(spy.fabricRemoteWrite).toHaveBeenCalledTimes(1);
+    const req = spy.fabricRemoteWrite.mock.calls[0][0];
+    expect(req.source).toEqual(VM);
+    expect(req.path).toBe(h.path);
+    expect(f.records.find((x) => x.path === h.path)!.record.state).toBe('succeeded');
+    expect(f.records.find((x) => x.path === h.path)!.source).toBe('vm');
+  });
+
+  it('creates a remote task under the unexpanded folder', async () => {
+    const { f, spy } = await mixed();
+    const made = await f.createTask('~/sample/app', { title: 'Patch the kernel' });
+    expect(spy.fabricRemoteCreate.mock.calls[0][0]).toMatchObject({ source: VM, folder: '~/sample/app', title: 'Patch the kernel' });
+    expect(made.path).toBe('~/sample/app/.fabric-space/tasks/2026-10-25-patch-the-kernel.md');
+    expect(made.source).toBe('vm');
+  });
+
+  it('reload re-lists the source and a removed source drops its records', async () => {
+    const { f, spy } = await mixed();
+    const h = f.heldFor('~/sample', '', '2026-10-25-check-printer-firmware')!;
+    const before = spy.fabricRemoteList.mock.calls.length;
+    await f.reload(h.path);
+    expect(spy.fabricRemoteList.mock.calls.length).toBe(before + 1);
+    f.setSources([]);
+    expect(f.records.some((x) => x.source === 'vm')).toBe(false);
   });
 });

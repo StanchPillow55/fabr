@@ -26,7 +26,7 @@ describe('mock api', () => {
   it('multi-source: virtual root, via labels', async () => {
     const t = await createMockApi({ today: '2026-10-19', latency: 0, multi: true }).getTree(false);
     expect(t.root.name).toBe('/');
-    expect(t.root.children.map((c) => c.source)).toEqual(['local', 'lab']);
+    expect(t.root.children.map((c) => c.source)).toEqual(['local', 'lab', 'vm']);
     expect(find(t.root.children[1], 'srv/wiki')?.via).toBe('srv/wiki');
   });
 

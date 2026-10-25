@@ -81,9 +81,11 @@
     if (store?.tree && !fabric) {
       fabric = new FabricStore();
       fabric.onItemsChange = () => store?.reloadSoon();
-      void fabric.start(localRoots(store.tree.sources));
+      void fabric.start(localRoots(store.tree.sources), store.tree.sources);
     }
   });
+
+  $effect(() => { if (fabric && store?.tree) fabric.setSources(store.tree.sources); });
 
   $effect(() => { if (fabric) fabric.agentReason = agentReason; });
 

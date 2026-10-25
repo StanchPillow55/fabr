@@ -41,7 +41,16 @@ fn scan_json(fs: &dyn Fs, src: &Source, show_all: bool) -> serde_json::Value {
 
 #[test]
 fn scripts_have_no_backslashes() {
-    for s in [snapshot_script(&prune_list()).unwrap(), write_script(), remove_script(), init_script(), node_script(), list_script()] {
+    for s in [
+        snapshot_script(&prune_list()).unwrap(),
+        write_script(),
+        remove_script(),
+        init_script(),
+        node_script(),
+        list_script(),
+        task_write_script(),
+        task_create_script(),
+    ] {
         assert!(!s.contains('\\'), "{s}");
         assert!(!s.contains('\n'), "{s}");
     }
@@ -317,4 +326,62 @@ fn remove_script_works_with_a_node_dir_relative_to_the_cwd() {
     assert_eq!(code, 0, "{err}");
     assert!(!xs.exists() && f.p("personal/health").is_dir());
     assert_eq!(sh(&script, &["./personal/health", &v], b"").0, EXIT_NOT_NODE);
+}
+
+fn sh_home(script: &str, args: &[&str], home: &Path) -> (i32, Vec<u8>, String) {
+    let out = Command::new("sh").arg("-c").arg(shell_command(script, args)).envs([("HOME", home)]).stdin(Stdio::null()).output().unwrap();
+    (out.status.code().unwrap_or(-1), out.stdout, String::from_utf8_lossy(&out.stderr).into_owned())
+}
+
+#[test]
+fn snapshot_exposes_the_home_registry_without_touching_the_tree() {
+    let f = Fixture::new();
+    let home = tempfile::tempdir().unwrap();
+    let space = home.path().join(".fabric-space");
+    std::fs::create_dir_all(space.join("registry")).unwrap();
+    std::fs::write(space.join("registry/one.yaml"), "name: one\n").unwrap();
+    std::fs::write(space.join("registry/two.yaml"), "name: two\n").unwrap();
+    std::fs::write(space.join("registry/_backend.yaml"), "beat: 7\n").unwrap();
+    std::fs::write(space.join("registry/notes.txt"), "no").unwrap();
+    let events: String = (0..3000).map(|i| format!("line {i}\n")).collect();
+    std::fs::write(space.join("events.log"), &events).unwrap();
+    let script = snapshot_script(&prune_list()).unwrap();
+    let root = f.root.to_str().unwrap();
+    let (code, out, err) = sh_home(&script, &[root], home.path());
+    assert!(code == 0 || code == 1, "exit {code}: {err}");
+    let snap = untar(&out);
+    assert_eq!(
+        snap.home_registry(),
+        [("one.yaml".to_string(), "name: one\n".to_string()), ("two.yaml".to_string(), "name: two\n".to_string())]
+    );
+    assert_eq!(snap.home_backend().as_deref(), Some("beat: 7\n"));
+    let ev = snap.home_events();
+    assert!(ev.starts_with("line 1000\n") && ev.ends_with("line 2999\n"), "tail only");
+    assert!(!snap.files.keys().any(|k| k.starts_with(".fabric-space/registry") || k == ".fabric-space/events.log"));
+    let plain = untar(&sh_home(&script, &[root], tempfile::tempdir().unwrap().path()).1);
+    assert!(plain.home_registry().is_empty() && plain.home_backend().is_none() && plain.home_events().is_empty());
+    assert_eq!(plain.files, snap.files);
+    assert_eq!(plain.dirs, snap.dirs);
+    assert_ne!(plain.hash(), snap.hash());
+    let (small, cut) = TarSnapshot::from_tar_capped(&out[..], 3).unwrap();
+    assert!(cut && small.home.is_empty());
+}
+
+#[test]
+fn task_scripts_map_exit_codes() {
+    let f = Fixture::new();
+    let dir = f.p("work");
+    let d = dir.to_str().unwrap();
+    let (code, _, _) = sh(&task_create_script(), &[d, "new.md"], b"---\nupdated_at: A\n---\nbody\n");
+    assert_eq!(code, 0);
+    assert_eq!(sh(&task_create_script(), &[d, "new.md"], b"other").0, EXIT_EXISTS);
+    assert_eq!(read(&dir.join(".fabric-space/tasks/new.md")), "---\nupdated_at: A\n---\nbody\n");
+    assert_eq!(sh(&task_create_script(), &["/nonexistent/fabr", "x.md"], b"x").0, EXIT_NOT_NODE);
+    assert_eq!(sh(&task_write_script(), &[d, "B", "new.md"], b"x").0, EXIT_MISMATCH);
+    assert_eq!(sh(&task_write_script(), &[d, "A", "missing.md"], b"x").0, EXIT_NOT_NODE);
+    assert_eq!(sh(&task_write_script(), &[d, "A", "new.md"], b"---\nupdated_at: \"B\"\n---\n").0, 0);
+    assert_eq!(sh(&task_write_script(), &[d, "B", "new.md"], b"---\nupdated_at: C\n---\n").0, 0);
+    let left: Vec<_> =
+        std::fs::read_dir(dir.join(".fabric-space/tasks")).unwrap().map(|e| e.unwrap().file_name().into_string().unwrap()).collect();
+    assert!(left.iter().all(|n| !n.starts_with('.')), "{left:?}");
 }

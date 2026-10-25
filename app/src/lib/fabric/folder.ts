@@ -21,9 +21,9 @@ export function stepLabel(r: TaskRecord): string | null {
 }
 
 export function nodeFolder(source: { host: string | null; root: string } | undefined, path: string, home: string | null = null): string | null {
-  if (!source || source.host) return null;
+  if (!source) return null;
   let root = source.root.trim().replace(/\/+$/, '');
-  if (root === '~' || root.startsWith('~/')) {
+  if (!source.host && (root === '~' || root.startsWith('~/'))) {
     const h = home?.replace(/\/+$/, '');
     if (!h) return null;
     root = h + root.slice(1);

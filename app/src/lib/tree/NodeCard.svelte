@@ -34,11 +34,10 @@
     onsettings?: () => void;
     fabric?: FabricStore | null;
     folder?: string | null;
-    remote?: boolean;
   }
   let {
     node, tally, model, selected, match, dim, ontoggle, onmore, onopen, onfocus, today = '', source = null, accent = null,
-    sources = [], errors = [], pending = [], onsource, onurl, onsettings, fabric = null, folder = null, remote = false,
+    sources = [], errors = [], pending = [], onsource, onurl, onsettings, fabric = null, folder = null,
   }: Props = $props();
 
   const hidden = $derived(isHidden(node));
@@ -49,14 +48,12 @@
   const lines = $derived(virtual && !model.collapsed ? sourceLines(tally ?? node, sources, errors, today, undefined, pending) : []);
   const canToggle = $derived(node.children.length > 0 || node.items.length > 0);
   const roll = $derived(model.collapsed ? rollup(tally ?? node, today) : null);
-  const REMOTE_NOTE = 'Remote node: read-only';
   const expandedMore = $derived(model.shown.length > MAX_ROWS);
 
-  const REMOTE_TITLE = 'Remote task: open on its machine';
   const held = (item: Item) => fabric?.heldFor(folder, node.path, item.id);
   function openItem(item: Item) {
     const h = held(item);
-    if (h && fabric) fabric.open(h.path, remote);
+    if (h && fabric) fabric.open(h.path);
   }
   async function markDone(h: Held) {
     try {
@@ -141,18 +138,17 @@
     <ul class="card__items">
       {#if fabric}
         <li class="row row--add">
-          <AddTask {fabric} {folder} variant="card" disabled={remote} note={remote ? REMOTE_NOTE : ''} />
+          <AddTask {fabric} {folder} variant="card" />
         </li>
       {/if}
       {#each model.shown as item}
         {@const h = held(item)}
-        {@const dead = remote && !h}
         <li class="row row--{item.phase}">
           <Pill phase={item.phase} />
-          <button type="button" class="row__title row__link" title={dead ? REMOTE_TITLE : item.title} aria-disabled={dead || undefined} onclick={stop(() => openItem(item))} ondblclick={(e) => e.stopPropagation()}>{item.title}</button>
+          <button type="button" class="row__title row__link" title={item.title} onclick={stop(() => openItem(item))} ondblclick={(e) => e.stopPropagation()}>{item.title}</button>
           <Priority pri={item.pri} />
           <DueBadge {item} {today} />
-          {#if h && !remote && isOpen(item.phase) && !h.record.requests.complete}
+          {#if h && isOpen(item.phase) && !h.record.requests.complete}
             <button type="button" class="row__tick" title="Mark done" aria-label="Mark {item.title} done" onclick={stop(() => markDone(h))} ondblclick={(e) => e.stopPropagation()}><Icon name="check" size={12} /></button>
           {/if}
         </li>

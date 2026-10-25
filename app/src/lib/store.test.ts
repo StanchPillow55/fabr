@@ -576,14 +576,14 @@ describe('accent colour', () => {
     expect(s.layoutVersion).toBeGreaterThan(v);
   });
 
-  it('activate selects and toggles the fold without opening settings; the gear opens settings and selects', async () => {
+  it('activate only selects; the chevron folds; the gear opens settings and selects', async () => {
     const s = new Store(mockApi());
     await s.load();
     s.activate('local:work');
     expect(s.selected).toBe('local:work');
-    expect(s.collapsed.has('local:work')).toBe(true);
-    s.activate('local:work');
     expect(s.collapsed.has('local:work')).toBe(false);
+    s.toggleCollapse('local:work');
+    expect(s.collapsed.has('local:work')).toBe(true);
     expect(s.nodeSettings).toBeNull();
     s.openNodeSettings('local:plain');
     expect(s.nodeSettings?.key).toBe('local:plain');

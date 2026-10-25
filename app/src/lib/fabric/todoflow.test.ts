@@ -7,6 +7,7 @@ import NodeCard from '../tree/NodeCard.svelte';
 import NodeSettingsSheet from '../settings/NodeSettingsSheet.svelte';
 import { readFileSync } from 'node:fs';
 import { Store } from '../store.svelte';
+import { createMockApi } from '../../mock/api';
 import { AddFlow } from './addflow.svelte';
 import { applyDone, canMarkDone, submitDone } from './done';
 import { folderOf } from './folder';
@@ -19,6 +20,15 @@ import RecordScreen from './RecordScreen.svelte';
 import { applyRequest, canComplete, COMPLETE_PENDING } from './requests';
 
 const FOLDER = '/home/me/p';
+const VM = { id: 'vm', name: 'VM', host: 'vm', root: '~/sample', prune: null };
+
+async function remoteStore() {
+  const fabric = new FabricStore(new FixtureSource(), createMockApi({ today: '2026-10-25', latency: 0 }));
+  await fabric.load();
+  fabric.setSources([VM]);
+  await vi.waitFor(() => expect(fabric.records.some((h) => h.source === 'vm')).toBe(true));
+  return { fabric };
+}
 const today = '2026-10-25';
 
 async function fresh() {
@@ -246,12 +256,15 @@ describe('remote and local nodes', () => {
     expect(src).not.toMatch(/function openItem[^}]*onopen\(\)/);
   });
 
-  it('a remote card row with no loaded record is aria-disabled with the remote title', async () => {
-    const { fabric } = await fresh();
-    const n = node('work', { items: [item({ id: 'zz', title: 'Verify restore' })] });
-    const body = card(n, { fabric, folder: null, remote: true });
-    expect(body).toContain('aria-disabled="true"');
-    expect(body).toContain('Remote task: open on its machine');
+  it('a remote card row renders enabled with a tick, and its add input is enabled', async () => {
+    const { fabric } = await remoteStore();
+    const n = node('', { items: [item({ id: '2026-10-25-check-printer-firmware', title: 'Check printer firmware', phase: 'todo' })] });
+    const body = card(n, { fabric, folder: '~/sample' });
+    expect(body).not.toContain('aria-disabled');
+    expect(body).not.toContain('Remote task');
+    expect(body).not.toContain('Remote node');
+    expect(body).toContain('Mark Check printer firmware done');
+    expect(body).not.toMatch(/<input[^>]*disabled[^>]*>/);
   });
 
   function card(n: Node, extra: Record<string, unknown> = {}) {
@@ -268,17 +281,6 @@ describe('remote and local nodes', () => {
     expect(body).toContain(warn);
     expect(body).toContain('placeholder="Add task"');
     expect(body).not.toContain('click to change status');
-  });
-
-  it('a remote card lists items, disables add and shows the note', async () => {
-    const { fabric } = await fresh();
-    const n = node('work', { items: [item({ title: 'Verify restore' })] });
-    const body = card(n, { fabric, folder: null, remote: true });
-    expect(body).toContain('Verify restore');
-    expect(body).toMatch(/<input[^>]*disabled[^>]*>/);
-    expect(body).toContain('Remote node: read-only');
-    expect(body).not.toContain('mark-done');
-    expect(body).not.toContain('Mark Verify restore done');
   });
 
   it('a local card shows the tick for open rows that have a record', async () => {

@@ -1,9 +1,13 @@
 mod local;
 mod onboard;
 mod remote;
+mod tasks;
 
 use self::local::LocalCache;
 use self::remote::{RemoteCache, RemoteView};
+pub use self::tasks::{
+    RemoteCreateReq, RemoteCreateRes, RemoteListRes, RemoteRecord, RemoteRegistryFile, RemoteSourceReq, RemoteWriteReq, RemoteWriteRes,
+};
 use crate::backend::{Backend, CONFLICT_MSG, DirEntry, LocalBackend, NOT_A_NODE, NodeFiles, SshBackend, dir_entries};
 use crate::dto::{
     GetTreeReq, InitChildrenReq, ListDirsReq, NodeRef, RemoveNodeReq, SaveMetaReq, SourceError, Stamp, Tree, VIRTUAL_ROOT_NAME,

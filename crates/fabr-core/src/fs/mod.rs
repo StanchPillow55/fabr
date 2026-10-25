@@ -13,6 +13,9 @@ pub trait Fs: Send + Sync {
         let _ = rel;
         Vec::new()
     }
+    fn as_tar(&self) -> Option<&TarSnapshot> {
+        None
+    }
     fn try_subdirs(&self, rel: &str) -> Result<Vec<String>, String> {
         Ok(self.subdirs(rel))
     }
