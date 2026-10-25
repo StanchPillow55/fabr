@@ -1,0 +1,3 @@
+- CI is GitHub Actions; the main workflow is .github/workflows/ci.yml.
+- Releases are vX.Y.Z tags on main; a tag push runs release.yml.
+- Stripe keys are rotated in the dashboard and stored as the STRIPE_SECRET_KEY repository secret.

@@ -1,34 +1,45 @@
-# Feature waves
+# Waves
 
-Four waves, poured in order. Wave 1 is the concrete. The rule that protects it: no later wave
-changes a file format or adds a state. Each later wave only fills a slot that wave 1 already
-left. When a feature cannot be built without changing a format, the format was wrong in wave 1.
-That is a decision for the owner, not an edit made in passing.
+Four waves, poured in order. Wave 1 is the foundation. The rule that protects it: a later wave fills slots that wave 1 left and does not change a file format. A format change needs the owner and a new schema number. Schema 4 shows the rule bends, always by owner decision (see `DECISIONS.md`).
 
-| Wave | Name | Goal | Exit test | Plan |
-|---|---|---|---|---|
-| 1 | Foundation | one task goes from reminder to succeeded through Telegram, with a grant, a fill and an audit entry; a restart mid-run resumes | on a fresh machine, finish setup, then run one task end to end and survive a kill during execute | `WAVE_1.md` |
-| 2 | Tell it once | a decision made in one task is offered back in the next, and the user can say once, always, or no | the same kind of task three times: asked, then always, then assumed and listed | `WAVE_2.md` |
-| 3 | Trust and control | the agent can learn about the environment and act on riskier tasks without the user losing the wheel | a run proposes a procedure, the user accepts it in the GUI, the next run uses it; an irreversible task waits at a checkpoint | `WAVE_3.md` |
-| 4 | Reach | more ways in, more of the user's world reachable, all behind the same grant model | a voice note becomes a reminder; a task reads granted emails and nothing else | `WAVE_4.md` |
+Where a feature goes, the first yes wins.
 
-## Where a feature goes
+- It changes a format or a state: wave 1, or the owner.
+- One task cannot run end to end without it: wave 1.
+- It makes a second run better than the first: wave 2.
+- It lets the agent act with less supervision: wave 3.
+- It adds a channel or a connector: wave 4.
 
-Ask in order. The first yes places it.
+## Wave 1: foundation
 
-1. Does it change a file format or a state? Then it is wave 1, or it needs the owner.
-2. Is it needed for one task to run end to end? Wave 1.
-3. Does it make a second run better than the first? Wave 2.
-4. Does it let the agent act with less supervision, or learn about the environment? Wave 3.
-5. Does it add an input channel or a connector? Wave 4.
+Goal: one task goes from reminder to succeeded through Telegram, with a grant, a fill and an audit entry, and a restart mid-run resumes.
 
-## Two tracks
+| Item | Status |
+|---|---|
+| Settings, secrets, six-screen setup wizard | built |
+| Task record: six states, flags, atomic writes with flock, validation | built |
+| GUI: tree, delegate, answers, approval, agents sheet | built |
+| Orchestrator with resume, one running task per node, registry and heartbeat | built |
+| Definer, planner | built (model calls) |
+| Executor, evaluator | stubs: three file tools, allowlisted checks |
+| Notifier | stub: events log only |
+| Context gatherer | stub: no folder-chain walk |
+| Telegram bot, transport and buttons | planned |
+| Task index | planned; the app polls a stamp |
+| Knowledge files, rules and preferences editors | planned |
+| Data bank, fill at the sink, audit log, payment refusal | planned |
+| Learner (capture only) | stub |
 
-Dev 2 builds the agent backend and we build the frontend. `FRONTEND_PLAN.md` carves our part out
-of each wave, fixes the file contract between the tracks, and has our own waves F0 to F5.
+Exit test on a fresh machine: finish setup, hand-write a reminder and delegate it. Answer one batched question on Telegram, then approve plan, assertions and grants in one tap. The executor fills address fields on a web form and every assertion passes. The notice arrives on Telegram and in the app. A kill during execute resumes, and the audit log has one line per filled field.
 
-## Placeholders in wave 1
+## Wave 2: tell it once
 
-Two blocks are built as slots in wave 1 and filled later. The learner only captures answers in
-wave 1. Learned preferences get the record format and the project-scope file in wave 1. Both
-exist so the record and the files already carry their fields when wave 2 starts.
+A decision made in one task is offered back in the next, with the three answers once, always, or no. Learned records are read by the gatherer and shown to the definer as priors with an applies-when condition. Always-rules apply silently and are listed in the approval message. The app manages learned records. Grant scope allow-for-this-project, grant revocation, full-text search over past records and per task-type checklists come here. Exit test: the same kind of task three times, asked, then always, then assumed and listed.
+
+## Wave 3: trust and control
+
+Procedure proposals are staged after a passed evaluation and accepted in the app, never auto-accepted. A learned rule is promoted to global after confirmation in two projects. Always-rules get a staleness review. An irreversible step waits at a checkpoint even in auto mode. A failed evaluation re-plans once. Cost caps, several agents per folder and long-form review in the app belong here. Exit test: a run proposes a procedure, the user accepts it, the next run uses it, and an irreversible task waits at a checkpoint.
+
+## Wave 4: reach
+
+Wave 4 adds speech and photo input, and personal context connectors (email, calendar, messages) as read-only tools behind a grant that states the filter. It adds virtual cards per task, so the payment refusal can lift for pre-approved amounts, and screenshot redaction. Several machines may share a global layer. Embeddings come only if full-text search stops being enough. Exit test: a voice note becomes a reminder, a task reads granted emails and nothing else, and a purchase completes without the card number in any transcript.

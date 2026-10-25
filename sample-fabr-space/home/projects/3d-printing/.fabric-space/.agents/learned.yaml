@@ -1,9 +1,0 @@
-records:
-  - id: l1
-    text: "Orders from shop.example-filament.test ship to the home address with standard shipping"
-    applies_when: "ordering from the usual 3d printing shop"
-    scope: project
-    count: 1
-    source_tasks:
-      - <SAMPLE>/home/projects/3d-printing/.fabric-space/tasks/2026-08-14-order-resin.md
-    last_confirmed: 2026-08-14T10:30:00Z

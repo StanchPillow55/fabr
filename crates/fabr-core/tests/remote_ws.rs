@@ -26,7 +26,7 @@ fn source(id: &str, name: &str, host: Option<&str>, root: &str) -> Source {
 fn setup() -> (tempfile::TempDir, PathBuf, Workspace) {
     let tmp = tempfile::tempdir().unwrap();
     let root = tmp.path().join("remote sample's");
-    write_sample(&root).unwrap();
+    write_fixture_tree(&root).unwrap();
     let ws = ws_at(tmp.path());
     let src = source("r", "Remote", Some("fake"), &root.display().to_string());
     let local = source("l", "Local", None, &root.display().to_string());

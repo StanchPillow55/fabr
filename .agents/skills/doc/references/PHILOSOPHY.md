@@ -13,7 +13,7 @@ an identity that is not a path.
 ## 2. The task record is the state machine
 
 One file per task holds title, due date, context, spec, plan, success definition, state and
-log. The five states are entered by filling one more part of that file. There is no separate
+log. The states are entered by filling one more part of that file. A reminder, which the UI also calls a todo, is the same record in its first state. There is no separate
 workflow model. The GUI shows progress by showing which fields are filled.
 
 ## 3. The outer loop is code, the model works inside a step
@@ -58,9 +58,9 @@ writes the record, so each one can be built, demoed and replaced on its own.
 
 ## 9. Pour the foundation once
 
-Wave 1 defines every file format and every state. No later wave changes a format or adds a
-state. A later feature only fills a slot that wave 1 already left. A placeholder is a slot
-with a name, a file and an empty body.
+Wave 1 defines every file format and every state, and later features fill slots it left. A
+placeholder is a slot with a name, a file and an empty body. A format change needs the owner
+and a new schema number. Schema 4 is the third since the first pour.
 
 ## 10. Name what is not built
 
@@ -77,4 +77,13 @@ longer than a screen links to the GUI. The bot answers one user id and no one el
 
 People edit prose rules and structured preferences from the GUI. The agent writes only its own
 learned records and proposals. No file has both writers, so nothing is clobbered and the user
-keeps trusting what they wrote.
+keeps trusting what they wrote. In the task record the orchestrator alone writes `state`. The
+one owner-approved exception is the GUI moving a reminder to succeeded by hand.
+
+## What the design rests on
+
+- One key for everything: the path gives tasks, knowledge and preferences their inheritance.
+- A deterministic outer loop, so every stage leaves an artifact you can inspect and replay.
+- A separate evaluator with a fresh context, so the executor never grades its own work.
+- Fill, never read: leaks happen in the model's context window, not in storage.
+- Telegram fits a loop that mostly waits on the user: asynchronous, on the phone, cheap to set up.

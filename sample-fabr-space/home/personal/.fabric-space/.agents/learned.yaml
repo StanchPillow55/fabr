@@ -1,0 +1,9 @@
+records:
+  - id: l1
+    text: "window seat on trains"
+    applies_when: "reserving seats on a train"
+    scope: project
+    count: 1
+    source_tasks:
+      - <SAMPLE>/home/personal/japan-trip-2026/.fabric-space/tasks/2026-10-24-reserve-the-shinkansen-seats.md
+    last_confirmed: 2026-10-24T09:47:00Z

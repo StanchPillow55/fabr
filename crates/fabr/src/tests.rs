@@ -1,5 +1,5 @@
 use crate::server;
-use fabr_core::{Workspace, write_sample};
+use fabr_core::{Workspace, write_fixture_tree};
 use serde_json::{Value, json};
 use std::io::{Read, Write};
 use std::net::TcpStream;
@@ -15,7 +15,7 @@ struct Srv {
 fn start() -> Srv {
     let tmp = tempfile::tempdir().unwrap();
     let root = tmp.path().join("sample");
-    write_sample(&root).unwrap();
+    write_fixture_tree(&root).unwrap();
     let ui = tmp.path().join("ui");
     std::fs::create_dir_all(ui.join("assets")).unwrap();
     std::fs::write(ui.join("index.html"), "<title>fabr</title>").unwrap();

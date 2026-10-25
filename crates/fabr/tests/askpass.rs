@@ -41,7 +41,7 @@ HOME="{home}" exec sh -c "$last"
 fn password_over_askpass_then_install_key() {
     let tmp = tempfile::tempdir().unwrap();
     let root = tmp.path().join("sample");
-    assert_eq!(fabr_core::write_sample(&root).unwrap(), 19);
+    assert_eq!(fabr_core::write_fixture_tree(&root).unwrap(), 19);
     ssh::set_ssh_program(Some(fake_ssh(tmp.path())));
     let helper = std::env::var_os("FABR_TEST_ASKPASS_HELPER").map_or_else(|| PathBuf::from(env!("CARGO_BIN_EXE_fabr")), PathBuf::from);
     askpass::set_helper(Some(helper));

@@ -1,7 +1,7 @@
 # fixtures
 
 Ten fixtures for the F0 exit test. Each is a small copy of what the agent backend and the GUI
-share on disk, built from `.agents/skills/doc/dev2/agent_surface_spec.md`, section 10. The
+share on disk, built from `.agents/skills/doc/references/CONTRACT.md`, section 10. The
 backend's reader must load every record, and the GUI must render every one.
 
 Fixtures 02 to 09 follow one task, "order 2 kg of black PLA", from question to re-delegation.

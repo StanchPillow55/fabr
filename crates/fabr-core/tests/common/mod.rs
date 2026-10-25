@@ -1,6 +1,6 @@
 #![allow(clippy::new_without_default)]
 #![allow(dead_code)]
-use fabr_core::{Node, Workspace, write_sample};
+use fabr_core::{Node, Workspace, write_fixture_tree};
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
@@ -13,7 +13,7 @@ impl Fixture {
     pub fn new() -> Fixture {
         let tmp = tempfile::tempdir().unwrap();
         let root = tmp.path().join("sample");
-        assert_eq!(write_sample(&root).unwrap(), 19);
+        assert_eq!(write_fixture_tree(&root).unwrap(), 19);
         Fixture { tmp, root }
     }
     pub fn config(&self) -> PathBuf {

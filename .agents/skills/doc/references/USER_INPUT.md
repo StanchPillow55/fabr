@@ -1,19 +1,9 @@
 # The owner's input
 
-This is what the owner said in the founding conversation on 2026-10-24, in order. The wording
-is cleaned up and nothing is added or dropped. This file states the intent. A later document
-states the decision. When the two disagree, raise the difference with the owner. The owner is the user of the product. "The user" below means the person who owns the
-machine and the folders.
-
-## Contents
-
-1. The idea
-2. The learning layer and the monitoring view
-3. Lifecycle, focus, and the diagram
-4. The name
-5. Feature waves
-6. Initial setup
-7. Where this lives
+This is what the owner said in the founding conversation on 2026-10-24, in order, with the
+instructions addressed to the model of that day removed. It is frozen: never edit it. It states
+the intent, and `DECISIONS.md` states what was decided later. When the two disagree, raise the
+difference with the owner. "The user" below means the person who owns the machine and the folders.
 
 ## 1. The idea
 
@@ -63,11 +53,9 @@ Last note: the agent preferences have to be editable by the user, in a GUI. We h
 rules, global preferences and per-project preferences. dot_agents does not fit precisely, but
 well enough for the demo.
 
-Massage this idea. Do not read any files yet. Discuss strengths and weaknesses.
-
 ## 2. The learning layer and the monitoring view
 
-Reprint the grilling parts. Here are additional thoughts.
+Additional thoughts.
 
 Per task, when "do with agent" is pressed, the planning agent tries to figure out and gather
 the context across the current directory and past execution experiences. This is an
@@ -79,7 +67,7 @@ after the task was executed, and it is part of the task execution state machine.
 
 We should be able to see all executing agents somewhere.
 
-The application explodes. Include this and let us continue planning and grilling.
+The application explodes.
 
 ## 3. Lifecycle, focus, and the diagram
 
@@ -94,9 +82,7 @@ the foundation. Our goal is to shape and pour the foundation concrete.
 
 ## 4. The name
 
-We are renaming fabr to fabric. A naive string replace of fabr with fabric across the project.
-See what breaks. Use a Sonnet agent for it. (The owner interrupted this before it started. It
-is parked until the owner says go.)
+We are renaming fabr to fabric.
 
 ## 5. Feature waves
 
@@ -112,9 +98,6 @@ Telegram connection is step by step: it tells you one step at a time. Note it in
 ## 7. Where this lives
 
 Store all these formal decisions and plans locally in code/maxdokukin/fabr/.agents, through
-the xewe_doc skill. Keep all the details that are in the cloud artifact, because it is an
-excellent encapsulation of what we are building. Fetch it locally from the Claude cloud.
-Carry very detailed docs overall as well as plans for each wave. Reformat all the input I gave
-as the user input. This is the golden conversation that steers the product. Make it count.
+the xewe_doc skill. This conversation is the golden input that steers the product.
 
-Main point: do not document the code. Document design and philosophy. Ignore the code for now.
+Main point: do not document the code. Document design and philosophy.

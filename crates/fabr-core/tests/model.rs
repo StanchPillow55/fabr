@@ -294,7 +294,7 @@ fn stamp_changes_on_edit() {
 fn sources_settings_and_multi_source_tree() {
     let f = Fixture::new();
     let other = f.tmp.path().join("other");
-    write_sample(&other).unwrap();
+    write_fixture_tree(&other).unwrap();
     let ws = Workspace::from_config(&f.config(), &f.cache(), None).unwrap();
     assert!(ws.list_sources().is_empty());
     let empty = ws.get_tree(false);
@@ -478,7 +478,7 @@ fn remove_source_root_node() {
 fn rename_source_root_and_nested_node_in_a_two_source_tree() {
     let f = Fixture::new();
     let other = f.tmp.path().join("other");
-    write_sample(&other).unwrap();
+    write_fixture_tree(&other).unwrap();
     let ws = Workspace::from_config(&f.config(), &f.cache(), None).unwrap();
     let a = Source {
         id: "a".into(),

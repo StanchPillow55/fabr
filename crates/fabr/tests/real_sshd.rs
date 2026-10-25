@@ -63,7 +63,7 @@ fn trust_on_first_use_and_changed_key() {
     let tmp = tempfile::tempdir().unwrap();
     let d = tmp.path();
     let root = d.join("sample");
-    fabr_core::write_sample(&root).unwrap();
+    fabr_core::write_fixture_tree(&root).unwrap();
     keygen(&d.join("hostkey"));
     let client = d.join("clientkey");
     keygen(&client);

@@ -1,0 +1,3 @@
+- Dates: 21 Dec to 30 Dec 2026.
+- Two travellers.
+- Arrive at Kansai International (KIX) on 21 Dec; Kyoto 23 to 26 Dec, Tokyo 26 to 30 Dec.

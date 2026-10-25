@@ -158,7 +158,7 @@ mod tests {
         crate::secrets::use_memory_store();
         let tmp = tempfile::tempdir().unwrap();
         let root = tmp.path().join("remote sample's");
-        crate::sample::write_sample(&root).unwrap();
+        crate::fixture_tree::write_fixture_tree(&root).unwrap();
         let ws = Workspace::from_config(&tmp.path().join("cfg"), &tmp.path().join("cache"), None).unwrap();
         let source = |id: &str, name: &str, host: Option<&str>| Source {
             id: id.into(),

@@ -3,27 +3,7 @@ records:
     text: "Stop on the payment page and hand payment to the human"
     applies_when: "any checkout flow in the browser"
     scope: global
-    count: 3
+    count: 1
     source_tasks:
-      - <SAMPLE>/home/projects/3d-printing/.fabric-space/tasks/2026-08-14-order-resin.md
-      - <SAMPLE>/home/projects/archive/old-taxes/.fabric-space/tasks/2026-04-02-file-tax-extension.md
-      - <SAMPLE>/home/projects/garden/.fabric-space/tasks/2026-10-24-order-tulip-bulbs.md
-    last_confirmed: 2026-10-25T08:49:30Z
-  - id: g2
-    text: "Ask for address line 2 only when the form requires it"
-    applies_when: "a shipping form has an optional second address line"
-    scope: global
-    count: 2
-    source_tasks:
-      - <SAMPLE>/home/projects/3d-printing/.fabric-space/tasks/2026-10-24-order-filament.md
-      - <SAMPLE>/home/projects/garden/.fabric-space/tasks/2026-10-24-order-tulip-bulbs.md
-    last_confirmed: 2026-10-25T08:58:40Z
-  - id: g3
-    text: "Save downloaded documents under the folder's own naming pattern"
-    applies_when: "a task downloads a bill or a receipt"
-    scope: global
-    count: 2
-    source_tasks:
-      - <SAMPLE>/home/projects/archive/old-taxes/.fabric-space/tasks/2026-04-02-file-tax-extension.md
-      - <SAMPLE>/home/projects/home-admin/.fabric-space/tasks/2026-10-25-download-electric-bill.md
-    last_confirmed: 2026-10-25T08:32:10Z
+      - <SAMPLE>/home/personal/japan-trip-2026/.fabric-space/tasks/2026-10-24-reserve-the-shinkansen-seats.md
+    last_confirmed: 2026-10-24T09:47:00Z

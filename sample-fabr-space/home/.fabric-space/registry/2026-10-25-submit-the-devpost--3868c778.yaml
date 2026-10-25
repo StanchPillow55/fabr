@@ -1,0 +1,22 @@
+task_path: "<SAMPLE>/home/calhacks-13/.fabric-space/tasks/2026-10-25-submit-the-devpost.md"
+task_id: "2026-10-25-submit-the-devpost"
+folder: "<SAMPLE>/home/calhacks-13"
+state: task
+step: define
+step_at: "2026-10-25T07:32:00Z"
+started_at: "2026-10-25T07:25:00Z"
+heartbeat_at: "2026-10-25T08:59:54Z"
+heartbeat_interval_s: 1200
+waiting: question
+activity: parked
+retry_in_s: null
+last_error: null
+cost_usd: 0.03
+usage:
+  define: {calls: 2, input_tokens: 3100, output_tokens: 410, usd: 0.03}
+log_tail:
+  - "2026-10-25T07:25:00Z gather: delegate accepted, folder lock taken"
+  - "2026-10-25T07:26:00Z gather: context bundle written"
+  - "2026-10-25T07:32:00Z define: asked q1"
+question: {"id":"q1","kind":"open","text":"Which track are we submitting to: AI, Social Good, or Dev Tools?","options":null,"prior":null,"fields":null,"asked_at":"2026-10-25T07:32:00Z","answer":null}
+pid: 41872

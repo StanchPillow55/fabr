@@ -2,6 +2,7 @@ pub mod backend;
 pub mod dto;
 pub mod error;
 pub mod fabric;
+mod fixture_tree;
 pub mod fs;
 pub mod item;
 pub mod logging;
@@ -29,6 +30,8 @@ pub use dto::{
     RevealPathReq, SaveMetaReq, SaveSourcesReq, SourceError, SourceIdReq, SourcePasswordReq, Stamp, Tree, TrustResult, VIRTUAL_ROOT_NAME,
 };
 pub use error::{ErrorDto, FabrError, client_error};
+#[doc(hidden)]
+pub use fixture_tree::write_fixture_tree;
 pub use fs::{Fs, LocalFs, TarSnapshot};
 pub use item::{Item, Status, due_sort_key, is_overdue_at, items_in, now_minute};
 pub use meta::{Meta, MetaValue, parse_meta, render_meta, validate_meta};

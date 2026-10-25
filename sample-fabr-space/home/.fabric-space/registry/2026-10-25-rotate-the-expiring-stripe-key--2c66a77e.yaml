@@ -1,0 +1,32 @@
+task_path: "<SAMPLE>/home/work/.fabric-space/tasks/2026-10-25-rotate-the-expiring-stripe-key.md"
+task_id: "2026-10-25-rotate-the-expiring-stripe-key"
+folder: "<SAMPLE>/home/work"
+state: in_progress
+step: execute
+step_at: "2026-10-25T07:02:00Z"
+started_at: "2026-10-25T07:02:00Z"
+heartbeat_at: "2026-10-25T08:59:55Z"
+heartbeat_interval_s: 1200
+waiting: null
+activity: paused
+retry_in_s: null
+last_error: null
+cost_usd: 0.21
+usage:
+  define: {calls: 2, input_tokens: 3800, output_tokens: 640, usd: 0.03}
+  plan: {calls: 2, input_tokens: 3300, output_tokens: 790, usd: 0.06}
+  execute: {calls: 5, input_tokens: 28100, output_tokens: 2200, usd: 0.12}
+log_tail:
+  - "2026-10-25T04:00:00Z gather: delegate accepted, folder lock taken"
+  - "2026-10-25T04:01:00Z gather: context bundle written"
+  - "2026-10-25T04:06:00Z define: spec and 3 assertions written, 0 grants requested"
+  - "2026-10-25T04:14:00Z plan: plan written, irreversible, tools: browser, github"
+  - "2026-10-25T04:15:00Z approve: approval pending, message sent"
+  - "2026-10-25T07:00:00Z approve: approved by gui"
+  - "2026-10-25T07:02:00Z execute: started, registry entry created"
+  - "2026-10-25T07:08:00Z execute: tool browser: opened the Stripe dashboard, API keys page"
+  - "2026-10-25T07:16:00Z execute: tool browser: created restricted key ci-2026-10"
+  - "2026-10-25T08:26:00Z execute: tool github: updated the STRIPE_SECRET_KEY secret, ok"
+  - "2026-10-25T08:30:00Z execute: paused by user"
+question: null
+pid: 41872
