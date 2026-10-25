@@ -5,10 +5,16 @@
   import { STATUSES } from '../store.svelte';
   import Icon from '../ui/Icon.svelte';
   import Segmented from '../ui/Segmented.svelte';
+  import NewTaskSheet from '../fabric/NewTaskSheet.svelte';
+  import { KEPT_MESSAGE, promote, promoteFields } from '../fabric/promote';
+  import type { CreateFields } from '../fabric/source';
+  import type { FabricStore } from '../fabric/tasks.svelte';
   import { appendItem, commitInput, patchItem, removeItem, titleDecision } from './itemcommit';
 
-  let { items, oncommit, onfocus }: {
+  let { items, oncommit, onfocus, fabric = null, folder = null }: {
     items: Item[];
+    fabric?: FabricStore | null;
+    folder?: string | null;
     oncommit: (mutate: (items: Item[]) => Item[] | null) => Promise<boolean>;
     onfocus?: (on: boolean) => void;
   } = $props();
@@ -22,6 +28,38 @@
   let list = $state<HTMLDivElement>();
   let draft = $state<Item | null>(null);
   const sending = new Set<string>();
+  let making = $state<Item | null>(null);
+  let makeBusy = $state(false);
+  let makeError = $state<string | null>(null);
+  let makeNote = $state<string | null>(null);
+
+  const canMake = (item: Item) => !!fabric && !!folder && item.status !== 'done' && !!item.title.trim();
+  function startMake(item: Item) {
+    makeError = null;
+    makeNote = null;
+    making = item;
+  }
+  async function finishMake(f: CreateFields, delegate: boolean) {
+    const item = making;
+    if (!item || !fabric || !folder || makeBusy) return;
+    makeBusy = true;
+    makeError = null;
+    const same = (x: Item) => x.title === item.title && x.status === item.status && (x.due ?? null) === (item.due ?? null);
+    const r = await promote(fabric, folder, f, delegate, () =>
+      oncommit((all) => {
+        const at = all.findIndex(same);
+        return at < 0 ? null : removeItem(at)(all);
+      }));
+    makeBusy = false;
+    if (r.kind === 'failed') {
+      makeError = r.error;
+      await fabric.load().catch(() => {});
+      return;
+    }
+    making = null;
+    if (r.kind === 'kept') makeNote = KEPT_MESSAGE;
+    else fabric.open(r.held.path);
+  }
 
   function focusIn(e: FocusEvent) {
     if ((e.target as HTMLElement).matches('input, select')) onfocus?.(true);
@@ -101,7 +139,7 @@
   }
 </script>
 
-{#snippet fields(item: Item, setStatus: (v: Status) => void, setPri: (v: string) => void, setDate: (el: HTMLInputElement) => void, setTime: (el: HTMLInputElement) => void, clear: () => void, remove: () => void)}
+{#snippet fields(item: Item, setStatus: (v: Status) => void, setPri: (v: string) => void, setDate: (el: HTMLInputElement) => void, setTime: (el: HTMLInputElement) => void, clear: () => void, remove: () => void, make?: () => void)}
   <div class="erow__meta">
     <select class="erow__status status--{item.status}" aria-label="Status" value={item.status} onchange={(e) => setStatus(e.currentTarget.value as Status)}>
       {#each STATUSES as s (s)}<option value={s}>{s}</option>{/each}
@@ -114,6 +152,7 @@
         <button type="button" class="btn btn--icon erow__clear" title="Clear date" onclick={clear}><Icon name="x" size={12} /></button>
       {/if}
     </span>
+    {#if make}<button type="button" class="btn erow__make" onclick={make}>Make task</button>{/if}
     <button type="button" class="btn btn--icon btn--danger erow__del" title="Delete item" aria-label="Delete item" onclick={remove}><Icon name="trash" size={14} /></button>
   </div>
 {/snippet}
@@ -129,7 +168,7 @@
         aria-label="Title"
         {@attach commitInput((el) => title(i, el))}
       />
-      {@render fields(item, (v) => status(i, v), (v) => pri(i, v), (el) => dateChanged(i, el), (el) => timeChanged(i, el), () => due(i, null), () => del(i))}
+      {@render fields(item, (v) => status(i, v), (v) => pri(i, v), (el) => dateChanged(i, el), (el) => timeChanged(i, el), () => due(i, null), () => del(i), canMake(item) ? () => startMake(item) : undefined)}
     </div>
   {/each}
   {#if draft}
@@ -152,4 +191,9 @@
   {:else if !items.length}
     <p class="group__empty">No items yet.</p>
   {/if}
+  {#if makeNote}<p class="hint" role="status">{makeNote}</p>{/if}
 </div>
+{#if making && fabric && folder}
+  <NewTaskSheet {...promoteFields(making, folder)} busy={makeBusy} error={makeError}
+    onsave={(f) => finishMake(f, false)} ongenerate={(f) => finishMake(f, true)} oncancel={() => (making = null)} />
+{/if}

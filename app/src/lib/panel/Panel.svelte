@@ -132,7 +132,7 @@
 
         <section class="panel__section">
           <h3 class="section-title">Todos <span class="section-title__count">{open} open · {p.items.length}</span></h3>
-          <ItemEditor bind:this={editor} items={p.items} oncommit={(m) => store.commitItems(p.key, m)} onfocus={(on) => store.setItemFocus(on)} />
+          <ItemEditor bind:this={editor} items={p.items} {fabric} folder={taskFolder} oncommit={(m) => store.commitItems(p.key, m)} onfocus={(on) => store.setItemFocus(on)} />
           <div class="actions">
             <Button variant="tint" onclick={() => editor?.add()}><Icon name="plus" size={14} /> Add item</Button>
             <span class="actions__spacer"></span>

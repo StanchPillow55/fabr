@@ -5,8 +5,10 @@
   import Sheet from '../ui/Sheet.svelte';
   import type { CreateFields } from './source';
 
-  let { title = '', busy = false, error = null, onsave, ongenerate, oncancel }: {
+  let { title = '', due: dueIn = null, context: contextIn = '', busy = false, error = null, onsave, ongenerate, oncancel }: {
     title?: string;
+    due?: string | null;
+    context?: string;
     busy?: boolean;
     error?: string | null;
     onsave: (f: CreateFields) => void;
@@ -15,8 +17,8 @@
   } = $props();
 
   let name = $state(untrack(() => title));
-  let due = $state('');
-  let context = $state('');
+  let due = $state(untrack(() => (dueIn ?? '').slice(0, 10)));
+  let context = $state(untrack(() => contextIn));
   let spec = $state('');
   let success = $state('');
 
