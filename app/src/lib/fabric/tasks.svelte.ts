@@ -34,7 +34,7 @@ export class FabricStore {
   errors = $state<string[]>([]);
   actionError = $state<string | null>(null);
   openPath = $state<string | null>(null);
-  home: string | null = null;
+  home = $state<string | null>(null);
 
   #source: FabricSource | null = null;
   #timer: ReturnType<typeof setInterval> | null = null;
