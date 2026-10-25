@@ -1,9 +1,13 @@
 //! Fo MCP adapter.
 //!
-//! `https://mcp.api.wajo.ai/fo` is a candidate endpoint. This build does not
-//! complete an authenticated `tools/list`, so the production allowlist stays
-//! empty and Fo is not integrated. Tool descriptions are data. They do not
-//! authorize a call.
+//! `https://mcp.api.wajo.ai/fo` is still a candidate. Authenticated
+//! `tools/list` returned `ask_fo`, `get_fo_reply`, `list_fo_conversations`,
+//! `get_fo_conversation`, and `start_fo_call`. None is a narrow public read:
+//! `ask_fo` sends a request that Fo acts on from the user's account,
+//! `get_fo_reply` polls that in-progress action, the two conversation tools
+//! read private transcripts, and `start_fo_call` starts a live voice session.
+//! The allowlist stays empty, so Fo is not integrated. Tool text is data and
+//! does not authorize a call.
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct McpTool {
@@ -23,7 +27,8 @@ pub fn callable(discovered: &[McpTool]) -> Vec<&McpTool> {
 }
 
 /// Discovery does not run without a credential. A present key is still not a
-/// call: this build does not open the Fo MCP session.
+/// call: this function does not open a session. [`list_tools`] can list names,
+/// and those names stay outside [`ALLOWLIST`].
 pub fn discover(key_present: bool) -> Result<Vec<McpTool>, &'static str> {
     if !key_present {
         return Err("missing fo_api_key");

@@ -1,6 +1,6 @@
 # Sponsor evidence
 
-Recorded on `sponsor-integration` at base `bdfb585` (v0.7.0). Nothing was published, tagged, or pushed. Secret values are not in this file.
+Recorded on `sponsor-integration` after rebasing onto `460d4d6` (a root README on v0.7.0 `bdfb585`). The sponsor port is `c994650`, rewritten from `72a29c9` with no conflicts. Nothing was published, tagged, or pushed. Secret values are not in this file.
 
 Labels:
 
@@ -15,13 +15,17 @@ Labels:
 | Anthropic | not re-probed here | already the model client on v0.7.0 | unverified | Public Benefit community and measurable impact were not checked. |
 | Microsoft | no | no | unverified | No Microsoft client was added. |
 | Moss | yes | yes, for list | unverified | `listIndexes` returned 3 indexes. `getDocs` on `agent-memory-context` returned 75 documents and did not write `learned-preferences.json`. `moss_list` waited for approval and an `external_action` grant, then ran. `moss_upload` is not executable. Local learned preferences stay authoritative. Upload still needs a separate `external_upload` grant and a real upload call. |
-| Fo | yes, discovery only | no | unverified | `https://mcp.api.wajo.ai/fo` accepted the bearer token. `tools/list` returned `ask_fo`, `get_fo_conversation`, `get_fo_reply`, `list_fo_conversations`, `start_fo_call`. The allowlist is empty, so no tool was called. `fo_action` stays not executable. |
+| Fo | yes, discovery only | no | unverified | `https://mcp.api.wajo.ai/fo` accepted the bearer token. `tools/list` returned `ask_fo`, `get_fo_conversation`, `get_fo_reply`, `list_fo_conversations`, `start_fo_call`. None is a narrow public read, so the allowlist stays empty and no tool was called. `ask_fo` sends a request that Fo acts on from the user's account. `get_fo_reply` polls that in-progress action. `list_fo_conversations` and `get_fo_conversation` read private conversations. `start_fo_call` starts a live voice session. `fo_action` stays not executable. |
 | Cartesia | yes | yes, for a bound file write | unverified | Voices, TTS (`sonic-2`), and batch STT (`ink-whisper`) succeeded. A task approved `cartesia_speak` and the backend wrote `speech.wav` inside the node. There is no capture UI, so this is not the voice demo. |
-| Apify | no | no | unverified | No `apify_api_token`. The Actor client is present and disabled. |
+| Apify | no | no | unverified | Re-checked through the loader: no `apify_api_token` in the secrets file and no `APIFY_API_TOKEN` in the environment. The Actor client is present and disabled. |
 | Bright Data | yes | yes | unverified | Mock search waits for approval, requires `external_action` plus the bound query, and writes `research.md`. `live_public_docs_and_issues` passed against the official MCP server. A local read grant does not authorize it. |
-| Visa | no | no | unverified | No `visa_cert_path` or `visa_key_path`, and no sandbox call was made. |
+| Visa | no | no | unverified | Re-checked through the loader and the environment: no `visa_cert_path` or `visa_key_path`. No sandbox call was made. |
 | Nessie | yes | yes | unverified | `GET /accounts` returned a labeled sandbox result (`accounts=0`) and did not touch internship memory. The task path required `purchase_finance` and a bound call. |
 | Figma | no | no | unverified | No client and no slides. |
+
+## Rebase
+
+`origin/main` moved from `bdfb585` to `460d4d6`. That commit only adds the root README. `git rebase origin/main` finished with no conflict files. `cargo fmt --all --check`, `cargo clippy -p fabr-agent --locked --all-targets -- -D warnings`, and `cargo test -p fabr-agent --locked` passed. The lockfile was not regenerated.
 
 ## Approval and UNKNOWN
 
