@@ -66,18 +66,18 @@ describe('Store', () => {
     for (const gone of ['cycleStatus', 'quickAdd', 'commitItems', 'setItemFocus', 'itemFocus']) expect(gone in s).toBe(false);
   });
 
-  it('the panel reads items from the node, so a reload with new items shows them without a version change', async () => {
+  it('the node settings reads items from the node, so a reload with new items shows them without a version change', async () => {
     let items = [item()];
     const api = mockApi({ getTree: vi.fn(async () => makeTree('v-work', items)) });
     const s = new Store(api);
     await s.load();
-    s.openPanel('local:work');
-    expect(s.panel).not.toHaveProperty('items');
+    s.openNodeSettings('local:work');
+    expect(s.nodeSettings).not.toHaveProperty('items');
     expect(s.byKey.get('local:work')!.items.map((i) => i.title)).toEqual(['Write tests']);
     items = [item(), item({ id: 'z9', title: 'From a record', pri: 2 })];
     await s.load();
     expect(s.byKey.get('local:work')!.items.map((i) => [i.title, i.pri])).toEqual([['Write tests', 0], ['From a record', 2]]);
-    expect(s.panel!.version).toBe('v-work');
+    expect(s.nodeSettings!.version).toBe('v-work');
     expect(api.getTree).toHaveBeenCalledTimes(2);
   });
 
@@ -94,15 +94,15 @@ describe('Store', () => {
     expect(s.byKey.get('local:work')!.items).toEqual([]);
   });
 
-  it('the panel follows on-disk changes (no stale state)', async () => {
+  it('the node settings follows on-disk changes (no stale state)', async () => {
     let version = 'v-work';
     const api = mockApi({ getTree: vi.fn(async () => makeTree(version)) });
     const s = new Store(api);
     await s.load();
-    s.openPanel('local:work');
+    s.openNodeSettings('local:work');
     version = 'v-new';
     await s.load();
-    expect(s.panel!.version).toBe('v-new');
+    expect(s.nodeSettings!.version).toBe('v-new');
   });
 
   it('poll failure shows the lost-connection notice and clears it on recovery', async () => {
@@ -119,9 +119,9 @@ describe('Store', () => {
     const api = mockApi();
     const s = new Store(api);
     await s.load();
-    s.openPanel('local:work');
-    expect(metaPayload(s.panel!)).toEqual({});
-    s.panel!.meta.find((e) => e[0] === 'kind')![1] = 'project';
+    s.openNodeSettings('local:work');
+    expect(metaPayload(s.nodeSettings!)).toEqual({});
+    s.nodeSettings!.meta.find((e) => e[0] === 'kind')![1] = 'project';
     await s.saveMeta();
     expect(api.saveMeta.mock.calls[0][0]).toEqual({ source: 'local', path: 'work', version: 'v-work', meta: { kind: 'project' } });
     expect(api.getTree).toHaveBeenCalledTimes(2);
@@ -131,7 +131,7 @@ describe('Store', () => {
     const api = mockApi();
     const s = new Store(api);
     await s.load();
-    s.openPanel('local:plain');
+    s.openNodeSettings('local:plain');
     await s.init('local:plain');
     expect(api.initNode).toHaveBeenCalledWith({ source: 'local', path: 'plain' });
     expect(api.getTree).toHaveBeenCalledTimes(2);
@@ -358,20 +358,20 @@ describe('view modes, hidden nodes, autosave', () => {
     const api = liveApi();
     const s = new Store(api);
     await s.load();
-    s.openPanel('local:work');
+    s.openNodeSettings('local:work');
     expect(await s.setHidden(true)).toBe(true);
     expect(api.saveMeta.mock.calls[0][0]).toEqual({ source: 'local', path: 'work', version: 'v-work', meta: { hidden: true } });
-    expect(s.panel).toBeNull();
+    expect(s.nodeSettings).toBeNull();
     expect(paths(s.displayRoot)).not.toContain('work');
     s.setShowHidden(true);
-    s.openPanel('local:work');
-    expect(s.panel!.meta.find((e) => e[0] === 'hidden')![1]).toBe(true);
+    s.openNodeSettings('local:work');
+    expect(s.nodeSettings!.meta.find((e) => e[0] === 'hidden')![1]).toBe(true);
     expect(await s.setHidden(false)).toBe(true);
     expect(api.saveMeta.mock.calls[1][0]).toEqual({ source: 'local', path: 'work', version: 'v1', meta: { hidden: false } });
-    expect(s.panel?.key).toBe('local:work');
+    expect(s.nodeSettings?.key).toBe('local:work');
     expect(paths(s.displayRoot)).toContain('work');
     await s.setHidden(true);
-    expect(s.panel?.key).toBe('local:work');
+    expect(s.nodeSettings?.key).toBe('local:work');
   });
 
   it('hide, then Show hidden: the hidden node is in the displayed tree and the list rows', async () => {
@@ -382,7 +382,7 @@ describe('view modes, hidden nodes, autosave', () => {
     });
     const s = new Store(api);
     await s.load();
-    s.openPanel('local:work');
+    s.openNodeSettings('local:work');
     await s.setHidden(true);
     expect(paths(s.displayRoot)).toEqual(['']);
     expect(flattenItems(s.displayRoot!, { today: TODAY, filter: 'all', hideDone: false })).toHaveLength(0);
@@ -392,26 +392,26 @@ describe('view modes, hidden nodes, autosave', () => {
     expect(s.viewIndex.byKey.has('local:work')).toBe(true);
   });
 
-  it('hide with a 409 reloads the node and keeps the panel with a banner', async () => {
+  it('hide with a 409 reloads the node and keeps the node settings with a banner', async () => {
     const fresh = node('work', { version: 'v-disk' });
     const s = new Store(mockApi({ saveMeta: vi.fn(async () => { throw new ApiError(409, 'conflict', fresh); }) }));
     await s.load();
-    s.openPanel('local:work');
+    s.openNodeSettings('local:work');
     expect(await s.setHidden(true)).toBe(false);
-    expect(s.panel!.banner?.text).toMatch(/changed on disk/);
-    expect(s.panel!.version).toBe('v-disk');
+    expect(s.nodeSettings!.banner?.text).toMatch(/changed on disk/);
+    expect(s.nodeSettings!.version).toBe('v-disk');
   });
 
   it('meta autosave: commit saves one field with the current version and shows Saved', async () => {
     const api = liveApi();
     const s = new Store(api);
     await s.load();
-    s.openPanel('local:work');
+    s.openNodeSettings('local:work');
     await s.commitMeta('kind', 'project');
     expect(api.saveMeta).toHaveBeenCalledTimes(1);
     expect(api.saveMeta.mock.calls[0][0]).toEqual({ source: 'local', path: 'work', version: 'v-work', meta: { kind: 'project' } });
-    expect(s.panel!.metaNote).toEqual({ key: 'kind', kind: 'ok', text: 'Saved' });
-    expect(s.panel!.meta.find((e) => e[0] === 'kind')![1]).toBe('project');
+    expect(s.nodeSettings!.metaNote).toEqual({ key: 'kind', kind: 'ok', text: 'Saved' });
+    expect(s.nodeSettings!.meta.find((e) => e[0] === 'kind')![1]).toBe('project');
     await s.commitMeta('kind', 'project');
     expect(api.saveMeta).toHaveBeenCalledTimes(1);
     await s.commitMeta('description', 'x');
@@ -422,7 +422,7 @@ describe('view modes, hidden nodes, autosave', () => {
     const api = liveApi();
     const s = new Store(api);
     await s.load();
-    s.openPanel('local:work');
+    s.openNodeSettings('local:work');
     await Promise.all([s.commitMeta('kind', 'a'), s.commitMeta('kind', 'a'), s.commitMeta('description', 'd')]);
     expect(api.saveMeta).toHaveBeenCalledTimes(2);
     expect(api.saveMeta.mock.calls[1][0]).toMatchObject({ version: 'v1', meta: { kind: 'a', description: 'd' } });
@@ -432,7 +432,7 @@ describe('view modes, hidden nodes, autosave', () => {
     const api = liveApi();
     const s = new Store(api);
     await s.load();
-    s.openPanel('local:work');
+    s.openNodeSettings('local:work');
     await s.commitMeta('owner', 'me');
     expect(api.saveMeta.mock.calls[0][0].meta).toEqual({ owner: 'me' });
     await s.commitMeta('owner', undefined);
@@ -444,19 +444,19 @@ describe('view modes, hidden nodes, autosave', () => {
   it('meta autosave: errors show next to the field; a 409 shows the banner and reloads', async () => {
     const bad = new Store(mockApi({ saveMeta: vi.fn(async () => { throw new ApiError(422, 'meta.toml is not valid'); }) }));
     await bad.load();
-    bad.openPanel('local:work');
+    bad.openNodeSettings('local:work');
     await bad.commitMeta('kind', 'x');
-    expect(bad.panel!.metaNote).toEqual({ key: 'kind', kind: 'error', text: 'meta.toml is not valid' });
-    expect(bad.panel!.banner?.kind).toBe('error');
+    expect(bad.nodeSettings!.metaNote).toEqual({ key: 'kind', kind: 'error', text: 'meta.toml is not valid' });
+    expect(bad.nodeSettings!.banner?.kind).toBe('error');
     const fresh = node('work', { version: 'v-disk', meta: { kind: 'disk' } });
     const conflict = new Store(mockApi({ saveMeta: vi.fn(async () => { throw new ApiError(409, 'conflict', fresh); }) }));
     await conflict.load();
-    conflict.openPanel('local:work');
+    conflict.openNodeSettings('local:work');
     await conflict.commitMeta('kind', 'x');
-    expect(conflict.panel!.banner?.text).toMatch(/changed on disk/);
-    expect(conflict.panel!.version).toBe('v-disk');
-    expect(conflict.panel!.metaNote).toBeNull();
-    expect(conflict.panel!.meta.find((e) => e[0] === 'kind')![1]).toBe('disk');
+    expect(conflict.nodeSettings!.banner?.text).toMatch(/changed on disk/);
+    expect(conflict.nodeSettings!.version).toBe('v-disk');
+    expect(conflict.nodeSettings!.metaNote).toBeNull();
+    expect(conflict.nodeSettings!.meta.find((e) => e[0] === 'kind')![1]).toBe('disk');
   });
 });
 
@@ -547,11 +547,11 @@ describe('accent colour', () => {
     const api = mockApi({ getTree: vi.fn(async () => colorTree()) });
     const s = new Store(api);
     await s.load();
-    s.openPanel('local:work/api');
+    s.openNodeSettings('local:work/api');
     expect(await s.setColor('teal')).toBe(true);
     expect(api.saveMeta.mock.calls[0][0].meta.color).toBe('teal');
     expect(api.saveMeta.mock.calls[0][0].version).toBe('v-work/api');
-    s.openPanel('local:work');
+    s.openNodeSettings('local:work');
     expect(await s.commitMeta('color', '#12ab9f')).toBe(true);
     expect(api.saveMeta.mock.calls[1][0].meta.color).toBe('#12ab9f');
     expect(await s.setColor(null)).toBe(true);
@@ -576,27 +576,29 @@ describe('accent colour', () => {
     expect(s.layoutVersion).toBeGreaterThan(v);
   });
 
-  it('opening and closing the panel bumps layoutVersion; switching nodes does not', async () => {
+  it('activate selects and toggles the fold without opening settings; the gear opens settings and selects', async () => {
     const s = new Store(mockApi());
     await s.load();
-    let v = s.layoutVersion;
-    s.openPanel('local:work');
-    expect(s.layoutVersion).toBeGreaterThan(v);
-    v = s.layoutVersion;
-    s.openPanel('local:plain');
-    expect(s.layoutVersion).toBe(v);
-    s.closePanel();
-    expect(s.layoutVersion).toBeGreaterThan(v);
-    v = s.layoutVersion;
-    s.closePanel();
-    expect(s.layoutVersion).toBe(v);
+    s.activate('local:work');
+    expect(s.selected).toBe('local:work');
+    expect(s.collapsed.has('local:work')).toBe(true);
+    s.activate('local:work');
+    expect(s.collapsed.has('local:work')).toBe(false);
+    expect(s.nodeSettings).toBeNull();
+    s.openNodeSettings('local:plain');
+    expect(s.nodeSettings?.key).toBe('local:plain');
+    expect(s.selected).toBe('local:plain');
+    s.openNodeSettings('local:work');
+    expect(s.nodeSettings?.key).toBe('local:work');
+    s.closeNodeSettings();
+    expect(s.nodeSettings).toBeNull();
   });
 
   it('metaPayload drops an invalid colour but keeps other metadata, and keeps a valid one', async () => {
     const s = new Store(mockApi({ getTree: vi.fn(async () => ({ ...makeTree(), root: node('', { children: [node('work', { meta: { name: 'W', color: 'chartreuse' } })] }) })) }));
     await s.load();
-    s.openPanel('local:work');
-    const p = s.panel!;
+    s.openNodeSettings('local:work');
+    const p = s.nodeSettings!;
     p.meta.find(([k]) => k === 'kind')![1] = 'repo';
     const out = metaPayload(p);
     expect('color' in out).toBe(false);
@@ -623,14 +625,14 @@ describe('remove node', () => {
     expect([r.tasks, r.open, r.text]).toEqual([3, 2, 'its tasks stay in .fabric-space (3, 2 open)']);
   });
 
-  it('success closes the panel and reloads', async () => {
+  it('success closes the node settings and reloads', async () => {
     const api = mockApi();
     const s = new Store(api);
     await s.load();
-    s.openPanel('local:work');
+    s.openNodeSettings('local:work');
     expect(await s.removeNode()).toBe(true);
     expect(api.removeNode).toHaveBeenCalledWith({ source: 'local', path: 'work', version: 'v-work' });
-    expect(s.panel).toBeNull();
+    expect(s.nodeSettings).toBeNull();
     expect(s.selected).toBeNull();
     expect(api.getTree).toHaveBeenCalledTimes(2);
   });
@@ -646,12 +648,12 @@ describe('remove node', () => {
     });
     const s = new Store(api);
     await s.load();
-    s.openPanel('local:work');
+    s.openNodeSettings('local:work');
     await s.removeNode();
     expect(s.notice).toBe('Removed node work; the folder is still there');
   });
 
-  it('409 with a fresh node: banner, node reloaded, panel stays open', async () => {
+  it('409 with a fresh node: banner, node reloaded, settings stay open', async () => {
     const fresh = node('work', { version: 'v-new', items: [item({ title: 'Changed elsewhere' })] });
     let loads = 0;
     const api = mockApi({
@@ -660,11 +662,11 @@ describe('remove node', () => {
     });
     const s = new Store(api);
     await s.load();
-    s.openPanel('local:work');
+    s.openNodeSettings('local:work');
     expect(await s.removeNode()).toBe(false);
-    expect(s.panel).not.toBeNull();
-    expect(s.panel!.banner?.text).toMatch(/changed on disk/);
-    expect(s.panel!.version).toBe('v-new');
+    expect(s.nodeSettings).not.toBeNull();
+    expect(s.nodeSettings!.banner?.text).toMatch(/changed on disk/);
+    expect(s.nodeSettings!.version).toBe('v-new');
     expect(api.getTree).toHaveBeenCalledTimes(2);
   });
 
@@ -673,16 +675,16 @@ describe('remove node', () => {
     const api = mockApi({ removeNode: vi.fn(async () => { throw new ApiError(409, msg, node('work', { version: 'v-work' })); }) });
     const s = new Store(api);
     await s.load();
-    s.openPanel('local:work');
+    s.openNodeSettings('local:work');
     expect(await s.removeNode()).toBe(false);
-    expect(s.panel!.banner).toEqual({ kind: 'error', text: msg });
+    expect(s.nodeSettings!.banner).toEqual({ kind: 'error', text: msg });
   });
 
   it('ignores plain directories', async () => {
     const api = mockApi();
     const s = new Store(api);
     await s.load();
-    s.openPanel('local:plain');
+    s.openNodeSettings('local:plain');
     expect(await s.removeNode()).toBe(false);
     expect(api.removeNode).not.toHaveBeenCalled();
   });
@@ -729,16 +731,16 @@ describe('the / root', () => {
     expect(s.pathSegments()).toEqual([{ label: '/', key: ':' }]);
   });
 
-  it('the / panel has no version and is never saved; a source line opens the source root', async () => {
+  it('the / node has no version and is never saved; a source line opens the source root', async () => {
     const api = mockApi({ getTree: vi.fn(async () => twoSources()) });
     const s = new Store(api);
     await s.load();
-    s.openPanel(':');
-    expect([s.panel?.key, s.panel?.managed, s.panel?.version]).toEqual([':', false, null]);
+    s.openNodeSettings(':');
+    expect([s.nodeSettings?.key, s.nodeSettings?.managed, s.nodeSettings?.version]).toEqual([':', false, null]);
     expect(await s.commitMeta('name', 'x')).toBe(false);
     expect(api.saveMeta).not.toHaveBeenCalled();
-    s.openPanel('b:');
-    expect(s.panel?.key).toBe('b:');
+    s.openNodeSettings('b:');
+    expect(s.nodeSettings?.key).toBe('b:');
   });
 
   it('openSettings("sources") sets the one-shot page hint', () => {
@@ -754,12 +756,12 @@ describe('rename through Identity -> Name (regression)', () => {
     const s = new Store(api);
     await s.load();
     const k = 'lab:';
-    s.openPanel(k);
+    s.openNodeSettings(k);
     expect(await s.commitMeta('name', 'Lab renamed')).toBe(true);
     const shown = s.viewIndex.byKey.get(k)!;
     expect(shown.meta.name).toBe('Lab renamed');
     expect(cardTitle(shown)).toBe('Lab renamed');
-    expect(s.panel?.name).toBe('Lab renamed');
+    expect(s.nodeSettings?.name).toBe('Lab renamed');
   });
 
   it('a nested node: saved with its own source and path, card title follows', async () => {
@@ -767,7 +769,7 @@ describe('rename through Identity -> Name (regression)', () => {
     const spy = vi.spyOn(api, 'saveMeta');
     const s = new Store(api);
     await s.load();
-    s.openPanel('local:work');
+    s.openNodeSettings('local:work');
     expect(await s.commitMeta('name', 'Work renamed')).toBe(true);
     expect(spy.mock.calls[0][0]).toMatchObject({ source: 'local', path: 'work', meta: { name: 'Work renamed' } });
     expect(cardTitle(s.viewIndex.byKey.get('local:work')!)).toBe('Work renamed');

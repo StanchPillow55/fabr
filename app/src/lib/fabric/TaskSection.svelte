@@ -49,7 +49,7 @@
 {/snippet}
 
 {#if list.length}
-  <section class="panel__section" data-testid="task-section">
+  <section class="nodeset__section" data-testid="task-section">
     <h3 class="section-title">Tasks <span class="section-title__count">{todo.length} todo · {active.length} active</span></h3>
     {#if todo.length || active.length}
       <Group>

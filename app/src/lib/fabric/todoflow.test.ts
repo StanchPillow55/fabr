@@ -6,7 +6,6 @@ import { boxModel } from '../model';
 import NodeCard from '../tree/NodeCard.svelte';
 import NodeSettingsSheet from '../settings/NodeSettingsSheet.svelte';
 import { readFileSync } from 'node:fs';
-import Panel from '../panel/Panel.svelte';
 import { Store } from '../store.svelte';
 import { AddFlow } from './addflow.svelte';
 import { applyDone, canMarkDone, submitDone } from './done';
@@ -205,11 +204,11 @@ describe('remote and local nodes', () => {
     return store;
   }
 
-  it('the Panel lists no tasks for a remote or a local node', async () => {
+  it('the node settings sheet lists no tasks for a remote or a local node', async () => {
     for (const host of ['lab.local', null]) {
       const store = await storeFor(host);
-      store.openPanel('local:work');
-      const body = render(Panel, { props: { store } }).body;
+      store.openNodeSettings('local:work');
+      const body = render(NodeSettingsSheet, { props: { store } }).body;
       expect(body).not.toContain('Reply to vendor');
       expect(body).not.toContain('remote-tasks');
     }
@@ -224,7 +223,7 @@ describe('remote and local nodes', () => {
     expect(body).toContain('>Hide<');
     expect(body).toContain('Identity');
     expect(body).toContain('Remove node');
-    expect(store.panel).toBeNull();
+    expect(store.nodeSettings).not.toBeNull();
   });
 
   it('the virtual root settings list its sources instead of meta', async () => {

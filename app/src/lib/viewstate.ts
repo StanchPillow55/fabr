@@ -117,6 +117,6 @@ export const SHORTCUTS: { keys: string[]; what: string }[] = [
   { keys: ['f'], what: 'Fit the tree to the window' },
   { keys: ['/'], what: 'Search' },
   { keys: ['Enter'], what: 'In search: jump to the next match' },
-  { keys: ['Esc'], what: 'Close this, the View menu or the panel; leave a field' },
+  { keys: ['Esc'], what: 'Close this, the View menu or the settings sheet; leave a field' },
   { keys: ['?'], what: 'This list' },
 ];

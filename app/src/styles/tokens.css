@@ -50,7 +50,6 @@
   --shadow-notice: 0 6px 24px light-dark(rgb(0 0 0 / 10%), rgb(0 0 0 / 50%));
   --shadow-sheet: 0 24px 64px rgb(0 0 0 / 28%), 0 2px 8px rgb(0 0 0 / 10%);
   --backdrop: light-dark(rgb(0 0 0 / 22%), rgb(0 0 0 / 55%));
-  --panel-edge: light-dark(transparent, rgb(255 255 255 / 4%));
   --seg-thumb: light-dark(#ffffff, #636366);
   --shadow-seg-thumb: 0 0 0 0.5px rgb(0 0 0 / 4%), 0 2px 6px rgb(0 0 0 / 10%);
   --knob: #fff;

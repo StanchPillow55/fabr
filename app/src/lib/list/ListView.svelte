@@ -80,7 +80,7 @@
                 sourceName={store.sourceOf(r.source)?.name}
                 selected={store.selected === r.nodeKey}
                 color={store.colors.get(r.nodeKey) ?? null}
-                onopen={() => store.openPanel(r.nodeKey)}
+                onopen={() => store.openNodeSettings(r.nodeKey)}
               />
             {/each}
           </tbody>

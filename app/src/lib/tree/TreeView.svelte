@@ -207,7 +207,7 @@
   $effect(() => () => cancelAnimationFrame(pending));
 
   function onBackground(e: MouseEvent) {
-    if (e.target === svgEl && store.panel) store.closePanel();
+    if (e.target === svgEl) store.selected = null;
   }
 </script>
 
@@ -235,12 +235,12 @@
             dim={d.node.managed && store.filter !== 'all' && !m.visible.length}
             ontoggle={() => store.toggleCollapse(k)}
             onmore={() => store.toggleMore(k)}
-            onopen={() => store.openPanel(k)}
+            onopen={() => store.activate(k)}
             onfocus={() => store.setFocus(k)}
             sources={store.tree?.sources ?? []}
             errors={store.tree?.errors ?? []}
             pending={store.tree?.pending ?? []}
-            onsource={(sk) => store.openPanel(sk)}
+            onsource={(sk) => store.openNodeSettings(sk)}
             onurl={(u) => store.openUrl(u)}
             onsettings={() => store.openNodeSettings(k)}
             {fabric}

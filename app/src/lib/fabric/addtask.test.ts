@@ -3,7 +3,7 @@ import { render } from 'svelte/server';
 import type { Api } from '../api/index';
 import type { Node, Tree } from '../api/types';
 import { Store } from '../store.svelte';
-import Panel from '../panel/Panel.svelte';
+import NodeSettingsSheet from '../settings/NodeSettingsSheet.svelte';
 import { FixtureSource, taskSlug, updatedAtOf } from './source';
 import { FabricStore } from './tasks.svelte';
 import NewTaskSheet from './NewTaskSheet.svelte';
@@ -58,7 +58,7 @@ describe('FabricStore.createTask', () => {
 });
 
 describe('add task UI', () => {
-  it('the Panel has the Hide row and no task section or Add task line', async () => {
+  it('the node settings sheet has the Hide row and no task section or Add task line', async () => {
     const n = (path: string, o: Partial<Node> = {}): Node => ({
       source: 'local', path, name: path || 'root', managed: true, meta: {}, items: [], warnings: [], version: 'v', via: null, children: [], ...o,
     });
@@ -70,8 +70,8 @@ describe('add task UI', () => {
     const api = { getTree: vi.fn(async () => tree), getStamp: vi.fn(async () => ({ stamp: 's' })) } as unknown as Api;
     const store = new Store(api);
     await store.load();
-    store.openPanel('local:work');
-    const { body } = render(Panel, { props: { store } });
+    store.openNodeSettings('local:work');
+    const { body } = render(NodeSettingsSheet, { props: { store } });
     expect(body).toContain('Hide');
     expect(body).not.toContain('Add task');
     expect(body).not.toContain('data-testid="task-section"');

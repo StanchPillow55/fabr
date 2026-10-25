@@ -6,7 +6,6 @@
   import Onboarding from './lib/Onboarding.svelte';
   import ListView from './lib/list/ListView.svelte';
   import Notice from './lib/Notice.svelte';
-  import Panel from './lib/panel/Panel.svelte';
   import SettingsSheet from './lib/settings/SettingsSheet.svelte';
   import NodeSettingsSheet from './lib/settings/NodeSettingsSheet.svelte';
   import TaskSheet from './lib/fabric/TaskSheet.svelte';
@@ -139,7 +138,6 @@
       case 'fit': fit(); break;
       case 'search': e.preventDefault(); toolbar?.focusSearch(); break;
       case 'help': e.preventDefault(); helpOpen = true; break;
-      case 'escape': if (store.panel) store.closePanel(); break;
     }
   }
 </script>
@@ -150,7 +148,7 @@
   {#if setupNote}<p class="gate-note" role="alert">{setupNote}</p>{/if}
   <SetupWizard ondone={setupDone} />
 {:else if store}
-  <div class="app" class:app--panel={!!store.panel}>
+  <div class="app">
     <main class="app__main">
       <div class="app__bar" bind:clientHeight={toolbarH}>
         <Toolbar bind:this={toolbar} {store} onrescan={rescan} onexpand={expandAll} oncollapse={collapseAll} onsearchenter={() => treeView?.nextMatch()} {fabric} onnotices={() => { noticeError = null; noticesOpen = true; }} onagents={() => { noticeError = null; agentsOpen = true; }} />
@@ -170,7 +168,6 @@
         </div>
       {/if}
     </main>
-    <Panel {store} />
   </div>
   <SettingsSheet {store} />
   <NodeSettingsSheet {store} />

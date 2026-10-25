@@ -6,12 +6,12 @@ import { Store } from './store.svelte';
 const find = (n: Node, path: string): Node | undefined => (n.path === path ? n : n.children.map((c) => find(c, path)).find(Boolean));
 
 describe('remove node against the mock', () => {
-  it('children re-attach to the nearest managed ancestor with via; the panel closes', async () => {
+  it('children re-attach to the nearest managed ancestor with via; the sheet closes', async () => {
     const store = new Store(createMockApi({ latency: 0, today: '2026-10-19' }));
     await store.load();
-    store.openPanel('local:work/api-server');
+    store.openNodeSettings('local:work/api-server');
     expect(await store.removeNode()).toBe(true);
-    expect(store.panel).toBeNull();
+    expect(store.nodeSettings).toBeNull();
     const root = store.tree!.root;
     expect(find(root, 'work/api-server')).toBeUndefined();
     const work = find(root, 'work')!;

@@ -1,6 +1,6 @@
 <script lang="ts">
   import { isVirtualRoot, rootCounts, sourceLines } from '../model';
-  import { KNOWN_META, removeSummary, type PanelState, type Store } from '../store.svelte';
+  import { KNOWN_META, removeSummary, type NodeSettingsState, type Store } from '../store.svelte';
   import ErrorText from '../ui/ErrorText.svelte';
   import Group from '../ui/Group.svelte';
   import Icon from '../ui/Icon.svelte';
@@ -8,7 +8,7 @@
   import BannerView from '../panel/Banner.svelte';
   import MetaEditor from '../panel/MetaEditor.svelte';
 
-  let { store, p }: { store: Store; p: PanelState } = $props();
+  let { store, p }: { store: Store; p: NodeSettingsState } = $props();
 
   let busy = $state(false);
   let confirmRemove = $state(false);
@@ -51,14 +51,14 @@
 
 <BannerView banner={p.banner} />
 {#if p.warnings.length}
-  <ul class="panel__warnings">
+  <ul class="nodeset__warnings">
     {#each p.warnings as w, i (i)}<li><Icon name="warning" size={12} /> {w}</li>{/each}
   </ul>
 {/if}
 
 {#if virtual}
   {#if counts}
-    <section class="panel__section">
+    <section class="nodeset__section">
       <h3 class="section-title">Tasks</h3>
       <p class="rootcounts">
         <span><b>{counts.todo}</b> todo</span><span class="dotsep">·</span>
@@ -67,11 +67,11 @@
       </p>
     </section>
   {/if}
-  <section class="panel__section">
+  <section class="nodeset__section">
     <h3 class="section-title">Sources <span class="section-title__count">{lines.length}</span></h3>
     <div class="group">
       {#each lines as l (l.key)}
-        <button type="button" class="arow arow--source" title={l.error ?? `Open ${l.name}`} onclick={() => store.openPanel(l.key)}>
+        <button type="button" class="arow arow--source" title={l.error ?? `Open ${l.name}`} onclick={() => store.openNodeSettings(l.key)}>
           <span class="dot" class:dot--ok={!l.error && !l.pending} class:dot--wait={!l.error && l.pending} class:dot--bad={!!l.error}></span>
           <span class="arow__label">{l.name} · {l.where}</span>
           {#if l.error}<span class="srcline__error"><ErrorText message={l.error} compact onopen={(u) => store.openUrl(u)} /></span>{:else if l.pending}<span class="srcline__error srcline__pending">Connecting…</span>{:else}<span class="srcline__open">{l.open} open</span>{/if}
@@ -87,7 +87,7 @@
     <p class="empty-node__title">Plain directory</p>
     <p class="hint">It has no <code>.fabr/</code> folder yet. Make it a node to give it tasks and metadata.</p>
   </div>
-  <section class="panel__section">
+  <section class="nodeset__section">
     <h3 class="section-title">Actions</h3>
     <Group>
       <Row label="Make it a node" tone="tint" disabled={busy} onclick={() => run(() => store.init(p.key))} />
@@ -96,29 +96,29 @@
     </Group>
   </section>
 {:else}
-  <section class="panel__section">
+  <section class="nodeset__section">
     <Group footer="Hidden omits this node and its whole subtree (see Show in the toolbar).">
       <Row label={hidden ? 'Unhide' : 'Hide'} tone="tint" disabled={busy} onclick={() => run(async () => { await store.setHidden(!hidden); })} />
     </Group>
   </section>
 
-  <section class="panel__section">
+  <section class="nodeset__section">
     <h3 class="section-title">Identity</h3>
     <MetaEditor section="identity" {...metaProps} />
   </section>
 
-  <section class="panel__section">
+  <section class="nodeset__section">
     <h3 class="section-title">Display</h3>
     <MetaEditor section="display" {...metaProps} />
   </section>
 
-  <section class="panel__section">
+  <section class="nodeset__section">
     <h3 class="section-title">Custom keys</h3>
     <MetaEditor section="more" {...metaProps} />
     <p class="hint">Fields save on Enter or when you leave them.</p>
   </section>
 
-  <section class="panel__section">
+  <section class="nodeset__section">
     <h3 class="section-title">Actions</h3>
     <Group>
       <Row label="Add child nodes…" tone="tint" onclick={() => store.openAddNodes(p.key)} />

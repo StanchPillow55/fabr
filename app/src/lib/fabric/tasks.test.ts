@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { render } from 'svelte/server';
 import { FixtureSource, type FabricSource } from './source';
@@ -199,8 +199,10 @@ describe('Tasks view is gone', () => {
     expect(toolbar).not.toMatch(/onfabric|>Tasks</);
     expect(read('../viewstate.ts')).not.toMatch(/'g'|Open Tasks/);
   });
-  it('the Panel carries no task section and the App mounts the task sheet once', () => {
-    expect(read('../panel/Panel.svelte')).not.toMatch(/TaskSection|AddTask|RemoteItems/);
+  it('the side panel is gone, node settings carry no task section and the App mounts the task sheet once', () => {
+    expect(existsSync(new URL('../panel/Panel.svelte', import.meta.url))).toBe(false);
+    expect(app).not.toMatch(/Panel|store.panel/);
+    expect(read('../settings/NodeSettingsBody.svelte')).not.toMatch(/TaskSection|AddTask|RemoteItems/);
     expect(app).toContain('TaskSheet');
     expect(read('../tree/NodeCard.svelte')).toContain('TaskStrip');
     expect(toolbar).toContain('NoticesBadge');

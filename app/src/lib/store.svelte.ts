@@ -18,7 +18,7 @@ export interface Banner {
   text: string;
 }
 
-export interface PanelState {
+export interface NodeSettingsState {
   key: Key;
   source: string;
   path: string;
@@ -63,11 +63,7 @@ export class Store {
   byKey = $state(new Map<Key, Node>());
   parentOf = $state(new Map<Key, Node>());
 
-  panel = $state<PanelState | null>(null);
-  nodeSettings = $state<PanelState | null>(null);
-  get target(): PanelState | null {
-    return this.nodeSettings ?? this.panel;
-  }
+  nodeSettings = $state<NodeSettingsState | null>(null);
   list = $state<ListState>({ sortBy: 'pri', sortDir: 'asc', groupBy: 'none' });
 
   settings = $state<Settings>({ poll_ms: 2000, remote_poll_ms: 30000, max_nodes: 10000 });
@@ -286,7 +282,7 @@ export class Store {
   }
 
   async reveal(): Promise<void> {
-    const p = this.target;
+    const p = this.nodeSettings;
     if (!p) return;
     try {
       await this.api.openPath({ source: p.source, path: p.path });
@@ -335,7 +331,7 @@ export class Store {
       this.parentOf = idx.parentOf;
       if (this.focus !== null && !this.#viewIndex.byKey.has(this.focus)) this.focus = null;
       if (this.#viewIndex.byKey.size !== before) this.relayout();
-      if (this.selected !== null && !this.byKey.has(this.selected) && !this.panel) this.selected = null;
+      if (this.selected !== null && !this.byKey.has(this.selected)) this.selected = null;
       this.notice = t.truncated ? t.truncated_reason || 'Tree truncated: too many directories. Switch the view to Nodes or pick a smaller root.' : null;
       this.noticeRescan = t.truncated;
       if (t.truncated && t.truncated_by === 'time' && visitedIn(t.truncated_reason) < SLOW_SCAN_DIRS) {
@@ -346,7 +342,7 @@ export class Store {
           this.notice = (t.truncated_reason ?? '').replace(/;?\s*rescanning…/, '') + '. Press Rescan to try again.';
         }
       }
-      this.syncPanel();
+      this.syncNodeSettings();
     } catch (e) {
       if (seq === this.#loadSeq) this.notice = `Could not load tree: ${errText(e)}`;
     } finally {
@@ -380,44 +376,29 @@ export class Store {
     Object.assign(old, rest);
   }
 
-  openPanel(k: Key): void {
+  openNodeSettings(k: Key): void {
     const n = this.byKey.get(k);
     if (!n) return;
     this.selected = k;
-    if (this.panel && this.panel.key === k) return;
-    const was = !!this.panel;
-    this.#resetPanel(n);
-    if (!was) this.relayout();
+    this.nodeSettings = this.#stateOf(n);
   }
 
-  closePanel(): void {
-    this.#closeNow();
-  }
-
-  #closeNow(): void {
-    const was = !!this.panel;
-    this.panel = null;
-    this.selected = null;
-    if (was) this.relayout();
-  }
-
-  openNodeSettings(k: Key): void {
-    const n = this.byKey.get(k);
-    if (n) this.nodeSettings = this.#panelOf(n);
+  activate(k: Key): void {
+    if (!this.byKey.has(k)) return;
+    this.selected = k;
+    this.toggleCollapse(k);
   }
 
   closeNodeSettings(): void {
     this.nodeSettings = null;
   }
 
-  syncPanel(): void {
-    for (const slot of ['panel', 'nodeSettings'] as const) {
-      const p = this[slot];
-      if (!p) continue;
-      const n = this.byKey.get(p.key);
-      if (!n) p.banner = { kind: 'error', text: 'This directory is no longer in the tree.' };
-      else if (n.version !== p.version || n.managed !== p.managed) this[slot] = this.#panelOf(n);
-    }
+  syncNodeSettings(): void {
+    const p = this.nodeSettings;
+    if (!p) return;
+    const n = this.byKey.get(p.key);
+    if (!n) p.banner = { kind: 'error', text: 'This directory is no longer in the tree.' };
+    else if (n.version !== p.version || n.managed !== p.managed) this.nodeSettings = this.#stateOf(n);
   }
 
   #chain: Promise<unknown> = Promise.resolve();
@@ -430,25 +411,25 @@ export class Store {
 
   #seq = 0;
 
-  #flash(note: NonNullable<PanelState['metaNote']>): void {
-    if (!this.target) return;
-    this.target.metaNote = note;
+  #flash(note: NonNullable<NodeSettingsState['metaNote']>): void {
+    if (!this.nodeSettings) return;
+    this.nodeSettings.metaNote = note;
     const n = ++this.#seq;
     if (note.kind === 'ok') {
       setTimeout(() => {
-        if (this.#seq === n && this.target) this.target.metaNote = null;
+        if (this.#seq === n && this.nodeSettings) this.nodeSettings.metaNote = null;
       }, 1800);
     }
   }
 
-  #conflict(e: unknown, onPanel: (p: PanelState, node: Node) => void): boolean {
+  #conflict(e: unknown, onPanel: (p: NodeSettingsState, node: Node) => void): boolean {
     if (!(e instanceof ApiError && e.code === 409 && e.node)) return false;
     const node = e.node;
     this.replaceNode(node);
-    const p = this.target;
+    const p = this.nodeSettings;
     if (p && p.key === nodeKey(node)) {
       onPanel(p, node);
-      this.target!.banner = { kind: '', text: CONFLICT };
+      this.nodeSettings!.banner = { kind: '', text: CONFLICT };
     } else {
       this.notice = CHANGED;
     }
@@ -456,20 +437,20 @@ export class Store {
   }
 
   async saveMeta(note?: string): Promise<boolean> {
-    const p = this.target;
+    const p = this.nodeSettings;
     if (!p || !p.version) return false;
     let node: Node;
     try {
       node = await this.api.saveMeta({ source: p.source, path: p.path, version: p.version, meta: metaPayload(p) });
     } catch (e) {
       this.#saveFailed(e);
-      if (note && this.target && this.target.key === p.key && !(e instanceof ApiError && e.code === 409)) {
+      if (note && this.nodeSettings && this.nodeSettings.key === p.key && !(e instanceof ApiError && e.code === 409)) {
         this.#flash({ key: note, kind: 'error', text: errText(e) || 'save failed' });
       }
       return false;
     }
     this.replaceNode(node);
-    if (this.target && this.target.key === p.key) {
+    if (this.nodeSettings && this.nodeSettings.key === p.key) {
       this.#refresh(node);
       if (note) this.#flash({ key: note, kind: 'ok', text: 'Saved' });
     }
@@ -479,7 +460,7 @@ export class Store {
 
   commitMeta(field: string, value: string | number | boolean | undefined): Promise<boolean> {
     return this.#enqueue(async () => {
-      const p = this.target;
+      const p = this.nodeSettings;
       if (!p) return false;
       const i = p.meta.findIndex(([k]) => k === field);
       if (value === undefined) {
@@ -495,15 +476,14 @@ export class Store {
   }
 
   async setHidden(hidden: boolean): Promise<boolean> {
-    const p = this.target;
+    const p = this.nodeSettings;
     if (!p) return false;
     const at = p.key;
     const ok = await this.commitMeta('hidden', hidden);
     if (ok) this.relayout();
     if (ok && hidden && !this.showHidden) {
-      if (this.nodeSettings?.key === at) this.nodeSettings = null;
-      if (this.panel?.key === at) {
-        this.panel = null;
+      if (this.nodeSettings?.key === at) {
+        this.nodeSettings = null;
         this.selected = null;
       }
     }
@@ -558,7 +538,7 @@ export class Store {
     try {
       await this.api.initNode({ source: n.source, path: n.path });
     } catch (e) {
-      if (this.target && this.target.key === k) this.target.banner = { kind: 'error', text: errText(e) || 'could not create node' };
+      if (this.nodeSettings && this.nodeSettings.key === k) this.nodeSettings.banner = { kind: 'error', text: errText(e) || 'could not create node' };
       else this.notice = errText(e);
       return;
     }
@@ -569,7 +549,7 @@ export class Store {
   }
 
   async removeNode(): Promise<boolean> {
-    const p = this.target;
+    const p = this.nodeSettings;
     if (!p || !p.managed || !p.version || !p.source) return false;
     const at = p.key;
     const name = p.name;
@@ -584,9 +564,8 @@ export class Store {
       await this.load();
       return false;
     }
-    if (this.nodeSettings?.key === at) this.nodeSettings = null;
-    if (this.panel?.key === at) {
-      this.panel = null;
+    if (this.nodeSettings?.key === at) {
+      this.nodeSettings = null;
       this.selected = null;
     }
     await this.load();
@@ -631,17 +610,12 @@ export class Store {
     this.saveFolds();
   }
 
-  #resetPanel(n: Node): void {
-    this.panel = this.#panelOf(n);
-  }
-
   #refresh(n: Node): void {
     const k = nodeKey(n);
-    if (this.panel?.key === k) this.panel = this.#panelOf(n);
-    if (this.nodeSettings?.key === k) this.nodeSettings = this.#panelOf(n);
+    if (this.nodeSettings?.key === k) this.nodeSettings = this.#stateOf(n);
   }
 
-  #panelOf(n: Node): PanelState {
+  #stateOf(n: Node): NodeSettingsState {
     return {
       key: nodeKey(n),
       source: n.source,
@@ -660,7 +634,7 @@ export class Store {
   #saveFailed(e: unknown): void {
     if (this.#conflict(e, (_, node) => this.#refresh(node))) return;
     const msg = errText(e) || 'save failed';
-    if (this.target) this.target.banner = { kind: 'error', text: msg };
+    if (this.nodeSettings) this.nodeSettings.banner = { kind: 'error', text: msg };
     else this.notice = msg;
   }
 }
@@ -673,7 +647,7 @@ const CONFLICT = 'This node changed on disk; reloaded';
 const CHANGED = 'That node changed on disk; it has been reloaded. Try again.';
 const LOST = 'Lost connection to the fabr server.';
 
-export function metaPayload(p: Pick<PanelState, 'meta' | 'original'>): Meta {
+export function metaPayload(p: Pick<NodeSettingsState, 'meta' | 'original'>): Meta {
   const out: Meta = {};
   for (const [k, v] of p.meta) {
     if (k in KNOWN_META && !(k in p.original) && v === KNOWN_META[k]) continue;
