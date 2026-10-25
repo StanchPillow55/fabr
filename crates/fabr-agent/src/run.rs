@@ -42,6 +42,7 @@ pub fn run_once(ws: &Workspace, source: &str, node_path: &str, fabric_space: &Pa
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn drive(
     ws: &Workspace,
     source: &str,

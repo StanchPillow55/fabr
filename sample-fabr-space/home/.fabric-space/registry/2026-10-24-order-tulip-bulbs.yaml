@@ -1,0 +1,27 @@
+task_path: "<SAMPLE>/home/projects/garden/.fabric-space/tasks/2026-10-24-order-tulip-bulbs.md"
+task_id: 2026-10-24-order-tulip-bulbs
+folder: "<SAMPLE>/home/projects/garden"
+step: execute
+started_at: 2026-10-25T08:50:00Z
+heartbeat_at: 2026-10-25T08:59:52Z
+heartbeat_interval_s: 10
+cost_usd: 0.37
+log_tail:
+  - "2026-10-25T08:50:00Z execute: started, registry entry created"
+  - "2026-10-25T08:50:30Z execute: opened bulbs.example-garden.test"
+  - "2026-10-25T08:53:10Z execute: added 3 x mixed tulip bulbs, bag of 25"
+  - "2026-10-25T08:55:40Z execute: reached the checkout form"
+  - "2026-10-25T08:56:10Z execute: filled name.first (granted for task)"
+  - "2026-10-25T08:56:25Z execute: filled address.line_1 (granted for task)"
+  - "2026-10-25T08:56:40Z execute: filled address.zip (granted for task)"
+  - "2026-10-25T08:58:40Z execute: form requires address.line_2, asked q2 (grant)"
+question:
+  id: q2
+  kind: grant
+  text: "The form asks for address line 2. May I fill it for this task?"
+  options: null
+  prior: null
+  fields: [address.line_2]
+  asked_at: 2026-10-25T08:58:40Z
+  answer: null
+pid: 52144

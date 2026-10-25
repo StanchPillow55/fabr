@@ -137,6 +137,14 @@ export interface Stamp {
   stamp: string;
 }
 
+export interface FabricFile { path: string; mtime: number }
+export interface FabricListReq { root?: string; home?: string | null }
+export interface FabricListRes { records: FabricFile[]; registry: FabricFile[]; events: FabricFile | null; backend?: FabricFile | null }
+export interface FabricReadRes { text: string; mtime: number }
+export interface FabricWriteReq { path: string; text: string; expected_updated_at: string }
+export interface FabricWriteRes { mtime: number }
+export interface FabricStampReq { roots: string[]; home?: string | null }
+
 export interface ErrorDto {
   code: number;
   message: string;
@@ -172,3 +180,17 @@ export class ApiError extends Error {
 export function errText(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
 }
+
+export interface SetupState { completed_steps: string[]; completed: boolean }
+export interface FabricSettings {
+  default_folder: string; model: string; telegram_user_id: number | null; auto_mode: boolean;
+  question_budget: number; heartbeat_interval_s: number; setup: SetupState;
+}
+export interface FabricSettingsRead { exists: boolean; settings: FabricSettings }
+export interface FabricSecretsWriteReq { anthropic_api_key?: string; telegram_bot_token?: string }
+export interface FabricSecretsStatus { anthropic_api_key: boolean; telegram_bot_token: boolean }
+export type FabricCheckKind = 'folder' | 'api_key' | 'model' | 'telegram_token';
+export interface FabricCheckReq { kind: FabricCheckKind; path?: string; model?: string }
+export type FabricCheckResult =
+  | { ok: true; reply?: string; bot_name?: string; user_id?: number }
+  | { ok: false; reason: string };

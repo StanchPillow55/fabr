@@ -64,6 +64,7 @@ pub fn remove_registry(fabric_space: &Path, task_id: &str, task_path: &str) {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn advance(
     ws: &Workspace,
     source: &str,
@@ -258,6 +259,7 @@ fn define_stage(record_path: &Path, rec: &mut TaskRecord, expected: &str, model:
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn plan_stage(
     ws: &Workspace,
     source: &str,

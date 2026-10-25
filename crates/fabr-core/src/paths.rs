@@ -1,6 +1,6 @@
 use crate::error::FabrError;
 use crate::workspace::Workspace;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 pub const APP: &str = "fabr";
 
@@ -28,5 +28,28 @@ impl AppDirs {
             return Err(FabrError::NotFound(format!("{} is not a directory", r.display())));
         }
         Workspace::from_config(&self.config, &self.cache, root)
+    }
+}
+
+pub fn expand_home(path: &str, home: &Path) -> PathBuf {
+    match path.strip_prefix("~/") {
+        Some(rest) => home.join(rest),
+        None if path == "~" => home.to_path_buf(),
+        None => PathBuf::from(path),
+    }
+}
+
+#[cfg(test)]
+mod expand_tests {
+    use super::*;
+
+    #[test]
+    fn expands_only_a_leading_tilde() {
+        let h = Path::new("/h");
+        assert_eq!(expand_home("~", h), Path::new("/h"));
+        assert_eq!(expand_home("~/", h), Path::new("/h"));
+        assert_eq!(expand_home("~/x/y", h), Path::new("/h/x/y"));
+        assert_eq!(expand_home("/a/~/b", h), Path::new("/a/~/b"));
+        assert_eq!(expand_home("~x", h), Path::new("~x"));
     }
 }

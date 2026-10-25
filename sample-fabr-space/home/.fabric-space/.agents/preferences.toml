@@ -1,0 +1,4 @@
+language = "en"
+currency = "USD"
+notice_style = "short"
+quiet_hours = "22:00-07:00"

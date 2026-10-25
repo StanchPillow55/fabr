@@ -9,8 +9,9 @@
   import type { Store } from '../store.svelte';
   import Links from './Links.svelte';
   import NodeCard from './NodeCard.svelte';
+  import type { FabricStore } from '../fabric/tasks.svelte';
 
-  let { store, insetTop = 0 }: { store: Store; insetTop?: number } = $props();
+  let { store, insetTop = 0, fabric = null }: { store: Store; insetTop?: number; fabric?: FabricStore | null } = $props();
 
   let svgEl = $state<HTMLDivElement>();
   let t = $state<ZoomTransform>(zoomIdentity);
@@ -243,6 +244,8 @@
             pending={store.tree?.pending ?? []}
             onsource={(sk) => store.openPanel(sk)}
             onurl={(u) => store.openUrl(u)}
+            {fabric}
+            folder={fabric ? fabric.folderFor(store.sourceOf(d.node.source), d.node.path) : null}
           />
         </div>
       {/each}

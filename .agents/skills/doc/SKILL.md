@@ -32,7 +32,8 @@ material is published as an interactive map at https://claude.ai/artifact/WqqKKt
 | `references/ON_DISK.md` | deciding where a file lives, how the folder chain resolves, who may write which file |
 | `references/SETUP.md` | working on the first-run wizard: the six screens, their checks, the two files they write |
 | `references/FRONTEND_PLAN.md` | you work on the frontend track: what is ours versus dev 2's, the file contract between the tracks, the fixture strategy, the screens, and frontend waves F0 to F5 |
-| `references/FRONTEND_EXECUTION.md` | starting or continuing frontend work: the ordered steps for F0 to F3, what done means for each, the checkpoints with dev 2 |
+| `references/FRONTEND_EXECUTION.md` | starting or continuing frontend work: the ordered steps for F0 to F3, what done means for each, the checkpoints with dev 2, the M1 milestone |
+| `references/FRONTEND_SCHEDULE.md` | launching or re-planning the frontend agents: the implementer and verifier order for F1, F2 and the M1 ship |
 | `references/WAVES.md` | deciding whether a feature belongs now or later, and the rule that protects the foundation |
 | `references/WAVE_1.md` | building the foundation: the ordered plan, each item's definition of done, the exit test |
 | `references/WAVE_2.md` | building tell-it-once: learned preferences and the three-option prompt |

@@ -1,9 +1,11 @@
 use crate::dto::{
     Empty, GetTreeReq, HostReq, InitChildrenReq, InstallKeyReq, ListDirsReq, NodeRef, OpenUrlReq, RemoveNodeReq, RevealPathReq,
-    SaveMetaReq, SaveSourcesReq, SaveTodoReq, SourceIdReq, SourcePasswordReq,
+    SaveMetaReq, SaveSourcesReq, SaveTodoReq, SourceIdReq, SourcePasswordReq, Stamp,
 };
 use crate::error::FabrError;
+use crate::fabric::{self, FabricListReq, FabricReadReq, FabricStampReq, FabricWriteReq};
 use crate::settings::Settings;
+use crate::setup::{self, CheckReq, Ctx, LinkReq, SecretsWriteReq, SettingsWriteReq};
 use crate::sources::Source;
 use crate::workspace::Workspace;
 use serde::Serialize;
@@ -75,6 +77,16 @@ ops! {
     set_source_password Post true (SourcePasswordReq) |ws, r| json(ws.set_source_password(r)?);
     has_source_password Post true (SourceIdReq) |ws, r| json(ws.has_source_password(r));
     install_key Post true (InstallKeyReq) |ws, r| json(ws.install_key(r)?);
+    fabric_list Post true (FabricListReq) |_, r| json(fabric::list(&r)?);
+    fabric_read Post true (FabricReadReq) |_, r| json(fabric::read(&r)?);
+    fabric_write Post true (FabricWriteReq) |_, r| json(fabric::write(&r)?);
+    fabric_stamp Post true (FabricStampReq) |_, r| json(Stamp { stamp: fabric::stamp(&r)? });
+    fabric_settings_read Post true (Empty) |_, _| json(setup::settings_read(&Ctx::from_env())?);
+    fabric_settings_write Post true (SettingsWriteReq) |_, r| json(setup::settings_write(&Ctx::from_env(), r)?);
+    fabric_secrets_write Post true (SecretsWriteReq) |_, r| json(setup::secrets_write(&Ctx::from_env(), r)?);
+    fabric_secrets_status Post true (Empty) |_, _| json(setup::secrets_status(&Ctx::from_env()));
+    fabric_check Post true (CheckReq) |_, r| json(setup::check(&Ctx::from_env(), r)?);
+    fabric_telegram_link Post true (LinkReq) |_, r| json(setup::link(&Ctx::from_env(), r));
     open_path Post true (NodeRef) |_, r| Ok(Done::Desktop(Desktop::OpenPath(r)));
     reveal_path Post true (RevealPathReq) |_, r| Ok(Done::Desktop(Desktop::Reveal(r)));
     open_url Post false (OpenUrlReq) |_, r| Ok(Done::Desktop(Desktop::OpenUrl(r)));

@@ -1,6 +1,7 @@
 pub mod backend;
 pub mod dto;
 pub mod error;
+pub mod fabric;
 pub mod fs;
 pub mod logging;
 pub mod meta;
@@ -12,6 +13,7 @@ pub mod sample;
 pub mod scan;
 pub mod secrets;
 pub mod settings;
+pub mod setup;
 pub mod sources;
 pub mod stamp;
 mod sync;

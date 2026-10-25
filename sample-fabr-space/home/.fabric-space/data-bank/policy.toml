@@ -1,0 +1,5 @@
+[fields]
+"name" = "always-allow"
+"address" = "always-allow"
+"address.line_2" = "always-ask"
+"payment" = "never"          # the backend refuses to fill; the executor hands off

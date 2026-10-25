@@ -63,6 +63,16 @@ enum Cmd {
         #[arg(long)]
         status: Option<String>,
     },
+    #[command(about = "Run one setup check and print its JSON result")]
+    Check {
+        #[command(subcommand)]
+        what: CheckCmd,
+    },
+    #[command(about = "Telegram bot commands")]
+    Telegram {
+        #[command(subcommand)]
+        what: TelegramCmd,
+    },
     #[command(about = "List items")]
     Ls {
         #[arg(long, conflicts_with_all = ["overdue", "wip"])]
@@ -73,6 +83,39 @@ enum Cmd {
         wip: bool,
         path: Option<PathBuf>,
     },
+}
+
+#[derive(Subcommand)]
+enum CheckCmd {
+    Folder { path: String },
+    ApiKey,
+    Model { id: String },
+    TelegramToken,
+}
+
+#[derive(Subcommand)]
+enum TelegramCmd {
+    #[command(about = "Wait for a message to the bot, reply connected with a Confirm button, wait for the tap")]
+    Link {
+        #[arg(long, default_value_t = fabr_core::setup::DEFAULT_LINK_TIMEOUT_S)]
+        timeout: u64,
+    },
+}
+
+fn print_check(v: serde_json::Value) -> ExitCode {
+    println!("{v}");
+    if v["ok"].as_bool() == Some(true) { ExitCode::SUCCESS } else { ExitCode::FAILURE }
+}
+
+fn run_check(what: CheckCmd) -> ExitCode {
+    use fabr_core::setup::{self, Ctx};
+    let ctx = Ctx::from_env();
+    print_check(match what {
+        CheckCmd::Folder { path } => setup::check_folder(&ctx, &path),
+        CheckCmd::ApiKey => setup::check_api_key(&ctx),
+        CheckCmd::Model { id } => setup::check_model(&ctx, &id),
+        CheckCmd::TelegramToken => setup::check_telegram_token(&ctx),
+    })
 }
 
 fn workspace(root: Option<PathBuf>) -> Result<Workspace, FabrError> {
@@ -267,6 +310,13 @@ fn main() -> ExitCode {
         return ExitCode::from(code as u8);
     }
     let cli = Cli::parse();
+    match cli.cmd {
+        Cmd::Check { what } => return run_check(what),
+        Cmd::Telegram { what: TelegramCmd::Link { timeout } } => {
+            return print_check(fabr_core::setup::telegram_link(&fabr_core::setup::Ctx::from_env(), timeout));
+        }
+        _ => {}
+    }
     if matches!(cli.cmd, Cmd::Serve { .. } | Cmd::Scan { .. }) {
         let serve = matches!(cli.cmd, Cmd::Serve { .. });
         match fabr_core::logging::init_default(serve) {
@@ -282,6 +332,7 @@ fn main() -> ExitCode {
         Cmd::Remove { path, yes } => cmd_remove(path, yes),
         Cmd::Add { path, title, due, pri, status } => cmd_add(path, title, due, pri, status),
         Cmd::Ls { all, overdue, wip, path } => cmd_ls(path, all, overdue, wip),
+        Cmd::Check { .. } | Cmd::Telegram { .. } => unreachable!(),
     };
     match r {
         Ok(()) => ExitCode::SUCCESS,

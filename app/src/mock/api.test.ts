@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { ApiError, type Node } from '../lib/api/types';
 import { COMMANDS } from '../lib/api/commands';
 import { createMockApi } from './api';
+import { markStep } from '../lib/setup/wizard';
 
 const count = (n: Node): number => 1 + n.children.reduce((a, c) => a + count(c), 0);
 const find = (n: Node, path: string): Node | undefined =>
@@ -43,5 +44,37 @@ describe('mock api', () => {
 
   it('implements exactly the COMMANDS operations', () => {
     expect(Object.keys(createMockApi({ latency: 0 })).sort()).toEqual(Object.keys(COMMANDS).sort());
+  });
+
+  it('completing all five setup steps flips setup.completed', async () => {
+    const api = createMockApi({ latency: 0 });
+    const first = await api.fabricSettingsRead();
+    expect([first.exists, first.settings.setup.completed]).toEqual([false, false]);
+    let cur = first.settings;
+    for (const step of ['folder', 'api_key', 'model', 'telegram_bot', 'telegram_link'] as const) {
+      cur = markStep(cur, step);
+      const r = await api.fabricSettingsWrite(cur);
+      expect(r.settings.setup.completed).toBe(step === 'telegram_link');
+    }
+    expect(await api.fabricSettingsRead()).toMatchObject({ exists: true, settings: { setup: { completed: true } } });
+  });
+
+  it('a fresh config opens on setup and the five steps open tasks', async () => {
+    const { shouldShowSetup } = await import('../lib/setup/gate');
+    const { ApiSetupSource } = await import('../lib/setup/setup-source');
+    const api = createMockApi({ today: '2026-10-19', latency: 0 });
+    const read = await api.fabricSettingsRead();
+    expect(read.exists).toBe(false);
+    expect(shouldShowSetup(read)).toBe(true);
+    const src = new ApiSetupSource(api);
+    let s = read.settings;
+    for (const [step, kind] of [['folder', 'folder'], ['api_key', 'api_key'], ['model', 'model'], ['telegram_bot', 'telegram_token']] as const) {
+      expect((await src.check(kind, { path: '~/' })).ok).toBe(true);
+      s = markStep(s, step);
+    }
+    expect((await src.telegramLink(5)).ok).toBe(true);
+    s = markStep(s, 'telegram_link');
+    expect(shouldShowSetup(await src.writeSettings(s))).toBe(false);
+    expect(shouldShowSetup(await api.fabricSettingsRead())).toBe(false);
   });
 });
