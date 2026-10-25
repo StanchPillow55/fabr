@@ -36,6 +36,7 @@
   let gateApi: Awaited<ReturnType<typeof createApi>> | null = null;
   let setupNote = $state<string | null>(null);
   let alive = true;
+  let agentReason = $state<string | null>(null);
 
   function startStore() {
     if (store || !gateApi || !alive) return;
@@ -52,7 +53,10 @@
       setupNote = 'Could not read your settings. Finish setup to continue.';
     }
     gateReady = true;
-    if (!setupOpen) startStore();
+    if (!setupOpen) {
+      startStore();
+      gateApi.fabricAgentStatus().then((s) => (agentReason = s.reason), () => {});
+    }
   }
 
   async function setupDone() {
@@ -63,6 +67,7 @@
     setupNote = null;
     setupOpen = false;
     startStore();
+    gateApi!.fabricAgentStart().then((s) => (agentReason = s.reason), (e) => (agentReason = (e as Error).message));
   }
 
   onMount(() => {
@@ -76,6 +81,8 @@
       void fabric.start(localRoots(store.tree.sources));
     }
   });
+
+  $effect(() => { if (fabric) fabric.agentReason = agentReason; });
 
   function openNotice(taskPath: string) {
     const held = fabric?.locate(taskPath);

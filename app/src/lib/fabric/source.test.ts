@@ -88,3 +88,19 @@ describe('TauriSource request shaping', () => {
     expect(await new FixtureSource().readBackendHeartbeat()).toBeNull();
   });
 });
+
+describe('agent commands request shaping', () => {
+  it('sends the two agent commands as empty posts', async () => {
+    const calls: [string, boolean, unknown][] = [];
+    const api = buildApi(async (name, get, req) => {
+      calls.push([name, get, req]);
+      return { running: false, reason: 'Setup is not complete' };
+    });
+    expect(await api.fabricAgentStatus()).toEqual({ running: false, reason: 'Setup is not complete' });
+    await api.fabricAgentStart();
+    expect(calls).toEqual([
+      ['fabric_agent_status', false, undefined],
+      ['fabric_agent_start', false, undefined],
+    ]);
+  });
+});

@@ -47,7 +47,8 @@ export class FabricStore {
   }
 
   backend = $derived(backendState(this.heartbeat, this.now));
-  backendLabel = $derived(BACKEND_LABEL[this.backend]);
+  agentReason = $state<string | null>(null);
+  backendLabel = $derived(this.agentReason && this.backend !== 'connected' ? `${BACKEND_LABEL[this.backend]}: ${this.agentReason}` : BACKEND_LABEL[this.backend]);
   unread = $derived(unreadCount(this.events, this.readPosition));
   byFolder = $derived.by(() => {
     const m = new Map<string, Held[]>();

@@ -230,6 +230,8 @@ export function createMockApi(opts: MockOpts = {}): Api {
       return { ...fabSecrets };
     },
     async fabricSecretsStatus() { await wait(); return { ...fabSecrets }; },
+    async fabricAgentStatus() { return { running: true, reason: null }; },
+    async fabricAgentStart() { return { running: true, reason: null }; },
     async fabricCheck(req) {
       await wait();
       if (req.kind === 'model') return { ok: true, reply: 'Hello from the mock.' };

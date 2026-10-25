@@ -1,7 +1,10 @@
+mod agent;
+
+use agent::AgentHost;
 use fabr_core::ops::{Desktop, Done, dispatch, url_allowed};
 use fabr_core::workspace::Workspace;
 use fabr_core::{AppDirs, ErrorDto, FabrError, client_error};
-use tauri::{Manager, State};
+use tauri::{Manager, RunEvent, State};
 use tauri_plugin_dialog::{DialogExt, MessageDialogKind};
 
 fn effect(ws: &Workspace, d: Desktop) -> Result<(), FabrError> {
@@ -26,13 +29,23 @@ fn effect(ws: &Workspace, d: Desktop) -> Result<(), FabrError> {
 }
 
 #[tauri::command(rename_all = "snake_case", async)]
-fn call(ws: State<'_, Workspace>, name: String, req: serde_json::Value) -> Result<serde_json::Value, ErrorDto> {
+fn call(ws: State<'_, Workspace>, host: State<'_, AgentHost>, name: String, req: serde_json::Value) -> Result<serde_json::Value, ErrorDto> {
+    let status = |s: agent::Status| serde_json::to_value(s).map_err(|e| client_error(&name, FabrError::Io(e.to_string())));
+    match name.as_str() {
+        "fabric_agent_status" => return status(host.status()),
+        "fabric_agent_start" => return status(start_agent(&host)),
+        _ => {}
+    }
     let out = match dispatch(&ws, &name, req) {
         Ok(Done::Json(v)) => Ok(v),
         Ok(Done::Desktop(d)) => effect(&ws, d).map(|()| serde_json::Value::Null),
         Err(e) => Err(e),
     };
     out.map_err(|e| client_error(&name, e))
+}
+
+fn start_agent(host: &AgentHost) -> agent::Status {
+    host.start(fabr_core::setup::Ctx::from_env(), |root| AppDirs::resolve().workspace(Some(root)))
 }
 
 pub fn run() {
@@ -55,6 +68,11 @@ pub fn run() {
             match AppDirs::resolve().workspace(AppDirs::env_root()) {
                 Ok(ws) => {
                     app.manage(ws);
+                    app.manage(AgentHost::default());
+                    let host = app.state::<AgentHost>();
+                    if fabr_core::setup::settings_read(&fabr_core::setup::Ctx::from_env()).is_ok_and(|r| r.settings.setup.completed) {
+                        start_agent(&host);
+                    }
                 }
                 Err(e) => {
                     log::error!("setup failed: {}", e.message());
@@ -73,7 +91,16 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![call])
-        .run(tauri::generate_context!());
+        .build(tauri::generate_context!())
+        .map(|app| {
+            app.run(|handle, event| {
+                if let RunEvent::Exit = event
+                    && let Some(host) = handle.try_state::<AgentHost>()
+                {
+                    host.stop();
+                }
+            })
+        });
     if let Err(e) = result {
         log::error!("tauri failed: {e}");
         eprintln!("fabr: {e}");
