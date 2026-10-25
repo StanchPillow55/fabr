@@ -47,6 +47,6 @@ jobs:
         with:
           name: fabr-macos
           path: |
-            app/src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/*.dmg
-            app/src-tauri/target/aarch64-apple-darwin/release/bundle/macos/*.app
+            target/aarch64-apple-darwin/release/bundle/dmg/*.dmg
+            target/aarch64-apple-darwin/release/bundle/macos/*.app
           if-no-files-found: error

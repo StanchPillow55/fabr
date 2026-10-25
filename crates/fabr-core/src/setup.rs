@@ -467,7 +467,10 @@ mod tests {
         c.poll_s = 0;
         secrets_write(
             &c,
-            SecretsWriteReq { anthropic_api_key: Some("sk-ant-FIXTURE-NOT-REAL".into()), telegram_bot_token: Some("123456:FAKE-TOKEN".into()) },
+            SecretsWriteReq {
+                anthropic_api_key: Some("sk-ant-FIXTURE-NOT-REAL".into()),
+                telegram_bot_token: Some("123456:FAKE-TOKEN".into()),
+            },
         )
         .unwrap();
         (d, c)
@@ -513,9 +516,11 @@ mod tests {
         let d = tempfile::tempdir().unwrap();
         let c = Ctx::new(d.path());
         assert_eq!(secrets_status(&c), SecretsStatus { anthropic_api_key: false, telegram_bot_token: false });
-        let st = secrets_write(&c, SecretsWriteReq { anthropic_api_key: Some("sk-ant-FIXTURE-NOT-REAL".into()), telegram_bot_token: None }).unwrap();
+        let st = secrets_write(&c, SecretsWriteReq { anthropic_api_key: Some("sk-ant-FIXTURE-NOT-REAL".into()), telegram_bot_token: None })
+            .unwrap();
         assert_eq!(st, SecretsStatus { anthropic_api_key: true, telegram_bot_token: false });
-        let st = secrets_write(&c, SecretsWriteReq { anthropic_api_key: None, telegram_bot_token: Some("123456:FAKE-TOKEN".into()) }).unwrap();
+        let st =
+            secrets_write(&c, SecretsWriteReq { anthropic_api_key: None, telegram_bot_token: Some("123456:FAKE-TOKEN".into()) }).unwrap();
         assert_eq!(st, SecretsStatus { anthropic_api_key: true, telegram_bot_token: true });
         assert_eq!(read_secret(&c, "anthropic_api_key").as_deref(), Some("sk-ant-FIXTURE-NOT-REAL"));
         assert!(!serde_json::to_string(&st).unwrap().contains("FIXTURE"));
