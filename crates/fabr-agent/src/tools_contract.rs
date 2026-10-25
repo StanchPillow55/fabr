@@ -223,6 +223,7 @@ pub fn secret_in(doc: &toml_edit::DocumentMut, canonical: &str) -> Option<String
         name if name == MOSS_PROJECT_KEY => names.push("MOSS_PROJECT_KEY"),
         name if name == FO_KEY => names.push("fo_api_ke"),
         name if name == NESSIE_KEY => names.push("nessi_api_key"),
+        name if name == APIFY_TOKEN => names.push("apify_api_key"),
         _ => {}
     }
     for name in names {
@@ -1028,6 +1029,7 @@ mod tests {
         assert!(keys("MOSS_PROJECT_ID = \"id\"\nMOSS_PROJECT_KEY = \"key\"\n").has(MOSS_PROJECT_ID));
         assert!(keys("fo_api_ke = \"present\"\n").has(FO_KEY));
         assert!(keys("nessi_api_key = \"present\"\n").has(NESSIE_KEY));
+        assert!(keys("apify_api_key = \"present\"\n").has(APIFY_TOKEN));
     }
 
     #[test]

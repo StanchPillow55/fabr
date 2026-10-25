@@ -1,10 +1,10 @@
 # Bright Data live
 
-On `sponsor-integration` (`c994650`, rebased onto `460d4d6` from v0.7.0 `bdfb585`), `live_public_docs_and_issues` passed. The README-only rebase did not change that run. The task stayed pending until approval, then wrote `research.md` with `source: bright_data` and the public ureq docs URL. The token was not in the note or the log. The page dump below is the older capture from `sponsor-wiring`; this run did not replace that dump.
+On 2026-10-25, `live_public_docs_and_issues` passed again on `sponsor-integration`. The task stayed pending until approval, then wrote `research.md` with `source: bright_data` and `https://docs.rs/ureq`. The token was not in the note or the log. This run did not replace the page dump below. That dump is an older capture and is not a fresh copy of this run.
 
 # Historical capture
 
-Copied onto `sponsor-wiring`. This note was not regenerated on this branch, and the ignored live test was not run. It is not proof of a live call from this port.
+Older capture from an earlier Bright Data call. It is not the body of the 2026-10-25 re-run.
 
 source: bright_data
 retrieved_at: 2026-10-25T10:42:46Z

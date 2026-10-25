@@ -63,6 +63,20 @@ Follow folders on another machine: add an ssh source in Settings. You open, run 
 
 The pipeline runs end to end today. Define, plan and approval work, with an auto mode that skips the tap. The tool loop has 4 tools that stay inside the task's folder: read any file, list, write Markdown, make a folder. The evaluator is a model with a fresh context that judges each assertion from the evidence. Pause, suspend, complete, cancel, redo and per-section edits work, and ssh sources are read and written.
 
+## Sponsors
+
+Sponsor tools are optional. They show up only when `~/.fabric-space/secrets.toml` parses and contains that provider's key. An approval that has no bound action still runs the local tools. It does not authorize a sponsor tool. A remote call also needs its own grant. Evidence is in `docs/sponsor-evidence.md`.
+
+Verified through plan, approval, and execution on 2026-10-25:
+
+- Bright Data wrote `research.md` from the public ureq docs page after approval.
+- Moss listed 3 indexes and retrieved 75 documents from `agent-memory-context`. That did not replace the local preference file. The `$100` internship recall is the local file, and `moss_upload` does not run.
+- Cartesia synthesized speech to `speech.wav` and transcribed it. There is no microphone UI, so this is not a voice-first demo.
+- Apify ran the `apify~hello-world` Actor and returned one dataset item. That is not a shopping search.
+- Nessie read sandbox accounts (`accounts=0`). It is labeled sandbox and is not internship memory.
+
+Not integrated: Fo listed five private account tools and called none. Visa, Figma, Microsoft, and Atlassian are not in this tree. Anthropic is the model client. A Public Benefit community and a measured baseline were not checked. Hackathon-history eligibility is unverified.
+
 Next, execution moves to an isolated sandbox that runs a coding harness with a fixed tool set. Learning from answers, Telegram and the personal data bank are designed and not built.
 
 ---

@@ -131,6 +131,15 @@ fn live_apify_actor() {
     result.expect("apify actor");
 }
 
+#[test]
+#[ignore = "runs one Apify actor through plan, approval, and execute"]
+fn live_apify_task_runs_after_approval() {
+    let log =
+        drive("apify", "apify_lookup", serde_json::json!({"actor": "apify~hello-world", "input": "{}"}), "external_action", &[APIFY_TOKEN]);
+    assert!(log.contains("apify_lookup"), "{log}");
+    assert!(log.contains("succeeded"), "{log}");
+}
+
 fn stage_space(fabric: &Path, keys: &[&str]) {
     let mut out = String::new();
     for key in keys {
