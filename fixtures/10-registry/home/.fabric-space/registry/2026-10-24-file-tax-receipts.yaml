@@ -1,0 +1,13 @@
+task_path: /home/me/docs/.fabric-space/tasks/2026-10-24-file-tax-receipts.md
+task_id: 2026-10-24-file-tax-receipts
+folder: /home/me/docs
+step: execute
+started_at: 2026-10-24T18:54:10Z
+heartbeat_at: 2026-10-24T18:59:52Z
+heartbeat_interval_s: 10
+cost_usd: 1.12
+log_tail:
+  - "2026-10-24T18:58:50Z execute: renamed 38 of 52 receipts"
+  - "2026-10-24T18:59:30Z execute: renamed 45 of 52 receipts"
+question: null
+pid: 48390

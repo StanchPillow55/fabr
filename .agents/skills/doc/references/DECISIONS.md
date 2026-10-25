@@ -43,3 +43,5 @@ the decision, and the reason, with the newest line last.
 2026-10-24 Setup checks cross the boundary as a local command with JSON on stdout, the one exception to files-only, because they need the network.
 2026-10-24 Cancel moves a task to failed with the reason logged and the verdict left null, so a cancelled task is re-delegated like any failed one.
 2026-10-24 The frontend owns all setup screens (API key entry, model selector, Telegram bot onboarding) and the agent status UI; the backend exposes checks and writes the registry, nothing visual.
+2026-10-24 Dev 2 agreed to `dev2/agent_surface_spec.md` version 1 as written. Changes from here go through a new version number, not an edit in place.
+2026-10-24 The wave 1 demo task is ordering 2 kg of black PLA from a web shop, which fills address fields on a form and hands payment to the human. It is fixture 4 and the thread through fixtures 2 to 9.

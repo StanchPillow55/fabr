@@ -1,0 +1,4 @@
+ship_to = "home"
+filament_diameter_mm = 1.75
+usual_shop = "shop.example-filament.test"
+max_order_usd = 80

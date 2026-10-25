@@ -1,0 +1,13 @@
+task_path: /home/me/docs/scans/.fabric-space/tasks/2026-10-24-rename-scans.md
+task_id: 2026-10-24-rename-scans
+folder: /home/me/docs/scans
+step: execute
+started_at: 2026-10-24T18:48:00Z
+heartbeat_at: 2026-10-24T18:57:30Z
+heartbeat_interval_s: 10
+cost_usd: 0.66
+log_tail:
+  - "2026-10-24T18:57:00Z execute: opened scan folder"
+  - "2026-10-24T18:57:28Z execute: renaming scan_0001.pdf"
+question: null
+pid: 47102

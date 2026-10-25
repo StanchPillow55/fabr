@@ -32,6 +32,7 @@ material is published as an interactive map at https://claude.ai/artifact/WqqKKt
 | `references/ON_DISK.md` | deciding where a file lives, how the folder chain resolves, who may write which file |
 | `references/SETUP.md` | working on the first-run wizard: the six screens, their checks, the two files they write |
 | `references/FRONTEND_PLAN.md` | you work on the frontend track: what is ours versus dev 2's, the file contract between the tracks, the fixture strategy, the screens, and frontend waves F0 to F5 |
+| `references/FRONTEND_EXECUTION.md` | starting or continuing frontend work: the ordered steps for F0 to F3, what done means for each, the checkpoints with dev 2 |
 | `references/WAVES.md` | deciding whether a feature belongs now or later, and the rule that protects the foundation |
 | `references/WAVE_1.md` | building the foundation: the ordered plan, each item's definition of done, the exit test |
 | `references/WAVE_2.md` | building tell-it-once: learned preferences and the three-option prompt |
@@ -39,3 +40,4 @@ material is published as an interactive map at https://claude.ai/artifact/WqqKKt
 | `references/WAVE_4.md` | building reach: speech and photo input, connectors, virtual cards |
 | `references/DECISIONS.md` | changing anything a past decision covers |
 | `dev2/agent_surface_spec.md` | anything that crosses between the agent backend and the frontend: record fields and writers, states and transitions, request flags, the question slot, approval, the registry, events, audit, policy, vault, settings, secrets, setup checks, Telegram message kinds, and the ten F0 fixtures. It wins over TASK_RECORD.md where they differ |
+| `dev2/telegram_templates.md` | writing or changing what the Telegram bot says: text and buttons for the five message kinds, and the follow-up prompts |
