@@ -1,7 +1,7 @@
 <script lang="ts">
   import { PHASE_LABEL, type Phase } from './phase';
   import type { State, Step } from './types';
-  let { state, step, phase }: { state: State; step: Step | null; phase: Phase } = $props();
+  let { state, step, phase, needs = null }: { state: State; step: Step | null; phase: Phase; needs?: string | null } = $props();
 
   const stages = $derived([
     { id: 'reminder', label: 'reminder' },
@@ -21,7 +21,7 @@
     {/each}
   </ol>
   <p class="ribbon__sub">
-    <span class="ribbon__phase ribbon__phase--{phase}" data-testid="phase">{PHASE_LABEL[phase]}</span>
+    <span class="ribbon__phase ribbon__phase--{phase}" data-testid="phase">{phase === 'needs_harness' && needs ? `${PHASE_LABEL[phase]}: ${needs}` : PHASE_LABEL[phase]}</span>
     {#if showStep}<span>step: <b>{step}</b></span>{/if}
   </p>
 </div>
@@ -35,6 +35,7 @@
   .ribbon__sub { display: flex; gap: 12px; margin: 8px 0 0; min-height: 1.2em; font-size: var(--fs-12); color: var(--label-2); }
   .ribbon__phase { font-weight: 600; color: var(--tint); }
   .ribbon__phase--needs_you { color: var(--orange); }
+  .ribbon__phase--needs_harness { color: var(--orange); }
   .ribbon__phase--paused { color: var(--label-2); }
   .ribbon__phase--suspended { color: var(--label-3); font-style: italic; }
   .ribbon__phase--failed { color: var(--red); }

@@ -126,7 +126,7 @@ fn base(c: &Clock, title: &str, created: i64, state: State) -> TaskRecord {
         suspend_until: None,
         created_at: at.clone(),
         updated_at: at,
-        requests: Requests { delegate: false, cancel: false, redelegate: false, pause: false, resume: false, complete: false },
+        requests: Requests { delegate: false, cancel: false, redelegate: false, pause: false, resume: false, complete: false, redo: None },
         question: None,
         answers: Vec::new(),
         grants: Grants { requested: Vec::new(), granted: Vec::new() },
@@ -136,6 +136,8 @@ fn base(c: &Clock, title: &str, created: i64, state: State) -> TaskRecord {
         verdict: None,
         cost_usd: 0.0,
         links: Links { redelegated_from: None, redelegated_to: None },
+        by: Default::default(),
+        needs: None,
         context: String::new(),
         spec: String::new(),
         success: String::new(),
@@ -162,6 +164,7 @@ fn meta(reversibility: &str, tools: &[&str], assumptions: &[(&str, &str)]) -> Pl
         tools: tools.iter().map(|t| s(t)).collect(),
         assumptions: assumptions.iter().map(|(id, text)| Assumption { rule_id: s(id), text: s(text) }).collect(),
         checks: Vec::new(),
+        requires: Default::default(),
     }
 }
 

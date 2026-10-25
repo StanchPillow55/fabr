@@ -26,7 +26,7 @@ export function createMockApi(opts: MockOpts = {}): Api {
   let settings: Settings = { poll_ms: 2000, remote_poll_ms: 30000, search_depth: 6, full_rescan_ms: 30000, max_nodes: 10000, log_path: '/tmp/fabr/fabr.log' };
   let fabSettings: FabricSettings = {
     default_folder: '~/', model: 'claude-sonnet-5-5', telegram_user_id: null, auto_mode: false,
-    question_budget: 5, heartbeat_interval_s: 10, setup: { completed_steps: [], completed: false },
+    question_budget: 5, heartbeat_interval_s: 10, execute: 'full', capabilities: { tools: ['read_file', 'write_file', 'run_command'], checks: ['git', 'cargo'] }, setup: { completed_steps: [], completed: false },
   };
   let fabSettingsExist = false;
   const fabSecrets: FabricSecretsStatus = { anthropic_api_key: false, telegram_bot_token: false };

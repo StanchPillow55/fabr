@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { HEAD, LIST_PAD, ROLLUP, ROW } from './constants';
+import { BARS, COUNTS, HEAD, LIST_PAD, ROLLUP, ROW } from './constants';
 
 import { readFileSync } from 'node:fs';
 const read = (p: string) => readFileSync(new URL(p, import.meta.url), 'utf8');
@@ -15,6 +15,8 @@ const px = (re: RegExp): number => {
 describe('card overlay (no foreignObject)', () => {
   it('the CSS box sizes agree with the layout constants (boxModel heights)', () => {
     expect(px(/\.card__head \{[^}]*?height: (\d+)px/s)).toBe(HEAD);
+    expect(px(/\.card__row--counts \{[^}]*?height: (\d+)px/)).toBe(COUNTS);
+    expect(px(/\.card__row--bars \{[^}]*?height: (\d+)px/)).toBe(BARS);
     expect(px(/\.row \{[^}]*?height: (\d+)px/)).toBe(ROW);
     expect(px(/\.card__rollup \{[^}]*?height: (\d+)px/)).toBe(ROLLUP);
     expect(px(/\.card__more \{[^}]*?height: (\d+)px/)).toBe(ROW);

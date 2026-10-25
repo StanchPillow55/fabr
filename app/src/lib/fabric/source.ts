@@ -1,7 +1,8 @@
 import { isoNow } from './answer';
 import { parseRecord } from './parse';
 import { serializeRecord } from './serialize';
-import { SCHEMA, type TaskRecord } from './types';
+import { SECTION_KEYS, FROZEN_MESSAGE, isEditable } from './sections';
+import { NO_AUTHOR, SCHEMA, STEPS, type TaskRecord } from './types';
 
 export interface RawRecord { path: string; text: string }
 
@@ -29,11 +30,28 @@ export function updatedAtOf(text: string): string {
   return '';
 }
 
+const sameJson = (x: unknown, y: unknown) => JSON.stringify(x) === JSON.stringify(y);
+
+function guardEdits(a: TaskRecord, b: TaskRecord): TaskRecord {
+  if (a.state !== b.state) return b;
+  const sections = SECTION_KEYS.filter((s) => a.sections[s] !== b.sections[s]);
+  const assertions = !sameJson(a.assertions, b.assertions);
+  const fields = a.title !== b.title || a.due !== b.due || a.pri !== b.pri || !sameJson(a.grants.requested, b.grants.requested);
+  if (!sections.length && !assertions && !fields) return b;
+  if (!isEditable(a)) throw new Error(FROZEN_MESSAGE);
+  const by = { ...b.by };
+  for (const s of sections) by[s] = 'human';
+  if (assertions) by.success = 'human';
+  const replan = (sections.includes('spec') || sections.includes('success') || assertions) && (a.state === 'defined' || (a.state === 'task' && a.step !== null && STEPS.indexOf(a.step) > STEPS.indexOf('define')));
+  return { ...b, by, requests: { ...b.requests, redo: b.requests.redo ?? (replan ? 'plan' : null) } };
+}
+
 export function guardState(before: string, after: string, now: Date = new Date()): string {
   const a = parseRecord(before);
-  const b = parseRecord(after);
-  if (a.paused !== b.paused) throw new Error('400: paused is owned by the pipeline');
-  if (a.state === b.state) return after;
+  const b0 = parseRecord(after);
+  if (a.paused !== b0.paused) throw new Error('400: paused is owned by the pipeline');
+  const b = guardEdits(a, b0);
+  if (a.state === b.state) return b === b0 ? after : serializeRecord(b);
   if (a.state !== 'reminder' || b.state !== 'succeeded') throw new Error(`state may not change from ${a.state} to ${b.state}`);
   const log = [b.sections.log, `- ${isoNow(now)} done: marked done by hand`].filter(Boolean).join('\n');
   return serializeRecord({ ...b, sections: { ...b.sections, log } });
@@ -49,9 +67,9 @@ export function taskSlug(title: string): string {
 export function newRecord(id: string, f: CreateFields, now: Date = new Date()): TaskRecord {
   const at = isoNow(now);
   return {
-    schema: SCHEMA, id, source: null, title: f.title.trim(), due: f.due || null, pri: f.pri ?? 0, state: 'reminder', step: null, waiting: false, paused: false, suspended: false, suspend_until: null,
-    created_at: at, updated_at: at, requests: { delegate: false, cancel: false, redelegate: false, pause: false, resume: false, complete: false },
-    question: null, answers: [], grants: { requested: [], granted: [] }, plan_meta: null, assertions: [],
+    schema: SCHEMA, id, source: null, title: f.title.trim(), due: f.due || null, pri: f.pri ?? 0, state: 'reminder', step: null, waiting: false, needs: null, paused: false, suspended: false, suspend_until: null,
+    created_at: at, updated_at: at, requests: { delegate: false, cancel: false, redelegate: false, pause: false, resume: false, complete: false, redo: null },
+    question: null, answers: [], grants: { requested: [], granted: [] }, plan_meta: null, assertions: [], by: { ...NO_AUTHOR },
     approval: null, verdict: null, cost_usd: 0, links: { redelegated_from: null, redelegated_to: null },
     sections: { context: (f.context ?? '').trim(), spec: (f.spec ?? '').trim(), success: (f.success ?? '').trim(), plan: '', log: '', logEntries: [] },
   };

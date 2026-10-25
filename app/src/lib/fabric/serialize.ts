@@ -79,9 +79,10 @@ export function serializeFrontMatter(r: TaskRecord): string[] {
       case 'schema': add(`schema: ${SCHEMA}`); break;
       case 'requests': {
         const q = r.requests;
-        add(`requests: ${flowMap({ delegate: q.delegate, cancel: q.cancel, redelegate: q.redelegate, pause: !!q.pause, resume: !!q.resume, complete: !!q.complete })}`);
+        add(`requests: ${flowMap({ delegate: q.delegate, cancel: q.cancel, redelegate: q.redelegate, pause: !!q.pause, resume: !!q.resume, complete: !!q.complete, redo: q.redo ?? null })}`);
         break;
       }
+      case 'by': add(`by: ${flowMap({ context: r.by.context, spec: r.by.spec, success: r.by.success, plan: r.by.plan })}`); break;
       case 'links': add(`links: ${flowMap(r.links)}`); break;
       case 'source':
         if (r.source === null) add('source: null');
@@ -114,7 +115,7 @@ export function serializeFrontMatter(r: TaskRecord): string[] {
       case 'plan_meta': {
         const p = r.plan_meta;
         if (p === null) { add('plan_meta: null'); break; }
-        add('plan_meta:', `  reversibility: ${scalar(p.reversibility)}`, `  tools: ${flowList(p.tools)}`);
+        add('plan_meta:', `  reversibility: ${scalar(p.reversibility)}`, `  tools: ${flowList(p.tools)}`, '  requires:', `    tools: ${flowList(p.requires.tools)}`, `    checks: ${flowList(p.requires.checks)}`);
         if (!p.assumptions.length) add('  assumptions: []');
         else {
           add('  assumptions:');

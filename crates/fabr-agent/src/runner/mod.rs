@@ -10,7 +10,7 @@ pub use heartbeat::write_failure;
 pub use signal::install as install_signals;
 
 use crate::board::{Activity, Board, Extras};
-use crate::lifecycle::{Ctl, advance_with, task_path_key, trailing_error};
+use crate::lifecycle::{Ctl, advance_with, apply_redo, task_path_key, trailing_error};
 use crate::model::AnthropicModel;
 use crate::now_utc;
 use crate::settings::check_timeout_s;
@@ -22,7 +22,7 @@ use chrono::Utc;
 use events::Events;
 use fabr_core::fabric::{self, FabricListReq};
 use fabr_core::redact::{fingerprint, register_secret};
-use fabr_core::setup::{Ctx, read_secret, settings_read};
+use fabr_core::setup::{Ctx, ExecuteMode, read_secret, settings_read};
 use fabr_core::taskrec::{Grants, Links, Requests, State, TaskRecord, parse, write_record};
 use fabr_core::{FabrError, Secret, Workspace};
 use std::collections::HashSet;
@@ -115,7 +115,8 @@ impl Runner {
             AnthropicModel::new(gate.key.clone(), gate.model.clone()).with_base_url(&ctx.anthropic_url).with_observer(calls.observer());
         let space = ctx.space();
         let board = Board::new(&space, gate.heartbeat_interval_s, Some(calls.clone()));
-        let ctl = Ctl::with_board(board.clone(), check_timeout_s(&space));
+        let mut ctl = Ctl::with_board(board.clone(), check_timeout_s(&space));
+        ctl.harness = crate::caps::load(ctx)?;
         Ok(Runner {
             events: Events::new(&space),
             space,
@@ -157,6 +158,13 @@ impl Runner {
     }
 
     pub fn start(&mut self) -> Result<(), FabrError> {
+        let eff = self.ctl.harness.effective();
+        self.sink.info(format!(
+            "execute={} tools=[{}] checks=[{}]",
+            self.ctl.harness.mode.as_str(),
+            eff.tools.join(","),
+            eff.checks.join(",")
+        ));
         self.sink.info(format!(
             "agent starting: default_folder={} model={} key={} interval={}s heartbeat={}s",
             self.root.display(),
@@ -261,6 +269,9 @@ impl Runner {
                 self.emit("stuck", &entry.task_path, &format!("agent stopped answering ({age})"));
             }
         }
+        if self.ctl.harness.mode == ExecuteMode::Off {
+            return;
+        }
         let paths = self.records();
         if !self.seeded {
             self.seeded = true;
@@ -304,7 +315,7 @@ impl Runner {
         let extras = extras.unwrap_or_else(|| {
             if rec.paused {
                 Extras::doing(Activity::Paused)
-            } else if parked(rec) {
+            } else if parked(rec) || rec.needs.is_some() {
                 Extras::doing(Activity::Parked)
             } else if rec.state == State::Defined {
                 Extras::doing(Activity::Queued)
@@ -341,6 +352,14 @@ impl Runner {
                 let r = self.ignore(path, "redelegate", rec.state);
                 self.note_err("redelegate", path, r.err());
             }
+        }
+        if let Some(stage) = rec.requests.redo {
+            let r = if matches!(rec.state, State::Task | State::Defined) {
+                mutate(path, |r| apply_redo(r, stage)).map(|_| ())
+            } else {
+                self.ignore(path, "redo", rec.state)
+            };
+            self.note_err("redo", path, r.err());
         }
         if rec.requests.delegate && rec.state != State::Reminder {
             let r = self.ignore(path, "delegate", rec.state);
@@ -507,6 +526,7 @@ impl Runner {
             r.waiting = false;
             r.paused = false;
             r.verdict = None;
+            r.needs = None;
             append_log(&mut r.log, "execute", "cancelled by user");
         })?;
         self.board.remove(&rec.id, &task_path_key(path));
@@ -523,6 +543,7 @@ impl Runner {
             r.waiting = false;
             r.paused = false;
             r.verdict = None;
+            r.needs = None;
             append_log(&mut r.log, label, "completed by user");
         })?;
         self.board.remove(&rec.id, &task_path_key(path));
@@ -539,6 +560,7 @@ impl Runner {
                 "pause" => r.requests.pause = false,
                 "resume" => r.requests.resume = false,
                 "complete" => r.requests.complete = false,
+                "redo" => r.requests.redo = None,
                 _ => r.requests.redelegate = false,
             }
             append_log(&mut r.log, "notify", &msg);
@@ -570,7 +592,15 @@ impl Runner {
                     suspend_until: None,
                     created_at: now.clone(),
                     updated_at: now,
-                    requests: Requests { delegate: true, cancel: false, redelegate: false, pause: false, resume: false, complete: false },
+                    requests: Requests {
+                        delegate: true,
+                        cancel: false,
+                        redelegate: false,
+                        pause: false,
+                        resume: false,
+                        complete: false,
+                        redo: None,
+                    },
                     question: None,
                     answers: Vec::new(),
                     grants: Grants { requested: Vec::new(), granted: Vec::new() },
@@ -580,6 +610,8 @@ impl Runner {
                     verdict: None,
                     cost_usd: 0.0,
                     links: Links { redelegated_from: Some(task_path_key(path)), redelegated_to: None },
+                    by: Default::default(),
+                    needs: None,
                     context: old.context.clone(),
                     spec: String::new(),
                     success: String::new(),

@@ -6,8 +6,8 @@
 
   const status = $derived(statusOf(view, now));
   const down = $derived(view.alive === 'dead' || view.alive === 'backend-down');
-  const pulse = $derived(!view.finished && view.phase !== 'suspended' && view.alive === 'live' && !view.waiting && (view.activity === 'model' || view.activity === 'tool' || view.activity === 'check'));
-  const tone = $derived(view.phase === 'suspended' ? 'off' : view.phase === 'paused' && view.alive === 'live' ? 'paused' : view.finished === 'failed' ? 'bad' : view.alive === 'dead' ? 'bad' : view.alive === 'backend-down' ? 'off' : view.waiting ? 'wait' : view.activity === 'retry' ? 'retry' : 'ok');
+  const pulse = $derived(!view.finished && view.phase !== 'suspended' && view.alive === 'live' && !view.waiting && view.phase !== 'needs_harness' && (view.activity === 'model' || view.activity === 'tool' || view.activity === 'check'));
+  const tone = $derived(view.phase === 'suspended' ? 'off' : view.phase === 'paused' && view.alive === 'live' ? 'paused' : view.finished === 'failed' ? 'bad' : view.alive === 'dead' ? 'bad' : view.alive === 'backend-down' ? 'off' : view.waiting || view.phase === 'needs_harness' ? 'wait' : view.activity === 'retry' ? 'retry' : 'ok');
 
   function seg(i: number): string {
     if (view.finished === 'succeeded') return 'done';
@@ -20,7 +20,7 @@
   <ol class="sbar__row">
     {#each STAGES as s, i (s)}
       <li class="sbar__seg sbar__seg--{seg(i)}" class:sbar__seg--gate={GATES.includes(s)} class:sbar__seg--pulse={i === view.index && pulse} title={s}>
-        {#if mode === 'full'}<span class="sbar__lab">{i === view.index && view.waiting ? 'needs you' : s}</span>{/if}
+        {#if mode === 'full'}<span class="sbar__lab">{i === view.index && view.phase === 'needs_harness' ? 'needs harness' : i === view.index && view.waiting ? 'needs you' : s}</span>{/if}
       </li>
     {/each}
   </ol>

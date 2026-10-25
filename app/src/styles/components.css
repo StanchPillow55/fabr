@@ -203,8 +203,10 @@ code { font: 0.92em ui-monospace, "SF Mono", "JetBrains Mono", Menlo, monospace;
 .card--plain .card__head { border-bottom: 0; }
 .card--plain .card__head { color: var(--label-2); font-weight: 500; }
 .card__name { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; letter-spacing: -0.006em; }
-.card__src { color: var(--tint); }
-.card__kind { flex: none; margin-left: auto; color: var(--label-3); font-size: var(--fs-11); font-weight: 500; letter-spacing: 0.01em; }
+.card__row { display: flex; align-items: center; gap: 6px; flex: none; box-sizing: border-box; padding: 0 10px 0 32px; overflow: hidden; white-space: nowrap; font-size: var(--fs-12); color: var(--label-2); font-variant-numeric: tabular-nums; }
+.card__row--counts { height: 22px; gap: 0; }
+.card__row--bars { height: 20px; }
+.card__row--bars .tstrip__more { color: var(--label-3); }
 .card__warn { flex: none; color: var(--orange); }
 
 .chev { width: 20px; height: 20px; display: grid; place-items: center; flex: none; border: 0; padding: 0; border-radius: 5px; background: none; color: var(--label-3); cursor: pointer; }
@@ -232,11 +234,10 @@ code { font: 0.92em ui-monospace, "SF Mono", "JetBrains Mono", Menlo, monospace;
 .card__overdue { color: var(--overdue); font-weight: 600; }
 .card__next { color: var(--label-3); }
 .card--root .card__name { font-weight: 700; }
-.row--counts { gap: 0; font-size: var(--fs-12); color: var(--label-2); font-variant-numeric: tabular-nums; white-space: nowrap; }
-.row--counts b { color: var(--label); font-weight: 600; }
-.row--counts .dotsep { margin: 0 6px; }
+.card__row--counts b { color: var(--label); font-weight: 600; }
+.card__row--counts .dotsep { margin: 0 6px; }
 .card__wip { color: var(--status-wip); }
-.card__wip b, .row--counts .card__overdue b { color: inherit; }
+.card__wip b, .card__row--counts .card__overdue b { color: inherit; }
 .row--source { padding: 0 4px; }
 .srcline { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; height: 22px; padding: 0 6px; border: 0; border-radius: 5px; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
 .srcline:hover { background: var(--fill-3); }
@@ -269,6 +270,7 @@ code { font: 0.92em ui-monospace, "SF Mono", "JetBrains Mono", Menlo, monospace;
 .pill--todo { color: var(--status-todo); }
 .pill--working { color: var(--tint); background: color-mix(in srgb, var(--tint) 16%, transparent); }
 .pill--needs_you { color: var(--orange); background: color-mix(in srgb, var(--orange) 16%, transparent); }
+.pill--needs_harness { color: var(--orange); background: transparent; box-shadow: inset 0 0 0 1px var(--orange); }
 .pill--paused { color: var(--label-2); }
 .pill--suspended { color: var(--label-3); font-style: italic; }
 .pill--done { color: var(--status-done); background: transparent; box-shadow: inset 0 0 0 0.5px var(--sep); }
@@ -601,7 +603,6 @@ input.mrow__key { text-transform: none; color: var(--label); }
 .row__link:hover { text-decoration: underline; }
 .row__link[aria-disabled="true"] { cursor: default; color: var(--label-3); text-decoration: none; }
 .card__gear { margin-left: auto; }
-.card__kind + .card__gear { margin-left: 0; }
 .row__tick { all: unset; box-sizing: border-box; flex: none; display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; border-radius: 50%; color: var(--green); cursor: pointer; }
 .row__tick:hover { background: var(--fill-3); }
 .row--warn { color: var(--orange); font-size: var(--fs-12); gap: 4px; }

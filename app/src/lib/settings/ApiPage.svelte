@@ -6,6 +6,7 @@
   import Segmented from '../ui/Segmented.svelte';
   import Switch from '../ui/Switch.svelte';
   import { MODELS } from '../setup/wizard';
+  import type { ExecuteMode } from '../api/types';
   import type { SettingsController } from './controller.svelte';
 
   let { ctl }: { ctl: SettingsController } = $props();
@@ -13,11 +14,15 @@
   let secret = $state('');
   let model = $state(MODELS[0].value);
   let auto = $state(false);
+  let execute = $state<ExecuteMode>('full');
+  const MODES: { value: ExecuteMode; label: string }[] = [{ value: 'full', label: 'Full' }, { value: 'read_only', label: 'Read-only' }, { value: 'off', label: 'Off' }];
+  const HELP: Record<ExecuteMode, string> = { full: 'This machine runs tasks to the end, with tools and checks.', read_only: 'This machine defines, plans and gates tasks but never executes them.', off: 'The agent does not run on this machine.' };
 
   onMount(async () => {
     await p.load();
     model = p.settings?.model ?? MODELS[0].value;
     auto = p.settings?.auto_mode ?? false;
+    execute = p.settings?.execute ?? 'full';
   });
 
   async function save() {
@@ -53,6 +58,16 @@
   <Row label="Auto mode"><Switch label="Auto mode" bind:checked={auto} onchange={(v) => p.write({ auto_mode: v })} /></Row>
   <NumField label="Question budget" mode="numeric" bad={!!p.runnerError} bind:value={p.budgetText} oncommit={() => p.saveRunner()} />
   <NumField label="Heartbeat" unit="seconds" mode="numeric" bad={!!p.runnerError} bind:value={p.heartbeatText} oncommit={() => p.saveRunner()} />
+</Group>
+
+<Group header="Machine" footer="{HELP[execute]} The runner detects tools and checks and refreshes them when it starts.">
+  <Row label="Execute"><Segmented label="Execute" options={MODES} bind:value={execute} onchange={(m) => p.write({ execute: m })} /></Row>
+  <Row label="Tools" wrap>
+    <span class="chips" data-testid="cap-tools">{#each p.settings?.capabilities.tools ?? [] as t (t)}<span class="chip">{t}</span>{:else}<span class="chip chip--none">none detected</span>{/each}</span>
+  </Row>
+  <Row label="Checks" wrap>
+    <span class="chips" data-testid="cap-checks">{#each p.settings?.capabilities.checks ?? [] as c (c)}<span class="chip">{c}</span>{:else}<span class="chip chip--none">none detected</span>{/each}</span>
+  </Row>
 </Group>
 
 {#if p.error}<div class="banner banner--error page-panel" role="alert">{p.error}</div>{/if}

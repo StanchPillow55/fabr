@@ -13,6 +13,7 @@ import { parseRecord } from './parse';
 import { submitDone } from './done';
 import { submitSuspend, submitUnsuspend } from './suspend';
 import { submitRequest, type RequestKey } from './requests';
+import { submitAssertions, submitFields, submitSection, type FieldsEdit, type Section } from './sections';
 import type { CreateFields, FabricSource } from './source';
 import { minuteOf } from '../model';
 import { isActive, phaseOf, type Phase } from './phase';
@@ -22,7 +23,7 @@ import { submitAnswer } from './write';
 import type { RegistryEntry } from './agents';
 
 export type Held = Entry & { text: string; source: string | null };
-export type FolderCounts = { todo: number; active: number; needs_you: number; suspended: number; done: number; failed: number; total: number };
+export type FolderCounts = { todo: number; active: number; needs_you: number; needs_harness: number; suspended: number; done: number; failed: number; total: number };
 
 const EMPTY: Held[] = [];
 
@@ -272,12 +273,13 @@ export class FabricStore {
 
   countsFor(folder: string | null): FolderCounts {
     const list = this.tasksFor(folder);
-    const c: FolderCounts = { todo: 0, active: 0, needs_you: 0, suspended: 0, done: 0, failed: 0, total: list.length };
+    const c: FolderCounts = { todo: 0, active: 0, needs_you: 0, needs_harness: 0, suspended: 0, done: 0, failed: 0, total: list.length };
     for (const h of list) {
       const p = this.phaseFor(h);
       if (p === 'todo' || p === 'suspended' || p === 'done' || p === 'failed') c[p]++;
       else if (isActive(p)) c.active++;
       if (p === 'needs_you') c.needs_you++;
+      if (p === 'needs_harness') c.needs_harness++;
     }
     return c;
   }
@@ -362,6 +364,21 @@ export class FabricStore {
   async request(h: Held, key: RequestKey): Promise<void> {
     await submitRequest(this.#sourceFor(h.source), h.path, h.text, key);
     await this.#reread(h.path);
+  }
+
+  async editSection(path: string, section: Section, text: string): Promise<void> {
+    await submitSection(this.#sourceOfPath(path), path, await this.#fresh(path), section, text);
+    await this.#reread(path);
+  }
+
+  async editAssertions(path: string, text: string): Promise<void> {
+    await submitAssertions(this.#sourceOfPath(path), path, await this.#fresh(path), text);
+    await this.#reread(path);
+  }
+
+  async editFields(path: string, f: FieldsEdit): Promise<void> {
+    await submitFields(this.#sourceOfPath(path), path, await this.#fresh(path), f);
+    await this.#shelved(path);
   }
 
   async markDone(path: string): Promise<void> {

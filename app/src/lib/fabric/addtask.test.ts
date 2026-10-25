@@ -33,7 +33,7 @@ describe('FixtureSource.createRecord', () => {
     const s = new FixtureSource();
     const { path } = await s.createRecord('/a', { title: 'Pay rent', due: '2026-11-01', context: 'ctx', success: 'paid' });
     const r = parseRecord(await s.readRecord(path));
-    expect(r).toMatchObject({ state: 'reminder', title: 'Pay rent', due: '2026-11-01', waiting: false, requests: { delegate: false, cancel: false, redelegate: false, pause: false, resume: false, complete: false } });
+    expect(r).toMatchObject({ state: 'reminder', title: 'Pay rent', due: '2026-11-01', waiting: false, requests: { delegate: false, cancel: false, redelegate: false, pause: false, resume: false, complete: false, redo: null } });
     expect(r.sections).toMatchObject({ context: 'ctx', spec: '', success: 'paid', plan: '' });
   });
 });
@@ -45,13 +45,13 @@ describe('FabricStore.createTask', () => {
     const h = await f.createTask('/home/me/p', { title: 'Call the bank' });
     expect(f.tasksFor('/home/me/p')).toHaveLength(1);
     expect(h.record.state).toBe('reminder');
-    expect(h.record.requests).toEqual({ delegate: false, cancel: false, redelegate: false, pause: false, resume: false, complete: false });
+    expect(h.record.requests).toEqual({ delegate: false, cancel: false, redelegate: false, pause: false, resume: false, complete: false, redo: null });
   });
   it('generate leaves only requests.delegate set', async () => {
     const f = new FabricStore(new FixtureSource());
     await f.load();
     const h = await f.createAndDelegate('/home/me/p', { title: 'Call the bank' });
-    expect(h.record.requests).toEqual({ delegate: true, cancel: false, redelegate: false, pause: false, resume: false, complete: false });
+    expect(h.record.requests).toEqual({ delegate: true, cancel: false, redelegate: false, pause: false, resume: false, complete: false, redo: null });
     expect(h.record).toMatchObject({ state: 'reminder', step: null, waiting: false, question: null });
     expect(f.tasksFor('/home/me/p')[0].record.requests.delegate).toBe(true);
   });

@@ -1,5 +1,5 @@
 use crate::error::FabrError;
-use crate::taskrec::{self, State, TaskRecord};
+use crate::taskrec::{self, State, Step, TaskRecord};
 use serde::{Deserialize, Serialize};
 use std::io::Write;
 use std::path::{Component, Path, PathBuf};
@@ -229,6 +229,25 @@ pub(crate) fn gui_record(disk: &TaskRecord, incoming: &TaskRecord) -> Result<Tas
     if incoming.paused != disk.paused {
         return Err(FabrError::BadRequest("the gui does not write paused".into()));
     }
+    let same = |a: &str, b: &str| taskrec::normalize_section(a) == taskrec::normalize_section(b);
+    let changed = [
+        !same(&incoming.context, &disk.context),
+        !same(&incoming.spec, &disk.spec),
+        !same(&incoming.success, &disk.success),
+        !same(&incoming.plan, &disk.plan),
+    ];
+    let [context_changed, spec_changed, success_changed, plan_changed] = changed;
+    let assertions_changed = incoming.assertions != disk.assertions;
+    let content_changed = changed.iter().any(|c| *c)
+        || assertions_changed
+        || incoming.grants.requested != disk.grants.requested
+        || incoming.title != disk.title
+        || incoming.due != disk.due
+        || incoming.pri != disk.pri;
+    let editable = matches!(disk.state, State::Reminder | State::Task | State::Defined);
+    if !editable && content_changed {
+        return Err(FabrError::BadRequest("task is frozen once execution starts".into()));
+    }
     let mut rec = incoming.clone();
     if matches!(disk.state, State::Succeeded | State::Failed) {
         rec.suspended = disk.suspended;
@@ -244,16 +263,39 @@ pub(crate) fn gui_record(disk: &TaskRecord, incoming: &TaskRecord) -> Result<Tas
     rec.paused = disk.paused;
     rec.created_at = disk.created_at.clone();
     rec.answers = disk.answers.clone();
-    rec.grants.requested = disk.grants.requested.clone();
     rec.plan_meta = disk.plan_meta.clone();
-    rec.assertions = disk.assertions.clone();
     rec.verdict = if by_hand { None } else { disk.verdict.clone() };
     rec.cost_usd = disk.cost_usd;
     rec.links = disk.links.clone();
-    rec.spec = disk.spec.clone();
-    rec.success = disk.success.clone();
-    rec.plan = disk.plan.clone();
+    rec.by = disk.by.clone();
+    rec.needs = disk.needs.clone();
     rec.log = disk.log.clone();
+    let keep = |changed: bool, kept: &str, new: &mut String| {
+        if !changed {
+            *new = kept.to_string();
+        }
+    };
+    keep(context_changed, &disk.context, &mut rec.context);
+    keep(spec_changed, &disk.spec, &mut rec.spec);
+    keep(success_changed, &disk.success, &mut rec.success);
+    keep(plan_changed, &disk.plan, &mut rec.plan);
+    let human = Some(taskrec::Author::Human);
+    if context_changed {
+        rec.by.context = human;
+    }
+    if spec_changed {
+        rec.by.spec = human;
+    }
+    if success_changed || assertions_changed {
+        rec.by.success = human;
+    }
+    if plan_changed {
+        rec.by.plan = human;
+    }
+    let past_define = matches!(disk.step, Some(Step::Plan | Step::Approve));
+    if (spec_changed || success_changed || assertions_changed) && past_define && incoming.requests.redo.is_none() && rec.by.plan != human {
+        rec.requests.redo = Some(taskrec::RedoStage::Plan);
+    }
     if by_hand {
         if !rec.log.is_empty() && !rec.log.ends_with('\n') {
             rec.log.push('\n');
@@ -261,9 +303,16 @@ pub(crate) fn gui_record(disk: &TaskRecord, incoming: &TaskRecord) -> Result<Tas
         rec.log.push_str(&format!("- {} done: marked done by hand\n", chrono::Utc::now().format("%Y-%m-%dT%H:%M:%SZ")));
     }
     if let Some(kept) = &disk.approval {
-        match rec.approval.as_mut() {
-            Some(approval) => approval.digest = kept.digest.clone(),
-            None => rec.approval = Some(kept.clone()),
+        let plan_side = spec_changed || success_changed || plan_changed || assertions_changed;
+        if plan_side {
+            let digest = taskrec::approval_digest(&rec);
+            rec.approval = Some(taskrec::Approval { status: "pending".into(), by: None, at: None, note: None, digest: Some(digest) });
+            rec.waiting = disk.state == State::Defined;
+        } else {
+            match rec.approval.as_mut() {
+                Some(approval) => approval.digest = kept.digest.clone(),
+                None => rec.approval = Some(kept.clone()),
+            }
         }
     }
     Ok(rec)
@@ -407,7 +456,7 @@ pub(crate) fn render_new(req: &FabricCreateReq, nt: &NewTask, id: &str, now: chr
     let stamp = now.format("%Y-%m-%dT%H:%M:%SZ");
     let pri = nt.pri;
     format!(
-        "---\nschema: 5\nid: {id}\nsource: null\ntitle: {}\ndue: {}\npri: {pri}\nstate: reminder\nstep: null\nwaiting: false\npaused: false\nsuspended: false\nsuspend_until: null\ncreated_at: {stamp}\nupdated_at: {stamp}\nrequests: {{delegate: false, cancel: false, redelegate: false, pause: false, resume: false, complete: false}}\nquestion: null\nanswers: []\ngrants: {{requested: [], granted: []}}\nplan_meta: null\nassertions: []\napproval: null\nverdict: null\ncost_usd: 0\nlinks: {{redelegated_from: null, redelegated_to: null}}\n---\n## Context\n{}## Spec\n{}## Success\n{}## Plan\n## Log\n",
+        "---\nschema: 6\nid: {id}\nsource: null\ntitle: {}\ndue: {}\npri: {pri}\nstate: reminder\nstep: null\nwaiting: false\npaused: false\nsuspended: false\nsuspend_until: null\ncreated_at: {stamp}\nupdated_at: {stamp}\nrequests: {{delegate: false, cancel: false, redelegate: false, pause: false, resume: false, complete: false, redo: null}}\nquestion: null\nanswers: []\ngrants: {{requested: [], granted: []}}\nplan_meta: null\nassertions: []\napproval: null\nverdict: null\ncost_usd: 0\nlinks: {{redelegated_from: null, redelegated_to: null}}\nby: {{context: null, spec: null, success: null, plan: null}}\nneeds: null\n---\n## Context\n{}## Spec\n{}## Success\n{}## Plan\n## Log\n",
         yaml_title(&nt.title),
         nt.due.as_deref().unwrap_or("null"),
         section_text(&req.context),
@@ -796,14 +845,14 @@ mod tests {
         };
         let r = create_in(&req, d.path()).unwrap();
         let text = read(&FabricReadReq { path: r.path.clone() }).unwrap().text;
-        assert!(text.starts_with("---\nschema: 5\n"));
+        assert!(text.starts_with("---\nschema: 6\n"));
         assert_eq!(updated_at(&text).len(), 20);
         assert!(text.contains(&format!("id: {}\n", r.id)));
         assert!(text.contains("title: \"order: \\\"filament\\\"\"\ndue: null\npri: 0\nstate: reminder\nstep: null\nwaiting: false\n"));
         assert!(
             text.contains("created_at: ")
                 && text.contains(
-                    "requests: {delegate: false, cancel: false, redelegate: false, pause: false, resume: false, complete: false}\n"
+                    "requests: {delegate: false, cancel: false, redelegate: false, pause: false, resume: false, complete: false, redo: null}\n"
                 )
         );
         assert!(text.contains(
@@ -846,6 +895,51 @@ mod tests {
         assert_eq!(slugify(&format!("{} z", "a".repeat(39))), "a".repeat(39));
     }
 
+    fn gui_put(path: &str, rec: &TaskRecord, expected: &str) -> Result<FabricWriteRes, FabrError> {
+        write(&FabricWriteReq { path: path.into(), text: taskrec::render(rec), expected_updated_at: expected.into() })
+    }
+
+    #[test]
+    fn the_gui_edits_sections_until_execution_starts_and_not_after() {
+        let d = tempfile::tempdir().unwrap();
+        let made = create_in(&FabricCreateReq { spec: Some("old spec".into()), ..create_req(d.path(), "edit me") }, d.path()).unwrap();
+        let read_rec = || taskrec::parse(&read(&FabricReadReq { path: made.path.clone() }).unwrap().text).unwrap();
+        let mut rec = read_rec();
+        rec.spec = "new spec".into();
+        rec.title = "renamed".into();
+        gui_put(&made.path, &rec, &rec.updated_at.clone()).unwrap();
+        let after = read_rec();
+        assert_eq!((after.spec.as_str(), after.title.as_str()), ("new spec", "renamed"));
+        assert_eq!((after.by.spec, after.by.plan, after.by.context), (Some(taskrec::Author::Human), None, None));
+        let mut rec = after;
+        rec.state = State::Defined;
+        rec.step = Some(Step::Approve);
+        rec.plan = "1. do it".into();
+        rec.approval = Some(taskrec::Approval { status: "approved".into(), by: Some("gui".into()), at: None, note: None, digest: None });
+        rec.approval.as_mut().unwrap().digest = Some(taskrec::approval_digest(&rec));
+        taskrec::write_record(&PathBuf::from(&made.path), &rec, None).unwrap();
+        let mut rec = read_rec();
+        rec.success = "changed success".into();
+        gui_put(&made.path, &rec, &rec.updated_at.clone()).unwrap();
+        let after = read_rec();
+        assert_eq!(after.requests.redo, Some(taskrec::RedoStage::Plan));
+        assert_eq!(after.approval.as_ref().map(|a| a.status.as_str()), Some("pending"));
+        assert_eq!(after.approval.as_ref().unwrap().digest, Some(taskrec::approval_digest(&after)));
+        let mut rec = after;
+        rec.state = State::InProgress;
+        rec.step = Some(Step::Execute);
+        taskrec::write_record(&PathBuf::from(&made.path), &rec, None).unwrap();
+        let mut rec = read_rec();
+        rec.plan = "sneaky".into();
+        let err = gui_put(&made.path, &rec, &rec.updated_at.clone()).unwrap_err();
+        assert!(matches!(&err, FabrError::BadRequest(m) if m == "task is frozen once execution starts"), "{err:?}");
+        let mut rec = read_rec();
+        rec.requests.pause = true;
+        rec.suspended = true;
+        gui_put(&made.path, &rec, &rec.updated_at.clone()).unwrap();
+        assert!(read_rec().requests.pause);
+    }
+
     fn create_req(dir: &Path, title: &str) -> FabricCreateReq {
         FabricCreateReq {
             folder: dir.to_string_lossy().into_owned(),
@@ -864,7 +958,7 @@ mod tests {
         let req = FabricCreateReq { due: Some("2026-10-28T09:30".into()), pri: Some(3), ..create_req(d.path(), "call the bank") };
         let made = create_in(&req, d.path()).unwrap();
         let rec = taskrec::parse(&read(&FabricReadReq { path: made.path }).unwrap().text).unwrap();
-        assert_eq!((rec.schema, rec.pri, rec.due.as_deref(), rec.state), (5, 3, Some("2026-10-28T09:30"), State::Reminder));
+        assert_eq!((rec.schema, rec.pri, rec.due.as_deref(), rec.state), (6, 3, Some("2026-10-28T09:30"), State::Reminder));
         for bad in ["2026-10-28T25:00", "2026-10-28T9:30", "2026-10-28 09:30"] {
             let r = create_in(&FabricCreateReq { due: Some(bad.into()), ..create_req(d.path(), "x") }, d.path());
             assert!(matches!(r, Err(FabrError::BadRequest(_))), "{bad}");

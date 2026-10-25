@@ -1,3 +1,4 @@
+use fabr_core::setup::Capabilities;
 use fabr_core::{FabrError, Secret};
 use serde::Deserialize;
 use std::collections::VecDeque;
@@ -43,9 +44,19 @@ pub struct ToolCall {
     pub content: Option<String>,
 }
 
+pub struct PlanInput<'a> {
+    pub title: &'a str,
+    pub spec: &'a str,
+    pub success: &'a str,
+    pub refusal_note: Option<&'a str>,
+    pub answers: &'a str,
+    pub allowed: &'a Capabilities,
+    pub rejection: Option<&'a str>,
+}
+
 pub trait Model {
     fn define(&self, title: &str, context: &str) -> Result<DefineDraft, FabrError>;
-    fn plan(&self, title: &str, spec: &str, success: &str, refusal_note: Option<&str>, answers: &str) -> Result<PlanDraft, FabrError>;
+    fn plan(&self, input: &PlanInput) -> Result<PlanDraft, FabrError>;
     fn execute(&self, title: &str, spec: &str, plan: &str) -> Result<Vec<ToolCall>, FabrError>;
 }
 
@@ -56,6 +67,7 @@ pub struct ScriptedModel {
     executed: AtomicUsize,
     question: Mutex<Option<String>>,
     grants: Mutex<Vec<String>>,
+    rejections: Mutex<Vec<Option<String>>>,
 }
 
 impl ScriptedModel {
@@ -66,7 +78,12 @@ impl ScriptedModel {
             executed: AtomicUsize::new(0),
             question: Mutex::new(None),
             grants: Mutex::new(Vec::new()),
+            rejections: Mutex::new(Vec::new()),
         }
+    }
+
+    pub fn plan_rejections(&self) -> Vec<Option<String>> {
+        self.rejections.lock().unwrap_or_else(|p| p.into_inner()).clone()
     }
 
     pub fn with_grants(self, grants: &[&str]) -> Self {
@@ -103,7 +120,8 @@ impl Model for ScriptedModel {
         })
     }
 
-    fn plan(&self, _: &str, _: &str, _: &str, _: Option<&str>, _: &str) -> Result<PlanDraft, FabrError> {
+    fn plan(&self, input: &PlanInput) -> Result<PlanDraft, FabrError> {
+        self.rejections.lock().unwrap_or_else(|p| p.into_inner()).push(input.rejection.map(str::to_string));
         let mut q = self.plans.lock().unwrap_or_else(|p| p.into_inner());
         q.pop_front().ok_or_else(|| FabrError::BadRequest("no scripted plan".into()))
     }
@@ -247,16 +265,20 @@ impl Model for AnthropicModel {
         parse_define(&text)
     }
 
-    fn plan(&self, title: &str, spec: &str, success: &str, refusal_note: Option<&str>, answers: &str) -> Result<PlanDraft, FabrError> {
+    fn plan(&self, input: &PlanInput) -> Result<PlanDraft, FabrError> {
+        let PlanInput { title, spec, success, refusal_note, answers, allowed, rejection } = input;
         let note = refusal_note.unwrap_or("");
+        let rejected = rejection.map(|r| format!("\nYour previous plan was rejected: {r}. Return a corrected plan.")).unwrap_or_default();
         let prompt = format!(
             "Task title: {title}\nSpec:\n{spec}\nSuccess:\n{success}\nRefusal note:\n{note}\nUser answers:{answers}\n\
              Return one JSON object with keys spec, success, plan, assertions, plan_meta. \
              assertions is a list of objects with id and text. \
-             plan_meta has reversibility (reversible or irreversible), tools (read_file, write_file, list_dir), \
+             plan_meta has reversibility (reversible or irreversible), tools, \
              and checks (list of objects with cmd and args). checks is argv and must not use a shell. \
              spec, success, and plan are non-empty strings. \
-             Do not request browser, payment, or network tools."
+             Allowed tools: {}. Allowed check commands: {}. Plan only within them; every check cmd must be one of these.{rejected}",
+            allowed.tools.join(", "),
+            allowed.checks.join(", ")
         );
         let body = serde_json::json!({
             "model": self.model,

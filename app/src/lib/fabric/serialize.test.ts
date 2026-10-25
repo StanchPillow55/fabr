@@ -11,7 +11,7 @@ describe('serializeRecord', () => {
     const name = path.split('fixtures/')[1];
     it(`round-trips ${name}`, () => {
       const out = serializeRecord(parseRecord(text));
-      expect(parseRecord(out)).toEqual({ ...parseRecord(text), schema: 5 });
+      expect(parseRecord(out)).toEqual({ ...parseRecord(text), schema: 6 });
       expect(Object.keys(parseFrontMatter(out).data)).toEqual([...FIELDS]);
     });
   }
@@ -30,17 +30,17 @@ describe('serializeRecord', () => {
     const out = serializeRecord(parseRecord(c.text));
     expect(out).toContain('options: [once, always, "no"]');
     expect(out).toMatch(/^updated_at: 2026-10-24T18:05:30Z$/m);
-    expect(out).toMatch(/^requests: \{delegate: false, cancel: false, redelegate: false, pause: false, resume: false, complete: false\}$/m);
+    expect(out).toMatch(/^requests: \{delegate: false, cancel: false, redelegate: false, pause: false, resume: false, complete: false, redo: null\}$/m);
   });
 
   it('reads schema 2 as pri 0 and writes schema 4 with pri', () => {
     const old = parseRecord(records.find((x) => x.path.includes('01-reminder'))!.text.replace(/^schema: 4$/m, 'schema: 2').replace(/^(pri|paused|suspended|suspend_until):.*\n/gm, ''));
     expect([old.schema, old.pri]).toEqual([2, 0]);
     const out = serializeRecord(old);
-    expect(out).toMatch(/^schema: 5$/m);
+    expect(out).toMatch(/^schema: 6$/m);
     expect(out).toMatch(/^pri: 0$/m);
     expect(out.indexOf('\ndue:')).toBeLessThan(out.indexOf('\npri:'));
-    expect(parseRecord(out)).toMatchObject({ schema: 5, pri: 0 });
+    expect(parseRecord(out)).toMatchObject({ schema: 6, pri: 0 });
   });
 
   it('keeps pri and a timed due through a round trip', () => {
@@ -62,8 +62,8 @@ describe('schema 4 fields', () => {
     const r = parseRecord(old);
     expect(r).toMatchObject({ schema: 3, paused: false, suspended: false, suspend_until: null, requests: { pause: false, resume: false, complete: false } });
     const out = serializeRecord(r);
-    expect(out).toMatch(/^schema: 5$/m);
-    expect(out).toMatch(/^requests: \{delegate: false, cancel: false, redelegate: false, pause: false, resume: false, complete: false\}$/m);
+    expect(out).toMatch(/^schema: 6$/m);
+    expect(out).toMatch(/^requests: \{delegate: false, cancel: false, redelegate: false, pause: false, resume: false, complete: false, redo: null\}$/m);
     expect(out.indexOf('\nwaiting:')).toBeLessThan(out.indexOf('\npaused:'));
     expect(out.indexOf('\nsuspend_until:')).toBeLessThan(out.indexOf('\ncreated_at:'));
     expect(parseRecord(serializeRecord({ ...r, suspended: true, suspend_until: '2026-11-01T09:30' }))).toMatchObject({ suspended: true, suspend_until: '2026-11-01T09:30' });

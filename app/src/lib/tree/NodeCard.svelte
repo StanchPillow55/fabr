@@ -2,7 +2,7 @@
   import type { Item, Node, Source, SourceError } from '../api/types';
   import { MAX_ROWS } from '../constants';
   import { isOpen } from '../fabric/phase';
-  import { cardAside, cardTitle, dueLabel, isHidden, isVirtualRoot, rollup, rootCounts, sourceLines, type BoxModel, type Key } from '../model';
+  import { barAgents, cardTitle, dueLabel, isHidden, isVirtualRoot, rollup, rootCounts, sourceLines, type BoxModel, type Key } from '../model';
   import ErrorText from '../ui/ErrorText.svelte';
   import DueBadge from '../ui/DueBadge.svelte';
   import Icon from '../ui/Icon.svelte';
@@ -43,7 +43,7 @@
   const hidden = $derived(isHidden(node));
   const virtual = $derived(isVirtualRoot(node));
   const title = $derived(cardTitle(node));
-  const aside = $derived(cardAside(node, source));
+  const barCount = $derived(fabric && folder && node.managed && !virtual ? barAgents(fabric.agentsFor(folder)).length : 0);
   const counts = $derived(virtual && !model.collapsed ? rootCounts(tally ?? node, today) : null);
   const lines = $derived(virtual && !model.collapsed ? sourceLines(tally ?? node, sources, errors, today, undefined, pending) : []);
   const canToggle = $derived(node.children.length > 0 || node.items.length > 0);
@@ -100,7 +100,6 @@
     {:else}
       <span class="chev chev--none"></span>
     {/if}
-    {#if source}<span class="card__src"><Icon name={source.host ? 'server' : 'folder'} size={13} /></span>{/if}
     <span class="card__name">{title}</span>
     {#if hidden}
       <span class="card__hidden" title="Hidden node"><Icon name="eye-off" size={12} /></span>
@@ -108,8 +107,6 @@
     {#if node.warnings.length}
       <span class="card__warn" title={node.warnings.join('\n')}><Icon name="warning" size={12} /></span>
     {/if}
-    {#if fabric && folder}<TaskStrip {fabric} {folder} />{/if}
-    {#if aside}<span class="card__kind">{aside}</span>{/if}
     {#if onsettings}
       <button type="button" class="chev card__gear" title="Node settings" aria-label="Node settings" onclick={stop(onsettings)} ondblclick={(e) => e.stopPropagation()}>
         <Icon name="gear" size={12} />
@@ -118,12 +115,20 @@
   </div>
 
   {#if counts}
+    <div class="card__row card__row--counts">
+      <span><b>{counts.todo}</b> todo</span><span class="dotsep">·</span>
+      <span class:card__wip={counts.active > 0}><b>{counts.active}</b> active</span><span class="dotsep">·</span>
+      <span class:card__overdue={counts.overdue > 0}><b>{counts.overdue}</b> overdue</span>
+    </div>
+  {:else if node.managed && !virtual}
+    <div class="card__row card__row--counts">{#if fabric && folder}<TaskStrip {fabric} {folder} />{/if}</div>
+  {/if}
+  {#if barCount > 0 && fabric}
+    <div class="card__row card__row--bars"><TaskStrip {fabric} {folder} part="bars" /></div>
+  {/if}
+
+  {#if counts}
     <ul class="card__items">
-      <li class="row row--counts">
-        <span><b>{counts.todo}</b> todo</span><span class="dotsep">·</span>
-        <span class:card__wip={counts.active > 0}><b>{counts.active}</b> active</span><span class="dotsep">·</span>
-        <span class:card__overdue={counts.overdue > 0}><b>{counts.overdue}</b> overdue</span>
-      </li>
       {#each lines as l (l.key)}
         <li class="row row--source">
           <button type="button" class="srcline" title={l.error ?? `Open ${l.name}`} onclick={stop(() => onsource?.(l.key))}>

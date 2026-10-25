@@ -1,6 +1,7 @@
 import type { Item, Node, Source, SourceError } from './api/types';
 import { PHASE_LABEL, isActive, isOpen, type Phase } from './fabric/phase';
-import { HEAD, ROW, LIST_PAD, ROLLUP, MAX_ROWS } from './constants';
+import { leadOf, type AgentView } from './fabric/stage';
+import { BARS, COUNTS, HEAD, ROW, LIST_PAD, ROLLUP, MAX_ROWS } from './constants';
 
 export type Key = string;
 export type Filter = 'all' | 'open' | 'wip' | 'overdue';
@@ -173,6 +174,14 @@ export function computeForceOpen(index: TreeIndex, query: string): Set<Key> {
   return out;
 }
 
+const BAR_PHASES: readonly string[] = ['working', 'needs_you', 'paused', 'needs_harness'];
+
+export function barAgents(list: AgentView[]): AgentView[] {
+  const live = list.filter((v) => BAR_PHASES.includes(v.phase));
+  const lead = leadOf(live);
+  return lead ? [lead, ...live.filter((v) => v !== lead)] : live;
+}
+
 export interface BoxCtx extends ItemFilter {
   collapsed: ReadonlySet<Key>;
   moreOpen: ReadonlySet<Key>;
@@ -193,16 +202,18 @@ export interface BoxModel {
   h: number;
 }
 
-export function boxModel(n: Node, ctx: BoxCtx): BoxModel {
+export function boxModel(n: Node, ctx: BoxCtx, activeAgents = 0): BoxModel {
   const collapsed = isCollapsed(n, ctx);
   const visible = n.items.filter((i) => passes(i, ctx));
   const open = ctx.moreOpen.has(nodeKey(n));
   const shown = open ? visible : visible.slice(0, MAX_ROWS);
   const more = visible.length - shown.length;
   let h = HEAD;
-  if (isVirtualRoot(n) && !collapsed) {
-    h += LIST_PAD + (1 + n.children.length) * ROW;
-  } else if (n.managed && !collapsed) {
+  if (isVirtualRoot(n)) {
+    if (!collapsed) h += COUNTS + LIST_PAD + n.children.length * ROW;
+  } else if (n.managed) h += COUNTS;
+  if (n.managed && !isVirtualRoot(n) && activeAgents > 0) h += BARS;
+  if (!isVirtualRoot(n) && n.managed && !collapsed) {
     h += LIST_PAD + ROW + Math.max(shown.length, 1) * ROW;
     if (more > 0 || (open && visible.length > MAX_ROWS)) h += ROW;
     h += n.warnings.length * ROW;
@@ -334,7 +345,7 @@ export function flattenItems(root: Node, f: ItemFilter, query = ''): ListRow[] {
   return rows;
 }
 
-const STATUS_ORDER: Record<Phase, number> = { needs_you: 0, working: 1, paused: 2, todo: 3, suspended: 4, done: 5, failed: 6 };
+const STATUS_ORDER: Record<Phase, number> = { needs_you: 0, needs_harness: 1, working: 2, paused: 3, todo: 4, suspended: 5, done: 6, failed: 7 };
 
 export function sortRows(rows: ListRow[], by: SortBy, dir: SortDir, today: string): ListRow[] {
   const sign = dir === 'asc' ? 1 : -1;

@@ -26,7 +26,7 @@ describe('stageOf, table A', () => {
     expect(GATES).toEqual(['define', 'approve']);
   });
   it('1 delegate: a reminder with the delegate request', () => {
-    expect(stageOf(rec({ requests: { delegate: true, cancel: false, redelegate: false, pause: false, resume: false, complete: false } }))).toBe('delegate');
+    expect(stageOf(rec({ requests: { delegate: true, cancel: false, redelegate: false, pause: false, resume: false, complete: false, redo: null } }))).toBe('delegate');
     expect(stageOf(rec())).toBeNull();
   });
   it('2 gather: task with step gather or null', () => {
@@ -228,7 +228,7 @@ describe('pause and suspend', () => {
     expect(render(StageBar, { props: { view: v, mode: 'full', now: NOW } }).body).not.toContain('sbar__seg--pulse');
   });
   it('lists Paused between Needs you and Dead; a paused agent leads only when nothing else runs', () => {
-    expect(GROUPS.slice(0, 3)).toEqual(['needs-you', 'paused', 'dead']);
+    expect(GROUPS.slice(0, 3)).toEqual(['needs-you', 'needs-harness', 'paused']);
     const paused = viewOf(held(rec({ state: 'in_progress', step: 'evaluate', paused: true })), entry({ activity: 'paused' }), 'connected', NOW)!;
     const running = viewOf(held(rec({ state: 'task', step: 'plan' })), entry({ step: 'plan' }), 'connected', NOW)!;
     expect(leadOf([paused, running])).toBe(running);

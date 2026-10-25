@@ -165,30 +165,58 @@ fn define_question_pauses_without_a_new_state() {
 }
 
 #[test]
-fn unsupported_tool_is_rejected_when_the_plan_is_written() {
+fn a_plan_still_invalid_after_one_repair_round_parks_with_needs_and_no_error_count() {
     let (_tmp, fabric, ws) = setup();
     let root = ws.local_path(&NodeRef { source: "local".into(), path: String::new() }).unwrap();
     let model = ScriptedModel::new(draft("1. Open the shop", &["browser"], ("test", &["-f", "greet.txt"])), vec![write_call()]);
+    model.push_plan(draft("1. Open the shop", &["browser"], ("git", &["status"])));
     save_one(&ws, "browse");
-    let err = run_once(&ws, "local", "", &fabric, &model).unwrap_err();
-    assert!(err.message().contains("unsupported tool browser"));
-    let path = record_path(&root);
-    let rec = load(&path);
-    assert_eq!((rec.state, rec.step), (State::Task, Some(Step::Plan)));
-    assert!(rec.approval.is_none());
-    assert!(rec.log.contains("plan: error 1: unsupported tool browser"), "{}", rec.log);
+    run_once(&ws, "local", "", &fabric, &model).unwrap();
+    let rejections = model.plan_rejections();
+    assert_eq!(rejections.len(), 2);
+    assert!(rejections[0].is_none());
+    let sent = rejections[1].as_deref().unwrap();
+    assert!(sent.contains("unsupported tool browser") && sent.contains("allowed checks: test"), "{sent}");
+    let rec = load(&record_path(&root));
+    assert_eq!((rec.state, rec.step), (State::Defined, Some(Step::Approve)));
+    assert_eq!(rec.needs.as_deref(), Some("harness: browser, checks: git"));
+    let meta = rec.plan_meta.as_ref().unwrap();
+    assert_eq!((meta.requires.tools.clone(), meta.requires.checks.clone()), (vec!["browser".to_string()], vec!["git".to_string()]));
+    assert!(rec.log.contains("plan: needs harness: browser, checks: git") && !rec.log.contains("error"), "{}", rec.log);
+    assert_eq!(rec.by.plan, Some(taskrec::Author::Agent));
     assert_eq!(model.execute_count(), 0);
 }
 
 #[test]
-fn a_shell_or_interpreter_check_is_rejected_when_the_plan_is_written() {
+fn a_repair_round_fixes_a_disallowed_check() {
+    let (_tmp, fabric, ws) = setup();
+    let root = ws.local_path(&NodeRef { source: "local".into(), path: String::new() }).unwrap();
+    let model = ScriptedModel::new(draft("1. write", &["write_file"], ("git", &["status"])), vec![write_call()]);
+    model.push_plan(greet_plan());
+    save_one(&ws, "repair");
+    run_once(&ws, "local", "", &fabric, &model).unwrap();
+    let rec = load(&record_path(&root));
+    assert!(model.plan_rejections()[1].as_deref().unwrap().contains("check command git is not allowed; allowed tools"));
+    assert!(rec.needs.is_none() && rec.log.contains("plan: retry after rejection: check command git is not allowed"), "{}", rec.log);
+    assert_eq!(rec.plan_meta.unwrap().requires.checks, vec!["test".to_string()]);
+}
+
+#[test]
+fn a_shell_or_interpreter_check_never_reaches_an_approvable_plan() {
     for (cmd, args) in [("sh", vec!["-c", "id"]), ("env", vec!["sh"]), ("python3", vec!["-c", "1"]), ("cat", vec!["/etc/passwd"])] {
         let (_tmp, fabric, ws) = setup();
         let root = ws.local_path(&NodeRef { source: "local".into(), path: String::new() }).unwrap();
-        let model = ScriptedModel::new(draft("1. check", &["write_file"], (cmd, &args)), vec![write_call()]);
+        let bad = || draft("1. check", &["write_file"], (cmd, &args));
+        let model = ScriptedModel::new(bad(), vec![write_call()]);
+        model.push_plan(bad());
         save_one(&ws, "check");
-        assert!(run_once(&ws, "local", "", &fabric, &model).is_err(), "{cmd}");
-        assert!(load(&record_path(&root)).approval.is_none(), "{cmd}");
+        run_once(&ws, "local", "", &fabric, &model).unwrap();
+        let rec = load(&record_path(&root));
+        assert!(rec.needs.is_some(), "{cmd}");
+        edit(&record_path(&root), |r| r.approval.as_mut().unwrap().status = "approved".into());
+        let _ = run_once(&ws, "local", "", &fabric, &model);
+        assert_eq!(load(&record_path(&root)).state, State::Defined, "{cmd}");
+        assert_eq!(model.execute_count(), 0, "{cmd}");
     }
 }
 
@@ -305,6 +333,7 @@ fn restart_does_not_write_the_file_twice() {
         tools: vec!["write_file".into()],
         assumptions: Vec::new(),
         checks: vec![taskrec::Check { cmd: "test".into(), args: vec!["-f".into(), "greet.txt".into()] }],
+        requires: Default::default(),
     });
     let expected = rec.updated_at.clone();
     taskrec::write_record(&path, &rec, Some(&expected)).unwrap();
@@ -386,7 +415,7 @@ fn ten_fixtures_one_stage_matches_fabric_updated_at() {
         let text = std::fs::read_to_string(&fixture).unwrap();
         let original = taskrec::parse(&text).unwrap_or_else(|e| panic!("{}: {}", fixture.display(), e.message()));
         assert!(text.starts_with("---\nschema: 4\n"), "{}", fixture.display());
-        assert_eq!((original.schema, original.pri), (5, 0), "{}", fixture.display());
+        assert_eq!((original.schema, original.pri), (6, 0), "{}", fixture.display());
         assert!(original.source.is_none(), "{}", fixture.display());
         assert_eq!(fabric::updated_at(&text), original.updated_at, "{}", fixture.display());
 
@@ -445,7 +474,10 @@ fn ten_fixtures_one_stage_matches_fabric_updated_at() {
                 }
                 (State::InProgress, Some(Step::Execute)) => {
                     assert_eq!(again.state, State::InProgress, "{}", fixture.display());
-                    assert_eq!(again.step, Some(Step::Evaluate), "{}", fixture.display());
+                    let unsupported = before.plan_meta.as_ref().is_some_and(|m| m.tools.iter().any(|t| t == "browser"));
+                    assert_eq!(again.needs.is_some(), unsupported, "{}", fixture.display());
+                    let want = if unsupported { Step::Execute } else { Step::Evaluate };
+                    assert_eq!(again.step, Some(want), "{}", fixture.display());
                 }
                 (State::Succeeded | State::Failed, _) => {
                     assert_eq!(again.state, before.state, "{}", fixture.display());
@@ -564,7 +596,7 @@ impl fabr_agent::Model for Broken {
         Err(fabr_core::FabrError::Remote("model said no, key sk-ant-api03-FAKEFAKEFAKEFAKEFAKE-x9Qa".into()))
     }
 
-    fn plan(&self, _: &str, _: &str, _: &str, _: Option<&str>, _: &str) -> Result<fabr_agent::PlanDraft, fabr_core::FabrError> {
+    fn plan(&self, _: &fabr_agent::PlanInput) -> Result<fabr_agent::PlanDraft, fabr_core::FabrError> {
         Err(fabr_core::FabrError::Remote("no plan".into()))
     }
 
@@ -672,7 +704,7 @@ impl fabr_agent::Model for CancelsMidRun {
         unreachable!()
     }
 
-    fn plan(&self, _: &str, _: &str, _: &str, _: Option<&str>, _: &str) -> Result<fabr_agent::PlanDraft, fabr_core::FabrError> {
+    fn plan(&self, _: &fabr_agent::PlanInput) -> Result<fabr_agent::PlanDraft, fabr_core::FabrError> {
         unreachable!()
     }
 
@@ -722,6 +754,7 @@ fn a_hung_check_is_killed_and_counted_as_a_stage_error() {
             tools: vec![],
             assumptions: vec![],
             checks: vec![taskrec::Check { cmd: "tail".into(), args: vec!["-f".into(), "greet.txt".into()] }],
+            requires: Default::default(),
         });
     });
     let model = ScriptedModel::new(greet_plan(), vec![]);
@@ -749,9 +782,9 @@ impl fabr_agent::Model for Recording {
         self.inner.as_ref().unwrap().define(title, context)
     }
 
-    fn plan(&self, t: &str, s: &str, c: &str, n: Option<&str>, a: &str) -> Result<fabr_agent::PlanDraft, fabr_core::FabrError> {
-        self.plan_answers.lock().unwrap().push(a.to_string());
-        self.inner.as_ref().unwrap().plan(t, s, c, n, a)
+    fn plan(&self, input: &fabr_agent::PlanInput) -> Result<fabr_agent::PlanDraft, fabr_core::FabrError> {
+        self.plan_answers.lock().unwrap().push(input.answers.to_string());
+        self.inner.as_ref().unwrap().plan(input)
     }
 
     fn execute(&self, t: &str, s: &str, p: &str) -> Result<Vec<ToolCall>, fabr_core::FabrError> {
@@ -914,4 +947,78 @@ fn registry_entry_mirrors_the_record_from_gather_to_notify_and_cancel_removes_it
     assert_eq!(rec.state, State::Failed);
     assert!(rec.log.contains("execute: cancelled by user"));
     assert!(entry(&fabric, &second).is_none());
+}
+
+fn drive_n(root: &Path, path: &Path, ctl: &fabr_agent::Ctl, model: &ScriptedModel, n: usize) {
+    for _ in 0..n {
+        let _ = fabr_agent::advance_with(root, path, ctl, model);
+    }
+}
+
+#[test]
+fn a_read_only_machine_plans_and_auto_approves_then_parks_at_execute_and_a_capable_one_executes() {
+    let (_tmp, fabric, ws) = setup();
+    let root = ws.local_path(&NodeRef { source: "local".into(), path: String::new() }).unwrap();
+    let model = ScriptedModel::new(greet_plan(), vec![write_call()]);
+    let path = save_one(&ws, "greet");
+    let mut ro = fabr_agent::Ctl::new(&fabric, 10);
+    ro.harness.mode = fabr_core::setup::ExecuteMode::ReadOnly;
+    ro.harness.auto_mode = true;
+    drive_n(&root, &path, &ro, &model, 10);
+    let rec = load(&path);
+    assert_eq!((rec.state, rec.step), (State::Defined, Some(Step::Approve)));
+    assert_eq!(rec.approval.as_ref().map(|a| (a.status.as_str(), a.by.as_deref())), Some(("approved", Some("auto"))));
+    assert_eq!(rec.needs.as_deref(), Some("harness: write_file, checks: test"));
+    assert_eq!(rec.log.matches("execute: needs harness: write_file, checks: test").count(), 1, "{}", rec.log);
+    assert_eq!(Phase::of(&rec, "2026-10-25T12:00"), Phase::NeedsHarness);
+    assert_eq!(model.execute_count(), 0);
+    assert!(!root.join("greet.txt").exists());
+    let full = fabr_agent::Ctl::new(&fabric, 10);
+    drive_n(&root, &path, &full, &model, 12);
+    let rec = load(&path);
+    assert_eq!(rec.state, State::Succeeded, "{}", rec.log);
+    assert!(rec.needs.is_none());
+    assert_eq!(std::fs::read_to_string(root.join("greet.txt")).unwrap(), "hi");
+}
+
+#[test]
+fn human_sections_are_not_regenerated_and_redo_steps_back() {
+    let (_tmp, fabric, ws) = setup();
+    let root = ws.local_path(&NodeRef { source: "local".into(), path: String::new() }).unwrap();
+    let model = ScriptedModel::new(greet_plan(), vec![write_call()]);
+    let path = save_one(&ws, "greet");
+    let ctl = fabr_agent::Ctl::new(&fabric, 10);
+    drive_n(&root, &path, &ctl, &model, 2);
+    assert_eq!(load(&path).step, Some(Step::Define));
+    edit(&path, |r| {
+        r.spec = "my own spec".into();
+        r.success = "my own success".into();
+        r.plan = "my own plan".into();
+        r.by.spec = Some(taskrec::Author::Human);
+        r.by.success = Some(taskrec::Author::Human);
+        r.by.plan = Some(taskrec::Author::Human);
+        r.assertions = vec![taskrec::Assertion { id: "h1".into(), text: "greet.txt contains hi".into() }];
+    });
+    drive_n(&root, &path, &ctl, &model, 3);
+    let rec = load(&path);
+    assert_eq!((rec.state, rec.step), (State::Defined, Some(Step::Approve)));
+    assert_eq!((rec.spec.as_str(), rec.success.as_str(), rec.plan.as_str()), ("my own spec", "my own success", "my own plan"));
+    assert_eq!(rec.assertions[0].id, "h1");
+    assert_eq!(rec.by.plan, Some(taskrec::Author::Human));
+    assert_eq!(rec.plan_meta.as_ref().unwrap().requires.checks, vec!["test".to_string()]);
+    edit(&path, |r| r.requests.redo = Some(taskrec::RedoStage::Plan));
+    drive_n(&root, &path, &ctl, &model, 1);
+    let rec = load(&path);
+    assert_eq!((rec.state, rec.step), (State::Task, Some(Step::Plan)));
+    assert!(rec.plan.is_empty() && rec.approval.is_none() && rec.plan_meta.is_none() && rec.requests.redo.is_none());
+    assert_eq!(rec.spec, "my own spec");
+    assert!(rec.log.contains("redo: plan by user"), "{}", rec.log);
+    edit(&path, |r| {
+        r.state = State::InProgress;
+        r.step = Some(Step::Execute);
+        r.requests.redo = Some(taskrec::RedoStage::Define);
+    });
+    drive_n(&root, &path, &ctl, &model, 1);
+    let rec = load(&path);
+    assert!(rec.requests.redo.is_none() && rec.log.contains("ignored request redo in state in_progress"), "{}", rec.log);
 }

@@ -1,4 +1,4 @@
-import { FIELDS, OPTIONAL_FIELDS, SECTION_HEADINGS, STATES, STEPS, type FrontMatter, type LogEntry, type Sections, type TaskRecord } from './types';
+import { FIELDS, NO_AUTHOR, OPTIONAL_FIELDS, SECTION_HEADINGS, STATES, STEPS, type Author, type By, type FrontMatter, type PlanMeta, type Redo, type Requires, type LogEntry, type Sections, type TaskRecord } from './types';
 import { parseYaml } from './yaml';
 
 export function parseFrontMatter(text: string): { data: Record<string, unknown>; body: string } {
@@ -39,9 +39,27 @@ export function splitContext(context: string): { own: string; gathered: string }
   return { own: lines.slice(0, i).join('\n').trim(), gathered: lines.slice(i + 1).join('\n').trim() };
 }
 
+const author = (v: unknown): Author => (v === 'human' || v === 'agent' ? v : null);
+
+function parseBy(v: unknown): By {
+  if (typeof v !== 'object' || v === null || Array.isArray(v)) return { ...NO_AUTHOR };
+  const o = v as Record<string, unknown>;
+  return { context: author(o.context), spec: author(o.spec), success: author(o.success), plan: author(o.plan) };
+}
+
+const strings = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : []);
+
+function parsePlanMeta(v: unknown): PlanMeta | null {
+  if (typeof v !== 'object' || v === null || Array.isArray(v)) return null;
+  const p = v as Record<string, unknown>;
+  const req = typeof p.requires === 'object' && p.requires !== null && !Array.isArray(p.requires) ? (p.requires as Record<string, unknown>) : {};
+  const requires: Requires = { tools: strings(req.tools), checks: strings(req.checks) };
+  return { ...(p as unknown as PlanMeta), requires };
+}
+
 export function parseRecord(text: string): TaskRecord {
   const { data, body } = parseFrontMatter(text);
-  if (![2, 3, 4, 5].includes(data.schema as number)) throw new Error(`unsupported schema ${String(data.schema)}`);
+  if (![2, 3, 4, 5, 6].includes(data.schema as number)) throw new Error(`unsupported schema ${String(data.schema)}`);
   for (const f of FIELDS) if (!(f in data) && !OPTIONAL_FIELDS.includes(f)) throw new Error(`missing front matter field "${f}"`);
   if (!(STATES as readonly string[]).includes(data.state as string)) throw new Error(`invalid state "${String(data.state)}"`);
   if (data.step !== null && !(STEPS as readonly string[]).includes(data.step as string)) throw new Error(`invalid step "${String(data.step)}"`);
@@ -54,7 +72,7 @@ export function parseRecord(text: string): TaskRecord {
   const pri = data.pri ?? 0;
   if (typeof pri !== 'number' || !Number.isInteger(pri) || pri < 0 || pri > 3) throw new Error(`invalid pri "${String(pri)}"`);
   const req = data.requests as Record<string, unknown>;
-  const requests = { ...req, pause: req.pause === true, resume: req.resume === true, complete: req.complete === true };
+  const requests = { ...req, pause: req.pause === true, resume: req.resume === true, complete: req.complete === true, redo: (req.redo === 'define' || req.redo === 'plan' ? req.redo : null) as Redo | null };
   const until = typeof data.suspend_until === 'string' && data.suspend_until !== '' ? data.suspend_until : null;
-  return { ...(data as unknown as FrontMatter), pri, requests: requests as unknown as FrontMatter['requests'], paused: data.paused === true, suspended: data.suspended === true, suspend_until: until, sections: parseSections(body) };
+  return { ...(data as unknown as FrontMatter), pri, requests: requests as unknown as FrontMatter['requests'], needs: typeof data.needs === 'string' && data.needs !== '' ? data.needs : null, by: parseBy(data.by), plan_meta: parsePlanMeta(data.plan_meta), paused: data.paused === true, suspended: data.suspended === true, suspend_until: until, sections: parseSections(body) };
 }

@@ -65,7 +65,7 @@ describe('mock api', () => {
     const done = serializeRecord({ ...rec, state: 'succeeded', updated_at: '2030-01-01T00:00:00Z' });
     await api.fabricWrite({ path: rem.path, text: done, expected_updated_at: rec.updated_at });
     const after = parseRecord((await api.fabricRead(rem.path)).text);
-    expect(after).toMatchObject({ state: 'succeeded', schema: 5 });
+    expect(after).toMatchObject({ state: 'succeeded', schema: 6 });
     expect(after.sections.logEntries.at(-1)?.message).toMatch(/done by hand/);
     const run = await read('05-running');
     const forged = serializeRecord({ ...parseRecord(run.text), state: 'succeeded' });

@@ -35,8 +35,16 @@ describe('phaseOf', () => {
     expect(phaseOf(base({ waiting: true, question: { answer: null } as TaskRecord['question'] }), '2026-10-25T08:00')).toBe('needs_you');
   });
 
+  it('puts needs_harness after paused and before needs you', () => {
+    const at = '2026-10-25T08:00';
+    expect(phaseOf(base({ needs: 'harness: write_file', state: 'defined', approval: null } as Partial<TaskRecord>), at)).toBe('needs_harness');
+    expect(phaseOf(base({ needs: 'harness: write_file', paused: true } as Partial<TaskRecord>), at)).toBe('paused');
+    expect(phaseOf(base({ needs: 'harness: write_file', suspended: true } as Partial<TaskRecord>), at)).toBe('suspended');
+    expect(phaseOf(base({ needs: null, state: 'defined', approval: null } as Partial<TaskRecord>), at)).toBe('needs_you');
+  });
+
   it('classifies the groups', () => {
-    expect(PHASES.filter(isOpen)).toEqual(['todo', 'working', 'needs_you', 'paused', 'suspended']);
-    expect(PHASES.filter(isActive)).toEqual(['working', 'needs_you', 'paused']);
+    expect(PHASES.filter(isOpen)).toEqual(['todo', 'working', 'needs_harness', 'needs_you', 'paused', 'suspended']);
+    expect(PHASES.filter(isActive)).toEqual(['working', 'needs_harness', 'needs_you', 'paused']);
   });
 });

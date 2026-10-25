@@ -104,6 +104,7 @@
   .agents__empty { color: var(--label-3); font-size: var(--fs-12); }
   .agents__group { margin: 12px 0 6px; font-size: var(--fs-12); font-weight: 600; color: var(--label-2); text-transform: uppercase; letter-spacing: 0.04em; }
   .agents__group--needs-you { color: var(--orange); }
+  .agents__group--needs-harness { color: var(--orange); font-weight: 500; padding-left: 10px; }
   .agents__group--paused { color: var(--label-2); }
   .agents__group--dead { color: var(--red); }
   .agents__n { color: var(--label-3); font-weight: 400; }

@@ -10,14 +10,15 @@
   import { splitContext } from './parse';
   import QuestionPanel from './QuestionPanel.svelte';
   import { BACKEND_LABEL } from './backend';
-  import { backendSilent, canComplete, canPauseResume, COMPLETE_PENDING, pendingRequests, requestFor, type RequestKey } from './requests';
+  import { backendSilent, canComplete, canPauseResume, canRedo, COMPLETE_PENDING, isRedoKey, pendingRequests, requestFor, type RequestKey } from './requests';
+  import { editStart, isEditable, provenance, REDO_LABEL, REDO_PENDING, type FieldsEdit, type Section } from './sections';
   import { isOpen, phaseOf } from './phase';
   import { suspendLabel } from './stage';
   import StateRibbon from './StateRibbon.svelte';
   import { minuteOf } from '../model';
   import type { TaskRecord } from './types';
 
-  let { record, name, backLabel = 'Records', agent, onback, onanswer, onapprove, onrequest, onsuspend, onunsuspend, now = new Date(), onreload, readonly = false }: {
+  let { record, name, backLabel = 'Records', agent, onback, onanswer, onapprove, onrequest, onedit, onfields, onsuspend, onunsuspend, now = new Date(), onreload, readonly = false }: {
     record: TaskRecord;
     name: string;
     backLabel?: string;
@@ -26,6 +27,8 @@
     onanswer?: (a: AnswerInput) => Promise<void>;
     onapprove?: (d: ApprovalDecision) => Promise<void>;
     onrequest?: (key: RequestKey) => Promise<void>;
+    onedit?: (section: Section | 'assertions', text: string) => Promise<void>;
+    onfields?: (f: FieldsEdit) => Promise<void>;
     onsuspend?: (until: string | null) => Promise<void>;
     onunsuspend?: () => Promise<void>;
     now?: Date | string;
@@ -33,10 +36,10 @@
     readonly?: boolean;
   } = $props();
 
-  const labels: Record<RequestKey, string> = { delegate: 'Delegate', cancel: 'Cancel', redelegate: 'Re-delegate', pause: 'Pause', resume: 'Resume', complete: 'Mark done' };
+  const labels: Record<RequestKey, string> = { delegate: 'Delegate', cancel: 'Cancel', redelegate: 'Re-delegate', pause: 'Pause', resume: 'Resume', complete: 'Mark done', redo_define: REDO_LABEL.define, redo_plan: REDO_LABEL.plan };
   const wanted = $derived(requestFor(record.state));
   const canAsk = $derived(wanted !== null && !record.requests[wanted] && !(wanted === 'redelegate' && record.links.redelegated_to));
-  const queued = $derived(pendingRequests(record).filter((k) => k !== 'pause' && k !== 'resume' && k !== 'complete'));
+  const queued = $derived(pendingRequests(record).filter((k) => k !== 'pause' && k !== 'resume' && k !== 'complete' && !isRedoKey(k)));
   const phase = $derived(phaseOf(record, minuteOf(now)));
   const flip = $derived(canPauseResume(record, phase));
   const flipping = $derived(record.requests.pause ? 'pause' : record.requests.resume ? 'resume' : null);
@@ -62,6 +65,52 @@
     catch (e) { reqError = (e as Error).message; }
     finally { busy = false; }
   }
+  const mayRedo = $derived(canRedo(record) && !record.suspended);
+  const editable = $derived(!readonly && isEditable(record) && !!onedit);
+  const holding = $derived(editStart(record, phase) === 'pause');
+  type Slot = Section | 'assertions' | 'fields';
+  let editing = $state<Slot | null>(null);
+  let wantedSlot = $state<Slot | null>(null);
+  let draft = $state('');
+  let fTitle = $state('');
+  let fDue = $state('');
+  let fPri = $state(0);
+  const pausing = $derived(wantedSlot !== null && editing === null);
+  const textOf = (slot: Slot): string => (slot === 'assertions' ? record.assertions.map((a) => a.text).join('\n') : slot === 'fields' ? '' : record.sections[slot]);
+  function open(slot: Slot) {
+    draft = textOf(slot);
+    fTitle = record.title;
+    fDue = record.due ?? '';
+    fPri = record.pri;
+    reqError = null;
+    editing = slot;
+  }
+  async function edit(slot: Slot) {
+    if (!holding) return open(slot);
+    wantedSlot = slot;
+    if (record.requests.pause) return;
+    await ask('pause');
+    if (reqError) wantedSlot = null;
+  }
+  $effect(() => {
+    if (wantedSlot !== null && editing === null && phase !== 'working') {
+      const slot = wantedSlot;
+      wantedSlot = null;
+      open(slot);
+    }
+  });
+  async function save() {
+    if (editing === null) return;
+    busy = true;
+    reqError = null;
+    try {
+      if (editing === 'fields') await onfields?.({ title: fTitle, due: fDue || null, pri: fPri });
+      else await onedit?.(editing, draft);
+      editing = null;
+    } catch (e) { reqError = (e as Error).message; }
+    finally { busy = false; }
+  }
+  const redoPending = $derived(record.requests.redo === 'define' || record.requests.redo === 'plan');
   const silent = $derived(backendSilent(record, now));
   let busy = $state(false);
   let reqError = $state<string | null>(null);
@@ -86,17 +135,50 @@
   const pm = $derived(record.plan_meta);
 </script>
 
+{#snippet sechead(slot: Section | 'assertions')}
+  {@const who = slot === 'assertions' ? provenance(record, 'success') : provenance(record, slot)}
+  <div class="sechead">
+    {#if who}<span class="prov prov--{who}" data-testid="prov-{slot}">{who}</span>{/if}
+    {#if slot === 'spec' || slot === 'success' || slot === 'assertions'}{#if redoPending && record.requests.redo === 'plan'}<span class="req__queued" data-testid="redo-pending">{REDO_PENDING}</span>{/if}{/if}
+    {#if editable && editing === null}
+      <Button variant="plain" disabled={busy || pausing} data-testid="edit-{slot}" onclick={() => edit(slot)}>{wantedSlot === slot ? 'pausing…' : 'Edit'}</Button>
+    {/if}
+  </div>
+{/snippet}
+
+{#snippet editor(slot: Slot)}
+  {#if editing === slot}
+    <div class="editor" data-testid="editor-{slot}">
+      {#if slot === 'fields'}
+        <input class="editor__in" type="text" aria-label="Title" bind:value={fTitle} />
+        <input class="editor__in" type="text" aria-label="Due" placeholder="YYYY-MM-DD or YYYY-MM-DDTHH:MM" bind:value={fDue} />
+        <select class="editor__in" aria-label="Priority" bind:value={fPri}>{#each [0, 1, 2, 3] as n (n)}<option value={n}>{n === 0 ? 'No priority' : '!'.repeat(n)}</option>{/each}</select>
+      {:else}
+        <textarea class="editor__text" rows={slot === 'assertions' ? 4 : 8} aria-label={slot === 'assertions' ? 'Assertions, one per line' : `Edit ${slot}`} bind:value={draft}></textarea>
+        {#if slot === 'assertions'}<p class="dim">One assertion per line.</p>{/if}
+      {/if}
+      <div class="req">
+        <Button variant="primary" disabled={busy} data-testid="save-{slot}" onclick={save}>Save</Button>
+        <Button variant="plain" disabled={busy} onclick={() => (editing = null)}>Close</Button>
+        {#if reqError}<span class="req__err">{reqError}</span>{/if}
+      </div>
+    </div>
+  {/if}
+{/snippet}
+
 <Page title={record.title} back={backLabel} {onback}>
   <div class="rec">
     <header class="rec__head">
-      <p class="rec__meta">{name}{#if record.due} · due {record.due}{/if} · cost ${record.cost_usd}</p>
+      <p class="rec__meta">{name}{#if record.due} · due {record.due}{/if} · cost ${record.cost_usd}{#if record.pri} · {'!'.repeat(record.pri)}{/if}</p>
+      {#if editable && editing === null}<Button variant="plain" disabled={busy} data-testid="edit-fields" onclick={() => open('fields')}>Edit title, due, priority</Button>{/if}
+      {@render editor('fields')}
     </header>
 
-    <StateRibbon state={record.state} step={record.step} {phase} />
+    <StateRibbon state={record.state} step={record.step} {phase} needs={record.needs} />
 
     {#if agent}{@render agent()}{/if}
 
-    {#if !readonly && (canAsk || queued.length || flip || flipping || mayComplete || record.requests.complete || shelved || mayShelve)}
+    {#if !readonly && (canAsk || mayRedo || redoPending || queued.length || flip || flipping || mayComplete || record.requests.complete || shelved || mayShelve)}
       <div class="req">
         {#if canAsk && wanted}
           <Button variant={wanted === 'cancel' ? 'danger' : 'primary'} disabled={busy} onclick={() => ask(wanted)}>{labels[wanted]}</Button>
@@ -105,6 +187,11 @@
         {#if record.requests.complete}<span class="req__queued" data-testid="complete-pending">{COMPLETE_PENDING}</span>{/if}
         {#if flip}<Button variant="tint" disabled={busy} data-testid="pause-resume" onclick={() => ask(flip)}>{labels[flip]}</Button>{/if}
         {#if flipping}<span class="req__queued">{flipping} requested</span>{/if}
+        {#if mayRedo}
+          <Button variant="tint" disabled={busy} data-testid="redo-plan" onclick={() => ask('redo_plan')}>{labels.redo_plan}</Button>
+          <Button variant="tint" disabled={busy} data-testid="redo-define" onclick={() => ask('redo_define')}>{labels.redo_define}</Button>
+        {/if}
+        {#if redoPending}<span class="req__queued" data-testid="redo-pending-top">{REDO_PENDING}</span>{/if}
         {#if shelved}
           <span class="req__queued">{suspendLabel(record)}</span>
           <Button variant="tint" disabled={busy} data-testid="unsuspend" onclick={unshelve}>Unsuspend</Button>
@@ -133,20 +220,30 @@
 
     <Group header="Context">
       <div class="blk">
-        {#if ctx.own}<p class="txt">{ctx.own}</p>{:else}<p class="slot">Context: written by you when the task is created</p>{/if}
+        {@render sechead('context')}
+        {@render editor('context')}
+        {#if editing === 'context'}{:else if ctx.own}<p class="txt">{ctx.own}</p>{:else}<p class="slot">Context: written by you when the task is created</p>{/if}
         {#if ctx.gathered}<h4 class="sub">Gathered</h4><p class="txt">{ctx.gathered}</p>
         {:else}<p class="slot">Gathered: appended by the gatherer during gather</p>{/if}
       </div>
     </Group>
 
     <Group header="Spec">
-      <div class="blk">{#if s.spec}<p class="txt">{s.spec}</p>{:else}<p class="slot">Spec: written by the definer during define</p>{/if}</div>
+      <div class="blk">
+        {@render sechead('spec')}
+        {@render editor('spec')}
+        {#if editing === 'spec'}{:else if s.spec}<p class="txt">{s.spec}</p>{:else}<p class="slot">Spec: written by the definer during define</p>{/if}
+      </div>
     </Group>
 
     <Group header="Success">
       <div class="blk">
-        {#if s.success}<p class="txt">{s.success}</p>{:else}<p class="slot">Success: the success definition, written by you</p>{/if}
-        {#if record.assertions.length}
+        {@render sechead('success')}
+        {@render editor('success')}
+        {#if editing === 'success'}{:else if s.success}<p class="txt">{s.success}</p>{:else}<p class="slot">Success: the success definition, written by you</p>{/if}
+        {#if editable && editing === null}<div class="sechead"><Button variant="plain" disabled={busy || pausing} data-testid="edit-assertions" onclick={() => edit('assertions')}>Edit assertions</Button></div>{/if}
+        {@render editor('assertions')}
+        {#if editing === 'assertions'}{:else if record.assertions.length}
           <ul class="list">
             {#each record.assertions as a (a.id)}
               <li class="assert"><span class="mark mark--{mark(a.id)}" title={mark(a.id)}>{symbol[mark(a.id)]}</span><span><b>{a.id}</b> {a.text} <span class="dim">({mark(a.id)})</span></span></li>
@@ -174,7 +271,9 @@
 
     <Group header="Plan">
       <div class="blk">
-        {#if s.plan}<p class="txt">{s.plan}</p>{:else}<p class="slot">Plan: written by the planner during plan</p>{/if}
+        {@render sechead('plan')}
+        {@render editor('plan')}
+        {#if editing === 'plan'}{:else if s.plan}<p class="txt">{s.plan}</p>{:else}<p class="slot">Plan: written by the planner during plan</p>{/if}
         {#if pm}
           <p class="dim">reversibility: <b class:warn={pm.reversibility === 'irreversible'}>{pm.reversibility}</b> · tools: {pm.tools.join(', ') || 'none'}</p>
           {#if pm.assumptions.length}
@@ -250,5 +349,11 @@
   .req__silent { color: var(--orange); font-size: var(--fs-12); }
   .req__err { color: var(--red); font-size: var(--fs-12); }
   .warn { color: var(--orange); }
+  .sechead { display: flex; align-items: center; justify-content: flex-end; gap: 10px; min-height: 0; }
+  .prov { margin-right: auto; font-size: var(--fs-11); text-transform: uppercase; color: var(--label-3); border: 0.5px solid var(--sep); border-radius: var(--radius-pill); padding: 1px 8px; }
+  .prov--you { color: var(--tint); border-color: var(--tint); }
+  .editor { display: flex; flex-direction: column; gap: 8px; }
+  .editor__text, .editor__in { width: 100%; font: inherit; color: var(--label); background: var(--bg-elev); border: 0.5px solid var(--sep); border-radius: var(--radius-ctl); padding: 8px 10px; }
+  .editor__text { resize: vertical; }
   .log { font-size: var(--fs-12); overflow-wrap: anywhere; }
 </style>

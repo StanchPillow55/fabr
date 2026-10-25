@@ -25,6 +25,8 @@
       onanswer={(a) => fabric.answer(h, a)}
       onapprove={(d) => fabric.approve(h, d)}
       onrequest={(k) => (k === 'pause' ? fabric.pause(h.path) : k === 'resume' ? fabric.resume(h.path) : fabric.request(h, k))}
+      onedit={(s, text) => (s === 'assertions' ? fabric.editAssertions(h.path, text) : fabric.editSection(h.path, s, text))}
+      onfields={(f) => fabric.editFields(h.path, f)}
       onsuspend={(until) => fabric.suspend(h.path, until)}
       onunsuspend={() => fabric.unsuspend(h.path)}
       onreload={() => fabric.reload(h.path)}

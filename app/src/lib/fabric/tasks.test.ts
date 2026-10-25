@@ -6,6 +6,8 @@ import { nodeFolder } from './folder';
 import TaskSection from './TaskSection.svelte';
 import AgentsBadge from './AgentsBadge.svelte';
 import TaskStrip from './TaskStrip.svelte';
+import NodeCard from '../tree/NodeCard.svelte';
+import { boxModel } from '../model';
 import StateRibbon from './StateRibbon.svelte';
 import { FabricStore, localRoots, remoteSources } from './tasks.svelte';
 import { createMockApi } from '../../mock/api';
@@ -150,9 +152,9 @@ describe('task strip', () => {
     const f = await realPathStore();
     expect(render(TaskStrip, { props: { fabric: f, folder: '/home/me/other' } }).body).not.toContain('task-strip');
   });
-  it('shows a compact stage bar when an agent is active', async () => {
+  it('shows compact stage bars when an agent is active', async () => {
     const f = await fixtureStore();
-    const body = render(TaskStrip, { props: { fabric: f, folder: '05-running' } }).body;
+    const body = render(TaskStrip, { props: { fabric: f, folder: '05-running', part: 'bars' } }).body;
     expect(body).toContain('role="progressbar"');
     expect(body).toContain('tstrip__bar');
     expect(body).not.toContain('tstrip__more');
@@ -312,5 +314,36 @@ describe('remote sources', () => {
     expect(spy.fabricRemoteList.mock.calls.length).toBe(before + 1);
     f.setSources([]);
     expect(f.records.some((x) => x.source === 'vm')).toBe(false);
+  });
+});
+
+describe('node card rows', () => {
+  const none = new Set<string>();
+  const mk = (managed: boolean) => ({ source: 'local', path: 'p', name: 'p', managed, meta: {}, items: [], warnings: [], version: 'v', via: null, children: [] }) as never;
+  const card = (n: never, fabric: unknown, folder: string | null, agents: number) =>
+    render(NodeCard, {
+      props: {
+        node: n, model: boxModel(n, { today: '2026-10-20', filter: 'all', hideDone: false, collapsed: none, moreOpen: none, forceOpen: none }, agents),
+        selected: false, match: false, dim: false, ontoggle() {}, onmore() {}, onopen() {}, onfocus() {}, onsettings() {}, fabric, folder,
+      } as never,
+    }).body;
+  it('has a name row, a counts row and a bars row only with active agents', async () => {
+    const f = await fixtureStore();
+    const view = f.agentsFor('05-running')[0];
+    const stub = (n: number) => ({
+      countsFor: () => ({ total: 1, todo: 0, active: 1, suspended: 0, done: 0, failed: 0, needs_you: 0, needs_harness: 0 }),
+      agentsFor: () => Array.from({ length: n }, (_, i) => ({ ...view, path: `${view.path}#${i}` })),
+      now: f.now,
+      heldFor: () => undefined,
+    });
+    const three = card(mk(true), stub(6), '05-running', 6);
+    expect(three).toContain('card__head');
+    expect(three).toContain('card__row--counts');
+    expect(three).toContain('card__row--bars');
+    expect(three.match(/role="progressbar"/g)?.length).toBe(4);
+    expect(three).toContain('+2');
+    expect(card(mk(true), stub(0), '05-running', 0)).not.toContain('card__row--bars');
+    const plain = card(mk(false), stub(3), '05-running', 3);
+    expect(plain).not.toContain('card__row');
   });
 });

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { parseEvents, unreadCount } from './events';
 import { parseRecord } from './parse';
-import { applyRequest, backendSilent, submitRequest } from './requests';
+import { applyRequest, backendSilent, pendingRequests as pendingRequestsOf, submitRequest } from './requests';
 import { serializeRecord } from './serialize';
 import { FixtureSource, type RawRecord } from './source';
 import { findByTaskPath, loadRegistry } from './view';
@@ -117,5 +117,100 @@ describe('RecordScreen request actions', async () => {
     expect(buttons(fresh)).toEqual([]);
     expect(fresh).not.toContain('Agent backend not connected');
     expect(html(flagged, new Date('2026-10-24T19:02:00Z'))).toContain('Agent backend not connected');
+  });
+});
+
+describe('section editing', async () => {
+  const { applySectionEdit, applyAssertionsEdit, applyRedo, submitSection, provenance, FROZEN_MESSAGE } = await import('./sections');
+  const raw = (n: string) => records.find((r) => r.path.includes(n))!;
+  const fresh = () => new FixtureSource();
+  const at = new Date('2026-10-24T19:00:00Z');
+
+  it('sets by and marks a plan redo when spec changes after define', async () => {
+    const s = fresh();
+    const e = (await s.listRecords()).find((r) => r.path.includes('04-awaiting'))!;
+    const { record } = await submitSection(s, e.path, e.text, 'spec', 'My own spec');
+    expect(record.sections.spec).toBe('My own spec');
+    expect(record.by.spec).toBe('human');
+    expect(record.requests.redo).toBe('plan');
+    expect(provenance(record, 'spec')).toBe('you');
+    expect(provenance(record, 'plan')).toBeNull();
+  });
+
+  it('marks no redo for context, plan or a pre-define edit', () => {
+    const task = parseRecord(raw('02-open-question').text);
+    expect(applySectionEdit(task, 'spec', 'x', at).requests.redo).toBeNull();
+    const defined = parseRecord(raw('04-awaiting').text);
+    expect(applySectionEdit(defined, 'context', 'x', at)).toMatchObject({ by: { context: 'human' }, requests: { redo: null } });
+    expect(applySectionEdit(defined, 'plan', 'x', at).requests.redo).toBeNull();
+    expect(applyAssertionsEdit(defined, 'one\ntwo', at)).toMatchObject({ by: { success: 'human' }, requests: { redo: 'plan' }, assertions: [{ id: 'a1', text: 'one' }, { id: 'a2', text: 'two' }] });
+  });
+
+  it('refuses edits once execution starts and on terminal tasks, in the apply step and the mock core', async () => {
+    for (const n of ['05-running', '07-succeeded', '08-failed']) {
+      const r = parseRecord(raw(n).text);
+      expect(() => applySectionEdit(r, 'spec', 'x', at)).toThrow(FROZEN_MESSAGE);
+      expect(() => applyRedo(r, 'plan', at)).toThrow(/frozen/);
+      const s = fresh();
+      const e = (await s.listRecords()).find((x) => x.path.includes(n))!;
+      await expect(s.writeRecord(e.path, serializeRecord({ ...r, sections: { ...r.sections, spec: 'sneaky' } }), r.updated_at)).rejects.toThrow(/task is frozen once execution starts/);
+      await expect(s.writeRecord(e.path, serializeRecord({ ...r, title: 'sneaky' }), r.updated_at)).rejects.toThrow(/frozen/);
+    }
+  });
+
+  it('the mock core stamps by and redo when a client forgets to', async () => {
+    const s = fresh();
+    const e = (await s.listRecords()).find((r) => r.path.includes('04-awaiting'))!;
+    const r = parseRecord(e.text);
+    await s.writeRecord(e.path, serializeRecord({ ...r, sections: { ...r.sections, success: 'new success' } }), r.updated_at);
+    const out = parseRecord(await s.readRecord(e.path));
+    expect([out.by.success, out.requests.redo]).toEqual(['human', 'plan']);
+  });
+
+  it('shows Edit on todo, defined, paused and needs-harness records, not on a running or finished one', async () => {
+    const { render } = await import('svelte/server');
+    const RecordScreen = (await import('./RecordScreen.svelte')).default;
+    const html = (rec: ReturnType<typeof parseRecord>) => render(RecordScreen, { props: { record: rec, name: 'x', now, onedit: async () => {}, onfields: async () => {} } }).body;
+    const working = { ...parseRecord(raw('02-open-question').text), waiting: false, question: null };
+    expect(html(working)).toContain('data-testid="edit-spec"');
+    expect(html({ ...working, paused: true })).toContain('data-testid="edit-spec"');
+    expect(html({ ...working, needs: 'harness: write_file' })).toContain('needs harness: harness: write_file');
+    expect(html(parseRecord(raw('01-reminder').text))).toContain('data-testid="edit-context"');
+    expect(html(parseRecord(raw('04-awaiting').text))).toContain('data-testid="edit-plan"');
+    expect(html(parseRecord(raw('05-running').text))).not.toContain('data-testid="edit-');
+    expect(html(parseRecord(raw('07-succeeded').text))).not.toContain('data-testid="edit-');
+  });
+
+  it('shows provenance and the redo label', async () => {
+    const { render } = await import('svelte/server');
+    const RecordScreen = (await import('./RecordScreen.svelte')).default;
+    const rec = applySectionEdit(parseRecord(raw('04-awaiting').text), 'spec', 'mine', at);
+    const body = render(RecordScreen, { props: { record: rec, name: 'x', now, onedit: async () => {} } }).body;
+    expect(body).toContain('data-testid="prov-spec"');
+    expect(body).toContain('redo requested');
+  });
+
+  it('a working task must be paused before editing, a parked or paused one opens at once', async () => {
+    const { editStart } = await import('./sections');
+    const { phaseOf } = await import('./phase');
+    const working = { ...parseRecord(raw('02-open-question').text), waiting: false, question: null };
+    const ph = (r: typeof working) => phaseOf(r, '2026-10-24T19:00');
+    expect([ph(working), editStart(working, ph(working))]).toEqual(['working', 'pause']);
+    expect(editStart({ ...working, paused: true }, 'paused')).toBe('open');
+    expect(editStart({ ...working, needs: 'harness: write_file' }, 'needs_harness')).toBe('open');
+    expect(editStart(parseRecord(raw('01-reminder').text), 'todo')).toBe('open');
+    expect(editStart(parseRecord(raw('05-running').text), 'working')).toBe('frozen');
+  });
+});
+
+describe('redo requests', () => {
+  it('writes requests.redo for define and plan on a task or defined record only', async () => {
+    const s = new FixtureSource();
+    const e = (await s.listRecords()).find((r) => r.path.includes('04-awaiting'))!;
+    const { record, text } = await submitRequest(s, e.path, e.text, 'redo_define');
+    expect(record.requests.redo).toBe('define');
+    expect(pendingRequestsOf(record)).toEqual(['redo_define']);
+    await expect(submitRequest(s, e.path, text, 'redo_plan')).rejects.toThrow(/already requested/);
+    expect(() => applyRequest(parseRecord(entry('05-running').text), 'redo_plan', now)).toThrow(/frozen/);
   });
 });

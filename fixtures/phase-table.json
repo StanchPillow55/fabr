@@ -153,5 +153,71 @@
     },
     "now": "2026-10-25T12:00",
     "phase": "working"
+  },
+  {
+    "name": "needs harness",
+    "front_matter": {
+      "state": "defined",
+      "needs": "harness: write_file"
+    },
+    "now": "2026-10-25T12:00",
+    "phase": "needs_harness"
+  },
+  {
+    "name": "needs harness outranks needs you",
+    "front_matter": {
+      "state": "defined",
+      "waiting": true,
+      "needs": "harness: checks: git"
+    },
+    "now": "2026-10-25T12:00",
+    "phase": "needs_harness"
+  },
+  {
+    "name": "paused outranks needs harness",
+    "front_matter": {
+      "state": "in_progress",
+      "paused": true,
+      "needs": "harness: write_file"
+    },
+    "now": "2026-10-25T12:00",
+    "phase": "paused"
+  },
+  {
+    "name": "suspended outranks needs harness",
+    "front_matter": {
+      "state": "task",
+      "suspended": true,
+      "needs": "harness: write_file"
+    },
+    "now": "2026-10-25T12:00",
+    "phase": "suspended"
+  },
+  {
+    "name": "done outranks needs harness",
+    "front_matter": {
+      "state": "succeeded",
+      "needs": "harness: write_file"
+    },
+    "now": "2026-10-25T12:00",
+    "phase": "done"
+  },
+  {
+    "name": "reminder with needs is todo",
+    "front_matter": {
+      "state": "reminder",
+      "needs": "harness: write_file"
+    },
+    "now": "2026-10-25T12:00",
+    "phase": "todo"
+  },
+  {
+    "name": "cleared needs is working",
+    "front_matter": {
+      "state": "in_progress",
+      "needs": null
+    },
+    "now": "2026-10-25T12:00",
+    "phase": "working"
   }
 ]

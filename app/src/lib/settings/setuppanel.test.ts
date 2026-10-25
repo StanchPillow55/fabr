@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { StubSetupSource } from '../setup/setup-source';
+import { StubSetupSource, emptySettings } from '../setup/setup-source';
 import { SetupPanel } from './setuppanel.svelte';
 
 const FAKE_SECRET = 'sk-ant-FAKE-FIXTURE-0000-0000';
@@ -50,5 +50,23 @@ describe('setup panel', () => {
     p.heartbeatText = '30';
     expect(await p.saveRunner()).toBe(true);
     expect(src.settings).toMatchObject({ question_budget: 7, heartbeat_interval_s: 30 });
+  });
+});
+
+describe('machine settings', () => {
+  it('writes execute through the settings source and keeps the detected capabilities', async () => {
+    const { src, p } = await panel({ settings: { ...emptySettings(), capabilities: { tools: ['write_file'], checks: ['git'] } } });
+    expect(await p.write({ execute: 'read_only' })).toBe(true);
+    expect(src.settings.execute).toBe('read_only');
+    expect(src.settings.capabilities).toEqual({ tools: ['write_file'], checks: ['git'] });
+    expect(p.settings?.execute).toBe('read_only');
+  });
+
+  it('renders the three modes and the capability chips', async () => {
+    const { render } = await import('svelte/server');
+    const ApiPage = (await import('./ApiPage.svelte')).default;
+    const { p } = await panel({ settings: { ...emptySettings(), capabilities: { tools: ['write_file'], checks: ['git'] } } });
+    const body = render(ApiPage, { props: { ctl: { setup: p } as never } }).body;
+    for (const t of ['Full', 'Read-only', 'Off', 'write_file', 'git', 'refreshes them when it starts']) expect(body).toContain(t);
   });
 });

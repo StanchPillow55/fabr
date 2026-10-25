@@ -1,11 +1,16 @@
 import { isoNow } from './answer';
 import { submitEdit } from './edit';
+import { applyRedo, REDO_PENDING } from './sections';
 import { isActive, isOpen, phaseOf, type Phase } from './phase';
 import { minuteOf } from '../model';
 import type { FabricSource } from './source';
 import type { TaskRecord } from './types';
 
-export type RequestKey = 'delegate' | 'cancel' | 'redelegate' | 'pause' | 'resume' | 'complete';
+export type RequestKey = 'delegate' | 'cancel' | 'redelegate' | 'pause' | 'resume' | 'complete' | 'redo_define' | 'redo_plan';
+export const REDO_KEYS = ['redo_define', 'redo_plan'] as const;
+export const isRedoKey = (k: RequestKey): k is (typeof REDO_KEYS)[number] => k === 'redo_define' || k === 'redo_plan';
+export const REQUEST_LABEL: Partial<Record<RequestKey, string>> = { redo_define: 'Redo define', redo_plan: 'Redo plan' };
+export { REDO_PENDING };
 
 export const REQUEST_STATES: Record<'delegate' | 'cancel' | 'redelegate', TaskRecord['state'][]> = {
   delegate: ['reminder'],
@@ -13,7 +18,11 @@ export const REQUEST_STATES: Record<'delegate' | 'cancel' | 'redelegate', TaskRe
   redelegate: ['failed'],
 };
 
-export const REQUEST_KEYS: RequestKey[] = ['delegate', 'cancel', 'redelegate', 'pause', 'resume', 'complete'];
+export const REQUEST_KEYS: RequestKey[] = ['delegate', 'cancel', 'redelegate', 'pause', 'resume', 'complete', 'redo_define', 'redo_plan'];
+
+export function canRedo(record: TaskRecord): boolean {
+  return (record.state === 'task' || record.state === 'defined') && !record.requests.redo;
+}
 
 export function canPauseResume(record: TaskRecord, phase: Phase): 'pause' | 'resume' | null {
   if (!isActive(phase) || record.requests.pause || record.requests.resume) return null;
@@ -35,6 +44,7 @@ export function requestFor(state: TaskRecord['state']): 'delegate' | 'cancel' | 
 export function applyRequest(record: TaskRecord, key: RequestKey, now: Date = new Date()): TaskRecord {
   if (!REQUEST_KEYS.includes(key)) throw new Error(`unknown request "${String(key)}"`);
   const phase = phaseOf(record, minuteOf(now));
+  if (isRedoKey(key)) return applyRedo(record, key === 'redo_define' ? 'define' : 'plan', now);
   if (key === 'pause' || key === 'resume') {
     if (!isActive(phase)) throw new Error(`${key} does not apply to a ${phase} task`);
     if (record.requests[key]) throw new Error(`${key} is already requested`);
@@ -51,7 +61,7 @@ export function applyRequest(record: TaskRecord, key: RequestKey, now: Date = ne
 }
 
 export function pendingRequests(record: TaskRecord): RequestKey[] {
-  return REQUEST_KEYS.filter((k) => record.requests[k]);
+  return REQUEST_KEYS.filter((k) => (isRedoKey(k) ? record.requests.redo === (k === 'redo_define' ? 'define' : 'plan') : record.requests[k as Exclude<RequestKey, 'redo_define' | 'redo_plan'>]));
 }
 
 export function backendSilent(record: TaskRecord, now: Date | string): boolean {

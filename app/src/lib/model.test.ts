@@ -5,7 +5,7 @@ import {
   groupRows, indexTree, isHidden, isOverdue, matches, nodeKey, passes, rollup, sortRows, compareDue, joinDue, dueDate, dueTime, visibleTree,
   colorSpec, effectiveColors, resolveColor, isVirtualRoot, rootCounts, sourceLines, errorParts, ROOT_KEY, cardTitle, cardAside,
 } from './model';
-import { HEAD, LIST_PAD, MAX_ROWS, ROLLUP, ROW } from './constants';
+import { BARS, COUNTS, HEAD, LIST_PAD, MAX_ROWS, ROLLUP, ROW } from './constants';
 
 const TODAY = '2026-10-19';
 const it_ = (o: Partial<Item> = {}): Item => ({ id: 'r', phase: 'todo', due: null, title: 't', pri: 0, ...o });
@@ -91,23 +91,28 @@ describe('tree', () => {
 describe('boxModel', () => {
   it('heights by state', () => {
     const empty = node('x');
-    expect(boxModel(empty, ctx()).h).toBe(HEAD + LIST_PAD + 2 * ROW + 2);
+    expect(boxModel(empty, ctx()).h).toBe(HEAD + COUNTS + LIST_PAD + 2 * ROW + 2);
     const plain = node('p', { managed: false });
     expect(boxModel(plain, ctx()).h).toBe(HEAD + 2);
     const many = node('m', { items: Array.from({ length: 12 }, (_, i) => it_({ title: 'i' + i })), children: [] });
     const b = boxModel(many, ctx());
     expect(b.shown.length).toBe(MAX_ROWS);
     expect(b.more).toBe(4);
-    expect(b.h).toBe(HEAD + LIST_PAD + ROW + MAX_ROWS * ROW + ROW + 2);
+    expect(b.h).toBe(HEAD + COUNTS + LIST_PAD + ROW + MAX_ROWS * ROW + ROW + 2);
     const open = boxModel(many, ctx({ moreOpen: new Set(['local:m']) }));
     expect(open.shown.length).toBe(12);
-    expect(open.h).toBe(HEAD + LIST_PAD + ROW + 12 * ROW + ROW + 2);
+    expect(open.h).toBe(HEAD + COUNTS + LIST_PAD + ROW + 12 * ROW + ROW + 2);
+  });
+  it('active agents add the bars row only on initialised cards', () => {
+    const n = node('a');
+    expect(boxModel(n, ctx(), 2).h).toBe(boxModel(n, ctx()).h + BARS);
+    expect(boxModel(node('p', { managed: false }), ctx(), 2).h).toBe(HEAD + 2);
   });
   it('collapsed adds rollup row and drops list', () => {
     const n = node('c', { items: [it_()] });
     const b = boxModel(n, ctx({ collapsed: new Set(['local:c']) }));
     expect(b.collapsed).toBe(true);
-    expect(b.h).toBe(HEAD + ROLLUP + 2);
+    expect(b.h).toBe(HEAD + COUNTS + ROLLUP + 2);
   });
   it('hidden meta no longer collapses a card; only the collapsed set does (unless force-open)', () => {
     const n = node('h', { meta: { hidden: true }, items: [it_()] });

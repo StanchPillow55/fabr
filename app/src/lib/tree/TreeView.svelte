@@ -4,7 +4,7 @@
   import { untrack } from 'svelte';
   import type { Item, Node } from '../api/types';
   import { layout, type LayoutResult } from '../layout';
-  import { boxModel, compareItems, computeForceOpen, matches, nodeKey, type BoxModel, type Key } from '../model';
+  import { barAgents, boxModel, compareItems, computeForceOpen, matches, nodeKey, type BoxModel, type Key } from '../model';
   import { fitTransform, needsRefit } from '../refit';
   import type { Store } from '../store.svelte';
   import Links from './Links.svelte';
@@ -32,7 +32,8 @@
     };
     const models = new Map<Key, BoxModel>();
     const lay = layout(snap, (n) => {
-      const m = boxModel({ ...n, items: [...n.items].sort(cardOrder) }, ctx);
+      const folder = fabric ? fabric.folderFor(store.sourceOf(n.source), n.path) : null;
+      const m = boxModel({ ...n, items: [...n.items].sort(cardOrder) }, ctx, fabric ? barAgents(fabric.agentsFor(folder)).length : 0);
       models.set(nodeKey(n), m);
       return m;
     });

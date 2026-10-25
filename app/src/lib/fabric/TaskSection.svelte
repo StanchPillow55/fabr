@@ -14,7 +14,7 @@
   const list = $derived(fabric.tasksFor(folder));
   const of = (p: Phase) => list.filter((h) => fabric.phaseFor(h) === p);
   const counts = $derived(fabric.countsFor(folder));
-  const SHOWN: Phase[] = ['needs_you', 'working', 'paused', 'todo'];
+  const SHOWN: Phase[] = ['needs_you', 'needs_harness', 'working', 'paused', 'todo'];
   const FOLDED: { phase: Phase; testid: string }[] = [
     { phase: 'suspended', testid: 'task-suspended' },
     { phase: 'done', testid: 'task-done' },
@@ -42,7 +42,7 @@
       label={r.title}
       sub={[r.due ? `due ${r.due.replace('T', ' ')}` : '', r.pri ? '!'.repeat(r.pri) : '', step ? `step: ${step}` : ''].filter(Boolean).join(' · ') || undefined}
       value={[phase === 'suspended' ? suspendLabel(r).toLowerCase() : PHASE_LABEL[phase], live && live !== 'parked' && phase === 'working' ? 'running' : ''].filter(Boolean).join(' · ')}
-      tone={phase === 'needs_you' ? 'tint' : undefined}
+      tone={phase === 'needs_you' || phase === 'needs_harness' ? 'tint' : undefined}
       onclick={() => fabric.open(h.path)}
     />
     {#if isOpen(phase) && !r.requests.complete}

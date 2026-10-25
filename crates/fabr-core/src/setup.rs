@@ -61,6 +61,39 @@ pub struct SetupState {
     pub completed: bool,
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ExecuteMode {
+    #[default]
+    Full,
+    ReadOnly,
+    Off,
+}
+
+impl ExecuteMode {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            ExecuteMode::Full => "full",
+            ExecuteMode::ReadOnly => "read_only",
+            ExecuteMode::Off => "off",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Capabilities {
+    #[serde(default)]
+    pub tools: Vec<String>,
+    #[serde(default)]
+    pub checks: Vec<String>,
+}
+
+impl Capabilities {
+    pub fn is_empty(&self) -> bool {
+        self.tools.is_empty() && self.checks.is_empty()
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct FabricSettings {
     pub default_folder: String,
@@ -70,6 +103,10 @@ pub struct FabricSettings {
     pub question_budget: u32,
     pub heartbeat_interval_s: u32,
     pub setup: SetupState,
+    #[serde(default)]
+    pub execute: ExecuteMode,
+    #[serde(default)]
+    pub capabilities: Capabilities,
 }
 
 impl FabricSettings {
@@ -82,6 +119,8 @@ impl FabricSettings {
             question_budget: 5,
             heartbeat_interval_s: 10,
             setup: SetupState { completed_steps: vec![], completed: false },
+            execute: ExecuteMode::Full,
+            capabilities: Capabilities::default(),
         }
     }
 }
@@ -178,6 +217,19 @@ pub fn settings_read(ctx: &Ctx) -> Result<SettingsRead, FabrError> {
             s.setup.completed = b;
         }
     }
+    if let Some(m) = doc.get("execute").and_then(Item::as_str) {
+        s.execute = match m {
+            "read_only" => ExecuteMode::ReadOnly,
+            "off" => ExecuteMode::Off,
+            _ => ExecuteMode::Full,
+        };
+    }
+    if let Some(t) = doc.get("capabilities").and_then(Item::as_table_like) {
+        let list = |k: &str| -> Vec<String> {
+            t.get(k).and_then(Item::as_array).map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect()).unwrap_or_default()
+        };
+        s.capabilities = Capabilities { tools: list("tools"), checks: list("checks") };
+    }
     Ok(SettingsRead { exists: true, settings: s })
 }
 
@@ -205,6 +257,15 @@ pub fn settings_write(ctx: &Ctx, req: SettingsWriteReq) -> Result<SettingsRead, 
     let setup = &mut doc["setup"];
     setup["completed_steps"] = value(s.setup.completed_steps.iter().map(String::as_str).collect::<Array>());
     setup["completed"] = value(s.setup.completed);
+    doc["execute"] = value(s.execute.as_str());
+    if !s.capabilities.is_empty() {
+        if !doc.get("capabilities").is_some_and(Item::is_table) {
+            doc["capabilities"] = Item::Table(Table::new());
+        }
+        let caps = &mut doc["capabilities"];
+        caps["tools"] = value(s.capabilities.tools.iter().map(String::as_str).collect::<Array>());
+        caps["checks"] = value(s.capabilities.checks.iter().map(String::as_str).collect::<Array>());
+    }
     atomic_write(&path, doc.to_string().as_bytes(), false)?;
     settings_read(ctx)
 }

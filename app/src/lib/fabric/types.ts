@@ -6,18 +6,24 @@ export type Step = (typeof STEPS)[number];
 
 export const FIELDS = [
   'schema', 'id', 'source', 'title', 'due', 'pri', 'state', 'step', 'waiting', 'paused', 'suspended', 'suspend_until', 'created_at', 'updated_at', 'requests',
-  'question', 'answers', 'grants', 'plan_meta', 'assertions', 'approval', 'verdict', 'cost_usd', 'links',
+  'question', 'answers', 'grants', 'plan_meta', 'assertions', 'approval', 'verdict', 'cost_usd', 'links', 'by', 'needs',
 ] as const;
 
-export const SCHEMA = 5;
-export const OPTIONAL_FIELDS: readonly string[] = ['pri', 'paused', 'suspended', 'suspend_until'];
+export const SCHEMA = 6;
+export const OPTIONAL_FIELDS: readonly string[] = ['pri', 'paused', 'suspended', 'suspend_until', 'needs', 'by'];
 
 export const SECTION_HEADINGS = ['Context', 'Spec', 'Success', 'Plan', 'Log'] as const;
 
 export type QuestionKind = 'open' | 'choice' | 'grant';
 export type Scope = 'task' | 'project' | 'always';
 
-export interface Requests { delegate: boolean; cancel: boolean; redelegate: boolean; pause: boolean; resume: boolean; complete: boolean }
+export type Redo = 'define' | 'plan';
+export type Author = 'human' | 'agent' | null;
+export interface By { context: Author; spec: Author; success: Author; plan: Author }
+export const NO_AUTHOR: By = { context: null, spec: null, success: null, plan: null };
+export interface Requires { tools: string[]; checks: string[] }
+
+export interface Requests { delegate: boolean; cancel: boolean; redelegate: boolean; pause: boolean; resume: boolean; complete: boolean; redo: Redo | null }
 
 export interface Answer {
   value: string | null;
@@ -43,6 +49,7 @@ export interface Grants { requested: string[]; granted: { field: string; scope: 
 export interface PlanMeta {
   reversibility: 'reversible' | 'irreversible';
   tools: string[];
+  requires: Requires;
   assumptions: { rule_id: string; text: string }[];
   checks?: { cmd: string; args: string[] }[];
 }
@@ -77,6 +84,7 @@ export interface FrontMatter {
   state: State;
   step: Step | null;
   waiting: boolean;
+  needs: string | null;
   paused: boolean;
   suspended: boolean;
   suspend_until: string | null;
@@ -88,6 +96,7 @@ export interface FrontMatter {
   grants: Grants;
   plan_meta: PlanMeta | null;
   assertions: Assertion[];
+  by: By;
   approval: Approval | null;
   verdict: Verdict | null;
   cost_usd: number;

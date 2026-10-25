@@ -32,6 +32,7 @@ export interface AgentView {
   retryInS: number | null;
   finished: 'succeeded' | 'failed' | null;
   phase: Phase;
+  needs: string | null;
   suspendUntil: string | null;
   entry: RegistryEntry | null;
 }
@@ -128,6 +129,7 @@ export function viewOf(held: Held, entry: RegistryEntry | null, backend: Backend
     retryInS: entry?.activity === 'retry' && typeof entry.retry_in_s === 'number' ? entry.retry_in_s : null,
     finished,
     phase,
+    needs: r.needs,
     suspendUntil: r.suspend_until,
     entry,
   };
@@ -154,12 +156,13 @@ export function finishedView(held: Held): AgentView | null {
   return isFinished(held.record) ? viewOf(held, null, 'absent') : null;
 }
 
-export type AgentGroup = 'needs-you' | 'paused' | 'dead' | 'running' | 'queued';
-export const GROUPS: readonly AgentGroup[] = ['needs-you', 'paused', 'dead', 'running', 'queued'];
-export const GROUP_LABEL: Record<AgentGroup, string> = { 'needs-you': 'Needs you', paused: 'Paused', dead: 'Dead', running: 'Running', queued: 'Queued' };
+export type AgentGroup = 'needs-you' | 'needs-harness' | 'paused' | 'dead' | 'running' | 'queued';
+export const GROUPS: readonly AgentGroup[] = ['needs-you', 'needs-harness', 'paused', 'dead', 'running', 'queued'];
+export const GROUP_LABEL: Record<AgentGroup, string> = { 'needs-you': 'Needs you', 'needs-harness': 'Needs harness', paused: 'Paused', dead: 'Dead', running: 'Running', queued: 'Queued' };
 
 export function groupOf(v: AgentView): AgentGroup {
   if (v.phase === 'needs_you') return 'needs-you';
+  if (v.phase === 'needs_harness') return 'needs-harness';
   if (v.alive === 'dead') return 'dead';
   if (v.phase === 'paused') return 'paused';
   return v.activity === 'queued' ? 'queued' : 'running';
@@ -199,6 +202,7 @@ export function statusOf(v: AgentView, now: Date | string = new Date()): string 
   if (v.alive === 'backend-down') return 'Backend not responding';
   if (v.phase === 'paused') return 'Paused';
   if (v.phase === 'needs_you') return PHASE_LABEL.needs_you;
+  if (v.phase === 'needs_harness') return v.needs ? `${PHASE_LABEL.needs_harness}: ${v.needs}` : PHASE_LABEL.needs_harness;
   if (v.activity === 'retry') return v.retryInS === null ? 'retrying' : `retry in ${v.retryInS}s`;
   if (v.activity === 'queued') return 'queued';
   return v.activity === 'parked' ? 'parked' : 'working';

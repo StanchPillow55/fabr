@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { parseFrontMatter, parseLogLine, parseRecord } from './parse';
 import { FixtureSource, fixtureName } from './source';
-import { FIELDS } from './types';
+import { FIELDS, OPTIONAL_FIELDS } from './types';
 
 const records = await new FixtureSource().listRecords();
 
@@ -13,7 +13,9 @@ describe('fixtures', () => {
 
   for (const { path, text } of records) {
     it(`parses ${path.split('fixtures/')[1]}`, () => {
-      expect(Object.keys(parseFrontMatter(text).data)).toEqual([...FIELDS]);
+      const keys = Object.keys(parseFrontMatter(text).data);
+      expect(keys).toEqual(FIELDS.filter((f) => keys.includes(f)));
+      expect(keys.filter((k) => !(OPTIONAL_FIELDS as readonly string[]).includes(k)).length).toBe(FIELDS.filter((f) => !(OPTIONAL_FIELDS as readonly string[]).includes(f)).length);
       const r = parseRecord(text);
       expect(r.schema).toBe(4);
       expect(r.pri).toBeGreaterThanOrEqual(0);

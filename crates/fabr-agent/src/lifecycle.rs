@@ -1,6 +1,7 @@
 use crate::board::{Activity, Board, Extras};
+use crate::caps::{Harness, requires_of};
 use crate::link::{list_records, load_record, update_record};
-use crate::model::Model;
+use crate::model::{Model, PlanInput};
 use crate::now_utc;
 use crate::state::{append_log, clean_message, is_terminal, pending_tail, question_open, stage_label, state_name, suspended_now};
 use crate::store::mutate;
@@ -8,7 +9,8 @@ use crate::tools;
 use crate::verify::{self, CheckOutcome};
 use fabr_core::FabrError;
 use fabr_core::taskrec::{
-    Approval, Assertion, Check, PlanMeta, Question, State, Step, TaskRecord, Verdict, VerdictItem, approval_digest, registry_filename,
+    Approval, Assertion, Author, Check, PlanMeta, Question, RedoStage, State, Step, TaskRecord, Verdict, VerdictItem, approval_digest,
+    registry_filename,
 };
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -21,15 +23,20 @@ const TOOL_LINE_PREFIXES: [&str; 3] = ["read_file ", "write_file ", "list_dir "]
 pub struct Ctl {
     pub board: Arc<Board>,
     pub check_timeout_s: u64,
+    pub harness: Harness,
 }
 
 impl Ctl {
     pub fn new(space: &Path, heartbeat_interval_s: u64) -> Ctl {
-        Ctl { board: Board::new(space, heartbeat_interval_s, None), check_timeout_s: verify::DEFAULT_CHECK_TIMEOUT_S }
+        Ctl {
+            board: Board::new(space, heartbeat_interval_s, None),
+            check_timeout_s: verify::DEFAULT_CHECK_TIMEOUT_S,
+            harness: Harness::standard(),
+        }
     }
 
     pub fn with_board(board: Arc<Board>, check_timeout_s: u64) -> Ctl {
-        Ctl { board, check_timeout_s }
+        Ctl { board, check_timeout_s, harness: Harness::standard() }
     }
 }
 
@@ -210,6 +217,13 @@ fn step_once(node_dir: &Path, record_path: &Path, ctl: &Ctl, model: &impl Model,
         rec.requests.redelegate = false;
         return persist(record_path, &mut rec, &mut base);
     }
+    if let Some(stage) = rec.requests.redo {
+        if !matches!(rec.state, State::Task | State::Defined) {
+            return ignore_request(record_path, &mut rec, &mut base, "redo");
+        }
+        apply_redo(&mut rec, stage);
+        return persist(record_path, &mut rec, &mut base);
+    }
     match rec.state {
         State::Reminder => {
             if rec.requests.cancel {
@@ -243,7 +257,23 @@ fn step_once(node_dir: &Path, record_path: &Path, ctl: &Ctl, model: &impl Model,
                 }
                 return plan_stage(node_dir, record_path, ctl, &mut rec, &mut base, model, true);
             }
+            if status == "pending" && auto_approvable(ctl, &rec) {
+                let digest = approval_digest(&rec);
+                rec.approval = Some(Approval {
+                    status: "approved".into(),
+                    by: Some("auto".into()),
+                    at: Some(now_utc()),
+                    note: None,
+                    digest: Some(digest),
+                });
+                rec.waiting = false;
+                append_log(&mut rec.log, "approve", "approved by auto");
+                return persist(record_path, &mut rec, &mut base);
+            }
             if status != "approved" {
+                return Ok(());
+            }
+            if !harness_gate(node_dir, record_path, ctl, &mut rec, &mut base, "execute")? {
                 return Ok(());
             }
             if let Some(reason) = check_approval(&rec)? {
@@ -268,11 +298,19 @@ fn step_once(node_dir: &Path, record_path: &Path, ctl: &Ctl, model: &impl Model,
             mark(ctl, node_dir, record_path, &rec, Activity::Tool);
             Ok(())
         }
-        State::InProgress => match rec.step {
-            Some(Step::Evaluate) => finish_checks(node_dir, record_path, ctl, &mut rec, &mut base),
-            Some(Step::Learn | Step::Notify) => tail_step(node_dir, record_path, ctl, &mut rec, &mut base),
-            _ => execute_stage(node_dir, record_path, ctl, &mut rec, &mut base, model),
-        },
+        State::InProgress => {
+            if !matches!(rec.step, Some(Step::Learn | Step::Notify)) {
+                let label = stage_label(&rec);
+                if !harness_gate(node_dir, record_path, ctl, &mut rec, &mut base, label)? {
+                    return Ok(());
+                }
+            }
+            match rec.step {
+                Some(Step::Evaluate) => finish_checks(node_dir, record_path, ctl, &mut rec, &mut base),
+                Some(Step::Learn | Step::Notify) => tail_step(node_dir, record_path, ctl, &mut rec, &mut base),
+                _ => execute_stage(node_dir, record_path, ctl, &mut rec, &mut base, model),
+            }
+        }
         State::Succeeded | State::Failed => match rec.step {
             Some(Step::Learn | Step::Notify) => tail_step(node_dir, record_path, ctl, &mut rec, &mut base),
             _ => {
@@ -281,6 +319,73 @@ fn step_once(node_dir: &Path, record_path: &Path, ctl: &Ctl, model: &impl Model,
             }
         },
     }
+}
+
+fn auto_approvable(ctl: &Ctl, rec: &TaskRecord) -> bool {
+    ctl.harness.auto_mode
+        && rec.needs.is_none()
+        && rec.plan_meta.as_ref().is_some_and(|m| m.reversibility.as_deref() != Some("irreversible") && validate_plan(m).is_ok())
+}
+
+fn harness_gate(
+    node_dir: &Path,
+    record_path: &Path,
+    ctl: &Ctl,
+    rec: &mut TaskRecord,
+    base: &mut TaskRecord,
+    label: &str,
+) -> Result<bool, FabrError> {
+    let Some(meta) = rec.plan_meta.clone() else { return Ok(true) };
+    match ctl.harness.missing(&meta) {
+        None => {
+            if rec.needs.is_some() {
+                rec.needs = None;
+                persist(record_path, rec, base)?;
+            }
+            Ok(true)
+        }
+        Some(missing) => {
+            let needs = format!("harness: {missing}");
+            if rec.needs.as_deref() != Some(needs.as_str()) {
+                rec.needs = Some(needs);
+                append_log(&mut rec.log, label, &format!("needs harness: {missing}"));
+                persist(record_path, rec, base)?;
+            }
+            mark(ctl, node_dir, record_path, rec, Activity::Parked);
+            Ok(false)
+        }
+    }
+}
+
+pub fn apply_redo(rec: &mut TaskRecord, stage: RedoStage) {
+    rec.requests.redo = None;
+    match stage {
+        RedoStage::Define => {
+            if rec.by.spec == Some(Author::Agent) {
+                rec.spec.clear();
+                rec.by.spec = None;
+            }
+            if rec.by.success == Some(Author::Agent) {
+                rec.success.clear();
+                rec.by.success = None;
+            }
+            rec.assertions.clear();
+            rec.step = Some(Step::Define);
+            rec.waiting = question_open(rec);
+            append_log(&mut rec.log, "redo", "define by user");
+        }
+        RedoStage::Plan => {
+            rec.step = Some(Step::Plan);
+            rec.waiting = false;
+            append_log(&mut rec.log, "redo", "plan by user");
+        }
+    }
+    rec.state = State::Task;
+    rec.plan.clear();
+    rec.by.plan = None;
+    rec.plan_meta = None;
+    rec.approval = None;
+    rec.needs = None;
 }
 
 fn tail_step(node_dir: &Path, record_path: &Path, ctl: &Ctl, rec: &mut TaskRecord, base: &mut TaskRecord) -> Result<(), FabrError> {
@@ -303,6 +408,9 @@ fn gather_stage(node_dir: &Path, record_path: &Path, ctl: &Ctl, rec: &mut TaskRe
     let mut view = rec.clone();
     view.step = Some(Step::Gather);
     mark(ctl, node_dir, record_path, &view, Activity::Tool);
+    if rec.context.trim().is_empty() {
+        rec.by.context = Some(Author::Agent);
+    }
     append_gathered(&mut rec.context, &gather_bundle(node_dir));
     rec.step = Some(Step::Define);
     rec.waiting = false;
@@ -410,6 +518,17 @@ fn define_stage(
     {
         rec.answers.push(q);
     }
+    let spec_human = rec.by.spec == Some(Author::Human);
+    let success_human = rec.by.success == Some(Author::Human);
+    if spec_human && success_human && !rec.assertions.is_empty() {
+        rec.question = None;
+        rec.waiting = false;
+        rec.step = Some(Step::Plan);
+        append_log(&mut rec.log, "define", "spec kept");
+        persist(record_path, rec, base)?;
+        mark(ctl, node_dir, record_path, rec, Activity::Model);
+        return Ok(());
+    }
     mark(ctl, node_dir, record_path, rec, Activity::Model);
     let draft = model.define(&rec.title, &context_with_answers(rec))?;
     if let Some(text) = draft.question.filter(|q| !q.trim().is_empty()) {
@@ -431,12 +550,24 @@ fn define_stage(
         mark(ctl, node_dir, record_path, rec, Activity::Model);
         return Ok(());
     }
-    if draft.spec.trim().is_empty() || draft.success.trim().is_empty() || draft.assertions.is_empty() {
+    let keep_assertions = (spec_human || success_human) && !rec.assertions.is_empty();
+    if (!spec_human && draft.spec.trim().is_empty())
+        || (!success_human && draft.success.trim().is_empty())
+        || (!keep_assertions && draft.assertions.is_empty())
+    {
         return Err(FabrError::BadRequest("spec is incomplete".into()));
     }
-    rec.spec = draft.spec;
-    rec.success = draft.success;
-    rec.assertions = draft.assertions.into_iter().map(|a| Assertion { id: a.id, text: a.text }).collect();
+    if !spec_human {
+        rec.spec = draft.spec;
+        rec.by.spec = Some(Author::Agent);
+    }
+    if !success_human {
+        rec.success = draft.success;
+        rec.by.success = Some(Author::Agent);
+    }
+    if !keep_assertions {
+        rec.assertions = draft.assertions.into_iter().map(|a| Assertion { id: a.id, text: a.text }).collect();
+    }
     let mut requested: Vec<String> = Vec::new();
     for field in draft.grants {
         if !requested.contains(&field) {
@@ -466,27 +597,63 @@ fn plan_stage(
     let mut view = rec.clone();
     view.step = Some(Step::Plan);
     mark(ctl, node_dir, record_path, &view, Activity::Model);
-    let draft = model.plan(&rec.title, &rec.spec, &rec.success, note.as_deref(), &answers_text(rec))?;
-    if draft.plan.trim().is_empty() || draft.checks.is_empty() {
-        return Err(FabrError::BadRequest("plan is incomplete".into()));
-    }
-    let meta = PlanMeta {
-        reversibility: Some(draft.reversibility),
-        tools: draft.tools,
-        assumptions: Vec::new(),
-        checks: draft.checks.into_iter().map(|c| Check { cmd: c.cmd, args: c.args }).collect(),
+    let allowed = ctl.harness.planning();
+    let answers = answers_text(rec);
+    let ask = |rejection: Option<&str>| {
+        model.plan(&PlanInput {
+            title: &rec.title,
+            spec: &rec.spec,
+            success: &rec.success,
+            refusal_note: note.as_deref(),
+            answers: &answers,
+            allowed: &allowed,
+            rejection,
+        })
     };
-    validate_plan(&meta)?;
-    if !draft.spec.trim().is_empty() {
-        rec.spec = draft.spec;
+    let human_plan = rec.by.plan == Some(Author::Human) && !rec.plan.trim().is_empty();
+    let kept = if human_plan { rec.plan_meta.clone().filter(|m| !m.checks.is_empty()) } else { None };
+    let (mut meta, draft) = match kept {
+        Some(meta) => (meta, None),
+        None => {
+            let mut draft = ask(None)?;
+            let mut meta = meta_of(&draft, human_plan)?;
+            if let Err(e) = validate_plan(&meta) {
+                let rejection =
+                    format!("{}; allowed tools: {}; allowed checks: {}", e.message(), allowed.tools.join(", "), allowed.checks.join(", "));
+                append_log(&mut rec.log, "plan", &format!("retry after rejection: {}", clean_message(&e.message(), 200)));
+                draft = ask(Some(&rejection))?;
+                meta = meta_of(&draft, human_plan)?;
+            }
+            (meta, Some(draft))
+        }
+    };
+    meta.requires = requires_of(&meta);
+    let invalid = validate_plan(&meta).err();
+    if let Some(draft) = draft {
+        let spec_human = rec.by.spec == Some(Author::Human);
+        let success_human = rec.by.success == Some(Author::Human);
+        if !spec_human && !draft.spec.trim().is_empty() {
+            rec.spec = draft.spec;
+            rec.by.spec = Some(Author::Agent);
+        }
+        if !success_human && !draft.success.trim().is_empty() {
+            rec.success = draft.success;
+            rec.by.success = Some(Author::Agent);
+        }
+        if !spec_human && !success_human && !draft.assertions.is_empty() {
+            rec.assertions = draft.assertions.into_iter().map(|a| Assertion { id: a.id, text: a.text }).collect();
+        }
+        if !human_plan {
+            rec.plan = draft.plan;
+            rec.by.plan = Some(Author::Agent);
+        }
     }
-    if !draft.success.trim().is_empty() {
-        rec.success = draft.success;
+    rec.needs = None;
+    if let Some(err) = invalid {
+        let missing = ctl.harness.missing(&meta).unwrap_or_else(|| clean_message(&err.message(), 160));
+        rec.needs = Some(format!("harness: {missing}"));
+        append_log(&mut rec.log, "plan", &format!("needs harness: {missing}"));
     }
-    if !draft.assertions.is_empty() {
-        rec.assertions = draft.assertions.into_iter().map(|a| Assertion { id: a.id, text: a.text }).collect();
-    }
-    rec.plan = draft.plan;
     rec.plan_meta = Some(meta);
     let digest = approval_digest(rec);
     rec.approval = Some(Approval { status: "pending".into(), by: None, at: None, note: None, digest: Some(digest) });
@@ -497,6 +664,19 @@ fn plan_stage(
     persist(record_path, rec, base)?;
     mark(ctl, node_dir, record_path, rec, Activity::Model);
     Ok(())
+}
+
+fn meta_of(draft: &crate::model::PlanDraft, plan_kept: bool) -> Result<PlanMeta, FabrError> {
+    if (!plan_kept && draft.plan.trim().is_empty()) || draft.checks.is_empty() {
+        return Err(FabrError::BadRequest("plan is incomplete".into()));
+    }
+    Ok(PlanMeta {
+        reversibility: Some(draft.reversibility.clone()),
+        tools: draft.tools.clone(),
+        assumptions: Vec::new(),
+        checks: draft.checks.iter().map(|c| Check { cmd: c.cmd.clone(), args: c.args.clone() }).collect(),
+        requires: Default::default(),
+    })
 }
 
 fn execute_stage(
@@ -631,6 +811,7 @@ fn ignore_request(path: &Path, rec: &mut TaskRecord, base: &mut TaskRecord, key:
         "cancel" => rec.requests.cancel = false,
         "delegate" => rec.requests.delegate = false,
         "redelegate" => rec.requests.redelegate = false,
+        "redo" => rec.requests.redo = None,
         _ => {}
     }
     persist(path, rec, base)

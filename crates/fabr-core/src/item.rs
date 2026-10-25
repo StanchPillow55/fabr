@@ -11,6 +11,7 @@ pub const TASKS_DIR: &str = "tasks";
 pub enum Phase {
     Todo,
     Working,
+    NeedsHarness,
     NeedsYou,
     Paused,
     Suspended,
@@ -26,6 +27,7 @@ pub trait Phased {
     fn suspend_until(&self) -> Option<&str>;
     fn question(&self) -> Option<&Question>;
     fn approval(&self) -> Option<&Approval>;
+    fn needs(&self) -> Option<&str>;
 
     fn suspended_at(&self, now: &str) -> bool {
         self.suspend_flag() && self.suspend_until().is_none_or(|u| u > now)
@@ -65,6 +67,9 @@ macro_rules! phased {
             fn approval(&self) -> Option<&Approval> {
                 self.approval.as_ref()
             }
+            fn needs(&self) -> Option<&str> {
+                self.needs.as_deref()
+            }
         }
     };
 }
@@ -78,6 +83,7 @@ impl Phase {
         match self {
             Phase::Todo => "todo",
             Phase::Working => "working",
+            Phase::NeedsHarness => "needs_harness",
             Phase::NeedsYou => "needs_you",
             Phase::Paused => "paused",
             Phase::Suspended => "suspended",
@@ -93,6 +99,7 @@ impl Phase {
             _ if rec.suspended_at(now) => Phase::Suspended,
             State::Reminder => Phase::Todo,
             _ if rec.is_paused() => Phase::Paused,
+            _ if rec.needs().is_some() => Phase::NeedsHarness,
             _ if rec.needs_you() => Phase::NeedsYou,
             _ => Phase::Working,
         }
@@ -131,6 +138,8 @@ struct Front {
     question: Option<Question>,
     #[serde(default)]
     approval: Option<Approval>,
+    #[serde(default)]
+    needs: Option<String>,
 }
 
 pub fn item_from_record(text: &str) -> Option<Item> {
