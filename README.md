@@ -65,17 +65,19 @@ The pipeline runs end to end today. Define, plan and approval work, with an auto
 
 ## Sponsors
 
-Sponsor tools are optional. They show up only when `~/.fabric-space/secrets.toml` parses and contains that provider's key. An approval that has no bound action still runs the local tools. It does not authorize a sponsor tool. A remote call also needs its own grant. Evidence is in `docs/sponsor-evidence.md`.
+Sponsor tools are optional. They appear when `~/.fabric-space/secrets.toml` parses and contains that provider's key. An approval with an empty `bound_actions` list still runs the local read, list, Markdown write, and make-directory tools. It does not authorize a sponsor tool. A remote call needs its own grant. The record sheet shows each bound action's tool, destination, effect, and grant. A log line that says `UNKNOWN` is a failure waiting for reconciliation.
 
-Verified through plan, approval, and execution on 2026-10-25:
+What ran on `unified-integration` on 2026-10-25:
 
-- Bright Data wrote `research.md` from the public ureq docs page after approval.
-- Moss listed 3 indexes and retrieved 75 documents from `agent-memory-context`. That did not replace the local preference file. The `$100` internship recall is the local file, and `moss_upload` does not run.
-- Cartesia synthesized speech to `speech.wav` and transcribed it. There is no microphone UI, so this is not a voice-first demo.
-- Apify ran the `apify~hello-world` Actor and returned one dataset item. That is not a shopping search.
-- Nessie read sandbox accounts (`accounts=0`). It is labeled sandbox and is not internship memory.
+- Task A confirmed `Stay under $100 for internship supplies` into the local preference file.
+- Task B recalled that line, searched once with Bright Data after approval (`hits=8`), and wrote `desk.md`. The prices in that file are estimates. The search did not return prices. Nothing was purchased.
+- Bright Data's docs test wrote `research.md` with `source: bright_data` and `https://docs.rs/ureq` only after approval.
+- Moss listed 3 indexes and retrieved 75 documents from `agent-memory-context`. `moss_upload` does not run.
+- Cartesia wrote `speech.wav` (`bytes=22050`) and transcribed it (`chars=5`). The record sheet can record or pick `capture.wav` and plays `speech.wav` only after an approved speak run succeeds.
+- Apify ran `apify~hello-world` and returned one dataset item.
+- Nessie read sandbox accounts (`accounts=0`), labeled sandbox.
 
-Not integrated: Fo listed five private account tools and called none. Visa, Figma, Microsoft, and Atlassian are not in this tree. Anthropic is the model client. A Public Benefit community and a measured baseline were not checked. Hackathon-history eligibility is unverified.
+Fo discovered five private account tools and called none. Visa, Figma, Microsoft, and Atlassian Forge are not integrated. Anthropic is the model client. Track eligibility is unverified. Details: [docs/SPONSOR_TRACKS.md](docs/SPONSOR_TRACKS.md), [docs/DEMO.md](docs/DEMO.md), [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), [docs/TEST_RESULTS.md](docs/TEST_RESULTS.md), [docs/sponsor-evidence.md](docs/sponsor-evidence.md).
 
 Next, execution moves to an isolated sandbox that runs a coding harness with a fixed tool set. Learning from answers, Telegram and the personal data bank are designed and not built.
 

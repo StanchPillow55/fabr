@@ -659,6 +659,11 @@ fn plan_stage(
         for bound in model.planned_bounds() {
             crate::tools_contract::bind_action(&mut meta, &bound.tool, &bound.params)?;
         }
+        for action in &meta.bound_actions {
+            if !action.grant_class.is_empty() && !rec.grants.requested.iter().any(|field| field == &action.grant_class) {
+                rec.grants.requested.push(action.grant_class.clone());
+            }
+        }
     }
     for tool in meta.tools.clone() {
         if crate::tools_contract::must_bind(&tool) && !meta.bound_actions.iter().any(|action| action.tool == tool) {

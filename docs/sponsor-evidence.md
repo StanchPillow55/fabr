@@ -16,7 +16,7 @@ Labels:
 | Microsoft | no | no | unverified | No Microsoft client was added. |
 | Moss | yes | yes, for list | unverified | `listIndexes` returned 3 indexes. `getDocs` on `agent-memory-context` returned 75 documents and did not write `learned-preferences.json`. `moss_list` waited for approval and an `external_action` grant, then ran. `moss_upload` is not executable. Local learned preferences stay authoritative. Upload still needs a separate `external_upload` grant and a real upload call. |
 | Fo | yes, discovery only | no | unverified | `https://mcp.api.wajo.ai/fo` accepted the bearer token. `tools/list` returned `ask_fo`, `get_fo_conversation`, `get_fo_reply`, `list_fo_conversations`, `start_fo_call`. None is a narrow public read, so the allowlist stays empty and no tool was called. `ask_fo` sends a request that Fo acts on from the user's account. `get_fo_reply` polls that in-progress action. `list_fo_conversations` and `get_fo_conversation` read private conversations. `start_fo_call` starts a live voice session. `fo_action` stays not executable. |
-| Cartesia | yes | yes, for a bound file write | unverified | Voices, TTS (`sonic-2`), and batch STT (`ink-whisper`) succeeded. A task approved `cartesia_speak` and the backend wrote `speech.wav` inside the node. There is no capture UI, so this is not the voice demo. |
+| Cartesia | yes | yes, for a bound file write | unverified | Voices, TTS (`sonic-2`), and batch STT (`ink-whisper`) succeeded. A task approved `cartesia_speak` and the backend wrote `speech.wav` inside the node. The record sheet can save `capture.wav` and plays `speech.wav` only after that approved run succeeds. |
 | Apify | yes | yes | unverified | `apify~hello-world` returned `items=1`. `live_apify_task_runs_after_approval` ran `apify_lookup` only after approval and an `external_action` grant. This is the hello-world Actor, not a shopping comparison. |
 | Bright Data | yes | yes | unverified | `live_public_docs_and_issues` passed again. The task stayed pending until approval, then `research.md` contained `source: bright_data` and `https://docs.rs/ureq`. The token was not in the note or the log. That is a public docs page, not a priced product comparison. |
 | Visa | no | no | unverified | Re-checked through the loader and the environment: no `visa_cert_path` or `visa_key_path`. No sandbox call was made. |
@@ -29,10 +29,12 @@ Ignored tests passed with these status lines and no secret values:
 
 - Moss: `indexes=3` named `agent-memory-context`, `languages`, `support-docs`. Retrieve returned `docs=75` and `source=moss`. `live_moss_task_lists_after_approval` passed.
 - Fo: `tools=5` (`ask_fo`, `get_fo_conversation`, `get_fo_reply`, `list_fo_conversations`, `start_fo_call`), `allowlist=0`.
-- Cartesia: `voices=1049`, TTS `bytes=23822` at `speech.wav`, STT `chars=5`. `live_cartesia_task_writes_after_approval` passed.
+- Cartesia: `voices=1049`, TTS `bytes=22050` at `speech.wav`, STT `chars=5`. `live_cartesia_task_writes_after_approval` passed. An earlier run on `sponsor-integration` reported `bytes=23822`.
 - Nessie: `accounts=0`. `live_nessie_task_is_labeled_sandbox` passed.
 - Apify: `actor=apify~hello-world items=1`. `live_apify_task_runs_after_approval` passed.
 - Bright Data: `live_public_docs_and_issues` passed. See `docs/brightdata-live.md`.
+
+The same ignored tests passed again on `unified-integration` on 2026-10-25. A separate demo, with `FABR_HOME` pointed at a temporary home, confirmed the internship preference and then wrote `desk.md` after one approved Bright Data search (`hits=8`). The prices in `desk.md` are labeled estimates because the search hits did not include prices. Out-of-root records stayed undriven in `out_of_root_driven`. Nessie stayed a labeled sandbox (`accounts=0`).
 
 ## Rebase
 
