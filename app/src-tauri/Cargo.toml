@@ -1,0 +1,23 @@
+[package]
+name = "fabr-desktop"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[lib]
+name = "fabr_desktop"
+
+[build-dependencies]
+tauri-build.workspace = true
+
+[dependencies]
+fabr-core.workspace = true
+tauri.workspace = true
+tauri-plugin-opener.workspace = true
+tauri-plugin-dialog.workspace = true
+serde_json.workspace = true
+log.workspace = true

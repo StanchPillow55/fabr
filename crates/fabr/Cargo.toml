@@ -1,0 +1,26 @@
+[package]
+name = "fabr"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+build = "build.rs"
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "fabr"
+path = "src/main.rs"
+
+[dependencies]
+fabr-core.workspace = true
+clap.workspace = true
+tiny_http.workspace = true
+include_dir.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+log.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

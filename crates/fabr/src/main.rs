@@ -1,0 +1,297 @@
+mod server;
+
+use clap::{Parser, Subcommand};
+use fabr_core::workspace::{Workspace, today};
+use fabr_core::{
+    AppDirs, FabrError, InitChildrenReq, Item, ListDirsReq, Node, NodeRef, RemoveNodeReq, SaveTodoReq, Status, format_item, write_sample,
+};
+use std::path::{Path, PathBuf};
+use std::process::ExitCode;
+use std::sync::Arc;
+
+#[derive(Parser)]
+#[command(name = "fabr", version, about = "Tree of per-directory todos")]
+struct Cli {
+    #[command(subcommand)]
+    cmd: Cmd,
+}
+
+#[derive(Subcommand)]
+enum Cmd {
+    #[command(about = "Print the scanned tree")]
+    Scan {
+        #[arg(long)]
+        json: bool,
+        #[arg(long)]
+        all: bool,
+        root: PathBuf,
+    },
+    #[command(about = "Serve the UI and API on loopback")]
+    Serve {
+        root: Option<PathBuf>,
+        #[arg(long, default_value_t = 0)]
+        port: u16,
+        #[arg(long)]
+        no_open: bool,
+        #[arg(long)]
+        ui_dir: Option<PathBuf>,
+    },
+    #[command(about = "Write the sample tree")]
+    Sample { dir: PathBuf },
+    #[command(about = "Make a directory a node (`show_depth = 1`); optionally its subdirectories too")]
+    Init {
+        path: PathBuf,
+        #[arg(long, help = "Also initialise the immediate subdirectories (not pruned, no dot-dirs)")]
+        children: bool,
+        #[arg(long, value_name = "N", help = "Initialise subdirectories down to N levels (implies --children; default 1 with --children)")]
+        depth: Option<u32>,
+    },
+    #[command(about = "Remove a node: deletes its `.fabr/` only; the folder and its files stay")]
+    Remove {
+        path: PathBuf,
+        #[arg(long, short = 'y', help = "Do not ask for confirmation")]
+        yes: bool,
+    },
+    #[command(about = "Add an item to a node's .todo")]
+    Add {
+        path: PathBuf,
+        title: String,
+        #[arg(long)]
+        due: Option<String>,
+        #[arg(long)]
+        pri: Option<u8>,
+        #[arg(long)]
+        status: Option<String>,
+    },
+    #[command(about = "List items")]
+    Ls {
+        #[arg(long, conflicts_with_all = ["overdue", "wip"])]
+        all: bool,
+        #[arg(long, conflicts_with = "wip")]
+        overdue: bool,
+        #[arg(long)]
+        wip: bool,
+        path: Option<PathBuf>,
+    },
+}
+
+fn workspace(root: Option<PathBuf>) -> Result<Workspace, FabrError> {
+    AppDirs::resolve().workspace(root)
+}
+
+fn print_tree(n: &Node, depth: usize, out: &mut String) {
+    let open = n.items.iter().filter(|i| i.status != Status::Done).count();
+    let mut line = format!("{}{}", "  ".repeat(depth), if n.name.is_empty() { "." } else { &n.name });
+    if !n.managed {
+        line.push('/');
+    }
+    if let Some(v) = &n.via {
+        line.push_str(&format!("  (via {v})"));
+    }
+    if !n.items.is_empty() {
+        line.push_str(&format!("  [{open} open / {}]", n.items.len()));
+    }
+    if !n.warnings.is_empty() {
+        line.push_str(&format!("  ({} warnings)", n.warnings.len()));
+    }
+    out.push_str(&line);
+    out.push('\n');
+    for c in &n.children {
+        print_tree(c, depth + 1, out);
+    }
+}
+
+fn cmd_scan(root: PathBuf, json: bool, all: bool) -> Result<(), FabrError> {
+    let ws = workspace(Some(root))?;
+    let tree = ws.get_tree(all);
+    if let Some(r) = &tree.truncated_reason {
+        eprintln!("fabr: truncated: {r}");
+    }
+    if json {
+        println!("{}", serde_json::to_string_pretty(&tree).map_err(|e| FabrError::Io(e.to_string()))?);
+    } else {
+        let mut s = String::new();
+        for r in &tree.root.children {
+            print_tree(r, 0, &mut s);
+        }
+        print!("{s}");
+        if tree.truncated {
+            println!("(truncated)");
+        }
+    }
+    for e in &tree.errors {
+        eprintln!("fabr: {}: {}", e.source, e.message);
+    }
+    Ok(())
+}
+
+fn cmd_serve(root: Option<PathBuf>, port: u16, no_open: bool, ui_dir: Option<PathBuf>) -> Result<(), FabrError> {
+    if let Some(d) = &ui_dir
+        && !server::ui_dir_ok(d)
+    {
+        return Err(FabrError::NotFound(format!("{} has no index.html", d.display())));
+    }
+    let ws = Arc::new(workspace(root)?);
+    let (srv, port) = server::bind(port).map_err(|e| FabrError::Io(format!("cannot bind: {e}")))?;
+    let url = format!("http://127.0.0.1:{port}/");
+    println!("fabr serving {url}  (Ctrl-C to stop)");
+    if !no_open {
+        server::open_browser(&url);
+    }
+    for h in server::spawn_workers(srv, ws, Arc::new(server::Ui::new(ui_dir)), 4) {
+        let _ = h.join();
+    }
+    Ok(())
+}
+
+fn managed(ws: &Workspace, path: &Path) -> Result<(Node, String), FabrError> {
+    let node = ws.get_node(NodeRef { source: "local".into(), path: String::new() })?;
+    match node.version.clone().filter(|_| node.managed) {
+        Some(version) => Ok((node, version)),
+        None => Err(FabrError::NotFound(format!("{} is not a fabr node (no .fabr/)", path.display()))),
+    }
+}
+
+fn cmd_add(path: PathBuf, title: String, due: Option<String>, pri: Option<u8>, status: Option<String>) -> Result<(), FabrError> {
+    let status = match status.as_deref() {
+        None => Status::Todo,
+        Some(s) => Status::parse(s).ok_or_else(|| FabrError::BadRequest(format!("bad status {s:?} (todo|wip|done)")))?,
+    };
+    let ws = workspace(Some(path.clone()))?;
+    let (node, version) = managed(&ws, &path)?;
+    let mut items = node.items;
+    items.push(Item { id: None, status, due, title, pri });
+    let n = items.len();
+    let saved = ws.save_todo(SaveTodoReq { source: "local".into(), path: String::new(), version, items })?;
+    if let Some(i) = saved.items.get(n - 1) {
+        println!("{}", format_item(i));
+    }
+    Ok(())
+}
+
+fn collect_rows<'a>(n: &'a Node, out: &mut Vec<(&'a Node, &'a Item)>) {
+    for i in &n.items {
+        out.push((n, i));
+    }
+    for c in &n.children {
+        collect_rows(c, out);
+    }
+}
+
+fn cmd_ls(path: Option<PathBuf>, all: bool, overdue: bool, wip: bool) -> Result<(), FabrError> {
+    let root = path.unwrap_or_else(|| PathBuf::from("."));
+    let ws = workspace(Some(root))?;
+    let tree = ws.get_tree(false);
+    let today = today();
+    let mut rows = Vec::new();
+    collect_rows(&tree.root, &mut rows);
+    rows.sort_by_key(|(_, i)| fabr_core::due_sort_key(i.due.as_deref()));
+    let now = fabr_core::todo::now_minute();
+    for (n, i) in rows {
+        let keep = if all {
+            true
+        } else if overdue {
+            i.status != Status::Done && i.due.as_deref().is_some_and(|d| fabr_core::todo::is_overdue_at(d, &today, &now))
+        } else if wip {
+            i.status == Status::Wip
+        } else {
+            i.status != Status::Done
+        };
+        if keep {
+            let marks = i.pri.map_or(String::new(), |p| "!".repeat(p.clamp(1, 3) as usize));
+            let node = if n.path.is_empty() { "." } else { &n.path };
+            println!("{:<4} {:<16} {:<3} {}  [{}]", i.status.as_str(), i.due.as_deref().unwrap_or("-"), marks, i.title, node);
+        }
+    }
+    Ok(())
+}
+
+fn cmd_init(path: PathBuf, children: bool, depth: Option<u32>) -> Result<(), FabrError> {
+    let levels = depth.unwrap_or(if children { 1 } else { 0 });
+    let ws = workspace(Some(path.clone()))?;
+    let at = |p: &str| NodeRef { source: "local".into(), path: p.into() };
+    let shown = |p: &str| if p.is_empty() { path.display().to_string() } else { path.join(p).display().to_string() };
+    match ws.init_node(at("")) {
+        Ok(_) => println!("initialised {}", shown("")),
+        Err(FabrError::Conflict { .. }) if levels > 0 => {}
+        Err(FabrError::Conflict { .. }) => {
+            return Err(FabrError::Conflict { message: format!("{} is already a fabr node", path.display()), node: None });
+        }
+        Err(e) => return Err(e),
+    }
+    let mut level = vec![String::new()];
+    for _ in 0..levels {
+        let mut next = Vec::new();
+        for dir in &level {
+            let dirs = ws.list_dirs(ListDirsReq { source: "local".into(), path: dir.clone() })?;
+            let names: Vec<String> = dirs.iter().filter(|d| !d.pruned).map(|d| d.name.clone()).collect();
+            for d in dirs.iter().filter(|d| !d.pruned && !d.managed) {
+                println!("initialised {}", shown(&fabr_core::node::join(dir, &d.name)));
+            }
+            if !names.is_empty() {
+                ws.init_children(InitChildrenReq { source: "local".into(), path: dir.clone(), names: names.clone() })?;
+            }
+            next.extend(names.iter().map(|n| fabr_core::node::join(dir, n)));
+        }
+        level = next;
+    }
+    Ok(())
+}
+
+fn cmd_remove(path: PathBuf, yes: bool) -> Result<(), FabrError> {
+    let ws = workspace(Some(path.clone()))?;
+    let (_, version) = managed(&ws, &path)?;
+    if !yes {
+        eprint!("Remove node {}? the folder stays [y/N] ", path.display());
+        let _ = std::io::Write::flush(&mut std::io::stderr());
+        let mut line = String::new();
+        let _ = std::io::stdin().read_line(&mut line);
+        if !matches!(line.trim().to_ascii_lowercase().as_str(), "y" | "yes") {
+            println!("not removed");
+            return Ok(());
+        }
+    }
+    ws.remove_node(RemoveNodeReq { source: "local".into(), path: String::new(), version })?;
+    println!("removed node {}", path.display());
+    Ok(())
+}
+
+fn cmd_sample(dir: &Path) -> Result<(), FabrError> {
+    let n = write_sample(dir).map_err(|e| FabrError::Io(format!("{}: {e}", dir.display())))?;
+    println!("wrote {n} nodes to {}", dir.display());
+    Ok(())
+}
+
+fn main() -> ExitCode {
+    if let Some(code) = fabr_core::remote::askpass::run_helper_if_invoked() {
+        return ExitCode::from(code as u8);
+    }
+    let cli = Cli::parse();
+    if matches!(cli.cmd, Cmd::Serve { .. } | Cmd::Scan { .. }) {
+        let serve = matches!(cli.cmd, Cmd::Serve { .. });
+        match fabr_core::logging::init_default(serve) {
+            Ok(p) => log::info!("fabr {} ({}) log {}", env!("CARGO_PKG_VERSION"), if serve { "serve" } else { "scan" }, p.display()),
+            Err(e) => eprintln!("fabr: logging disabled: {}", e.message()),
+        }
+    }
+    let r = match cli.cmd {
+        Cmd::Scan { json, all, root } => cmd_scan(root, json, all),
+        Cmd::Serve { root, port, no_open, ui_dir } => cmd_serve(root, port, no_open, ui_dir),
+        Cmd::Sample { dir } => cmd_sample(&dir),
+        Cmd::Init { path, children, depth } => cmd_init(path, children, depth),
+        Cmd::Remove { path, yes } => cmd_remove(path, yes),
+        Cmd::Add { path, title, due, pri, status } => cmd_add(path, title, due, pri, status),
+        Cmd::Ls { all, overdue, wip, path } => cmd_ls(path, all, overdue, wip),
+    };
+    match r {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(e) => {
+            log::error!("{}", e.message());
+            eprintln!("fabr: {}", e.message());
+            ExitCode::FAILURE
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests;

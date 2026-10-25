@@ -1,0 +1,8 @@
+export const W = 260;
+export const GAP_X = 30;
+export const LEVEL_GAP = 56;
+export const HEAD = 33;
+export const ROW = 22;
+export const LIST_PAD = 8;
+export const ROLLUP = 26;
+export const MAX_ROWS = 8;

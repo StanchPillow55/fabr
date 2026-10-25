@@ -1,0 +1,92 @@
+:root {
+  color-scheme: light dark;
+  --label: light-dark(#000000, #ffffff);
+  --label-2: light-dark(rgb(60 60 67 / 60%), rgb(235 235 245 / 60%));
+  --label-3: light-dark(rgb(60 60 67 / 30%), rgb(235 235 245 / 30%));
+  --label-4: light-dark(rgb(60 60 67 / 18%), rgb(235 235 245 / 16%));
+  --bg: light-dark(#f2f2f7, #000000);
+  --bg-elev: light-dark(#ffffff, #1c1c1e);
+  --bg-elev-2: light-dark(#ffffff, #2c2c2e);
+  --sep: light-dark(rgb(60 60 67 / 29%), rgb(84 84 88 / 60%));
+  --sep-opaque: light-dark(#c6c6c8, #38383a);
+  --fill: light-dark(rgb(120 120 128 / 20%), rgb(120 120 128 / 36%));
+  --fill-2: light-dark(rgb(120 120 128 / 16%), rgb(120 120 128 / 32%));
+  --fill-3: light-dark(rgb(120 120 128 / 12%), rgb(118 118 128 / 24%));
+  --blue: light-dark(#007aff, #0a84ff);
+  --green: light-dark(#34c759, #30d158);
+  --indigo: light-dark(#5856d6, #5e5ce6);
+  --orange: light-dark(#ff9500, #ff9f0a);
+  --pink: light-dark(#ff2d55, #ff375f);
+  --purple: light-dark(#af52de, #bf5af2);
+  --red: light-dark(#ff3b30, #ff453a);
+  --teal: light-dark(#30b0c7, #40c8e0);
+  --yellow: light-dark(#ffcc00, #ffd60a);
+  --tint: var(--blue);
+  --tint-soft: color-mix(in srgb, var(--tint) 16%, transparent);
+  --on-tint: #ffffff;
+  --status-todo: var(--label-2);
+  --status-wip: var(--orange);
+  --status-done: var(--label-3);
+  --overdue: var(--red);
+  --soon: var(--orange);
+  --match: var(--yellow);
+  --radius-card: 10px;
+  --radius-ctl: 6px;
+  --radius-pill: 4px;
+  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Inter Variable", "Adwaita Sans", "Noto Sans", sans-serif;
+  --fs-11: 11px;
+  --fs-12: 12px;
+  --fs-13: 13px;
+  --fs-14: 14px;
+  --fs-15: 15px;
+  --fs-17: 17px;
+  --fs-20: 20px;
+  --fs-22: 22px;
+  --toolbar-bg: color-mix(in srgb, var(--bg-elev) 70%, transparent);
+  --toolbar-filter: blur(20px) saturate(180%);
+  --shadow-card: light-dark(0 0.5px 1px rgb(0 0 0 / 8%), 0 0.5px 1px rgb(0 0 0 / 40%));
+  --shadow-card-hover: 0 4px 14px light-dark(rgb(0 0 0 / 6%), rgb(0 0 0 / 50%));
+  --shadow-popover: 0 8px 28px rgb(0 0 0 / 16%), 0 0 0 0.5px rgb(0 0 0 / 6%);
+  --shadow-notice: 0 6px 24px light-dark(rgb(0 0 0 / 10%), rgb(0 0 0 / 50%));
+  --shadow-sheet: 0 24px 64px rgb(0 0 0 / 28%), 0 2px 8px rgb(0 0 0 / 10%);
+  --backdrop: light-dark(rgb(0 0 0 / 22%), rgb(0 0 0 / 55%));
+  --panel-edge: light-dark(transparent, rgb(255 255 255 / 4%));
+  --seg-thumb: light-dark(#ffffff, #636366);
+  --shadow-seg-thumb: 0 0 0 0.5px rgb(0 0 0 / 4%), 0 2px 6px rgb(0 0 0 / 10%);
+  --knob: #fff;
+  --shadow-switch-knob: 0 1px 3px rgb(0 0 0 / 18%), 0 0 0 0.5px rgb(0 0 0 / 4%);
+  --shadow-row-knob: 0 1px 2px rgb(0 0 0 / 30%);
+  --on-swatch: #fff;
+  --warning-text: light-dark(#a35c00, var(--orange));
+  --error-text: light-dark(#c41e15, #ff6961);
+  --label-dim: light-dark(rgb(60 60 67 / 50%), rgb(235 235 245 / 50%));
+  --label-2-dim: light-dark(rgb(60 60 67 / 38%), rgb(235 235 245 / 38%));
+  --label-3-dim: light-dark(rgb(60 60 67 / 26%), rgb(235 235 245 / 26%));
+}
+
+html[data-theme="light"] { color-scheme: light; }
+html[data-theme="dark"] { color-scheme: dark; }
+
+html[data-tint="green"] { --tint: var(--green); }
+html[data-tint="indigo"] { --tint: var(--indigo); }
+html[data-tint="orange"] { --tint: var(--orange); --on-tint: #000000; }
+html[data-tint="pink"] { --tint: var(--pink); }
+html[data-tint="purple"] { --tint: var(--purple); }
+html[data-tint="red"] { --tint: var(--red); }
+html[data-tint="teal"] { --tint: var(--teal); }
+html[data-tint="yellow"] { --tint: var(--yellow); --on-tint: #000000; }
+
+@font-face {
+  font-family: "Inter Variable";
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url("/fonts/InterVariable.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Inter Variable";
+  font-style: italic;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url("/fonts/InterVariable-Italic.woff2") format("woff2");
+}

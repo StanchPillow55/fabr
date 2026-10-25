@@ -1,0 +1,43 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin
+      - uses: swatinem/rust-cache@v2
+      - name: Check versions match the tag
+        if: github.ref_type == 'tag'
+        run: |
+          v="${GITHUB_REF_NAME#v}"
+          test "$(jq -r .version app/package.json)" = "$v"
+          test "$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[]|select(.name=="fabr-desktop").version')" = "$v"
+      - name: Install npm packages
+        working-directory: app
+        run: npm ci
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          projectPath: app
+          tagName: ${{ github.ref_type == 'tag' && github.ref_name || 'v0.0.0-manual' }}
+          releaseName: Fabr ${{ github.ref_type == 'tag' && github.ref_name || 'v0.0.0-manual' }}
+          releaseDraft: false
+          prerelease: false
+          args: --target aarch64-apple-darwin --bundles app,dmg
