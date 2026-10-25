@@ -22,6 +22,11 @@ Ask in order. The first yes places it.
 4. Does it let the agent act with less supervision, or learn about the environment? Wave 3.
 5. Does it add an input channel or a connector? Wave 4.
 
+## Two tracks
+
+Dev 2 builds the agent backend and we build the frontend. `FRONTEND_PLAN.md` carves our part out
+of each wave, fixes the file contract between the tracks, and has our own waves F0 to F5.
+
 ## Placeholders in wave 1
 
 Two blocks are built as slots in wave 1 and filled later. The learner only captures answers in

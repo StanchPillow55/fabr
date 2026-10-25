@@ -2,7 +2,8 @@
 
 One file per task, in the folder that the task belongs to. It is the only shared state in fabric.
 Every component reads and writes this file and nothing else. The state machine is the record:
-a state is entered by writing one more part of the same file.
+a state is entered by writing one more part of the same file. The exact field names, enums and
+write protocols are in `../dev2/agent_surface_spec.md`, which wins where the two differ.
 
 ## Fields
 

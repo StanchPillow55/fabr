@@ -33,3 +33,13 @@ the decision, and the reason, with the newest line last.
 2026-10-24 The API key and the bot token live in a secrets file with mode 600 at the machine root. They are never loaded into an agent context.
 2026-10-24 The input project's contract is a record with state reminder and a title; everything else is optional and owned by the pipeline.
 2026-10-24 Agent documentation here covers design and philosophy only; code documentation follows later, as the owner asked on 2026-10-24.
+2026-10-24 The default folder that setup suggests is `~/`, not `~/projects`, as the owner asked.
+2026-10-24 Two tracks: dev 2 builds the agent backend and the Telegram transport; we build the GUI and setup. Everything crosses the boundary as a file, never as a function call.
+2026-10-24 The GUI never writes the state field. It writes answers, approval fields and request flags that the orchestrator picks up and clears, so one writer owns every transition.
+2026-10-24 The frontend is built against fixture records, one per state and flag, agreed with dev 2 before either side writes a screen or a step. The fixtures are the format contract in executable form.
+2026-10-24 The interaction surface between the agent backend and the frontend is specified in `dev2/agent_surface_spec.md`, which wins over the design files where they differ. New record fields need a new schema number and a new version of that file.
+2026-10-24 Human-edited files are TOML or markdown, machine-written files are YAML, and the task record is YAML front matter plus five fixed markdown sections, so each side can tell by format who writes a file.
+2026-10-24 The vault is plain TOML with mode 600 in wave 1 and the GUI writes it, as the owner allowed privacy to be "maybe zero for now"; encryption swaps in later behind the same field paths.
+2026-10-24 Setup checks cross the boundary as a local command with JSON on stdout, the one exception to files-only, because they need the network.
+2026-10-24 Cancel moves a task to failed with the reason logged and the verdict left null, so a cancelled task is re-delegated like any failed one.
+2026-10-24 The frontend owns all setup screens (API key entry, model selector, Telegram bot onboarding) and the agent status UI; the backend exposes checks and writes the registry, nothing visual.

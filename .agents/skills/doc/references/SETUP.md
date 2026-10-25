@@ -9,7 +9,7 @@ and never echoed back. Each screen has a back button.
 
 | # | Screen | What the user does | Check that must pass | Written |
 |---|---|---|---|---|
-| 1 | Default folder | picks where their projects live; `~/projects` is suggested | the folder exists and is writable | `default_folder` in settings; `~/.fabric-space/` is created |
+| 1 | Default folder | picks where their projects live; `~/` is suggested | the folder exists and is writable | `default_folder` in settings; `~/.fabric-space/` is created |
 | 2 | Anthropic API key | pastes the key | one tiny request succeeds | the key in secrets, mode 600, shown masked from then on |
 | 3 | Model | picks Sonnet (suggested) or Haiku; only these two are offered | a one-line reply from the chosen model | `model` in settings |
 | 4 | Telegram bot | opens BotFather in Telegram, sends `/newbot`, answers its two prompts, pastes the token | the bot API returns the bot's name | the token in secrets |

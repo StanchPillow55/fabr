@@ -16,7 +16,7 @@ code still says fabr until the rename lands.
     preferences.toml            # hand-written structured: budgets, allowed tools, ask or auto
     learned.yaml                # agent-written records; GUI lists, promotes, deletes
   data-bank/
-    vault.age                   # encrypted fields: name.first, address.zip, payment.* and so on
+    vault.toml                  # mode 600; fields name.first, address.zip and so on; plain in wave 1, encrypted later
     policy.toml                 # per field or subtree: always-allow or always-ask
     audit.log                   # every fill: task, field, sink, time
   registry/                     # live agents, heartbeat files, runtime only
@@ -64,5 +64,5 @@ passed. The default folder is where the tree opens and where the first `.fabric-
 ## Contract with the input project
 
 The organizer writes a task record with state reminder and at least a title. Everything else is
-optional. Fabric owns every state after that. The exact file format is still to be agreed with
-the parallel project; until then, this file and `TASK_RECORD.md` describe the intended shape.
+optional. Fabric owns every state after that. The exact file format is in `../dev2/agent_surface_spec.md`,
+section 2, and the minimal record there is what the organizer writes.

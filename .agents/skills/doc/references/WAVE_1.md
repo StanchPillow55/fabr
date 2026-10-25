@@ -9,7 +9,8 @@ audit entry. A restart mid-run resumes. Everything here is a foundation block fr
 1. Exit test
 2. Build order
 3. Definition of done per item
-4. Open with the owner
+4. Tracks
+5. Open with the owner
 
 ## 1. Exit test
 
@@ -84,7 +85,13 @@ Each line depends only on the lines above it. Build and test in this order.
 - Learner: every answer given during define is on the record with its question. A preference
   answer appears in the project learned file; an address-like answer is offered to the bank.
 
-## 4. Open with the owner
+## 4. Tracks
+
+Two people build this wave. Dev 2 builds items 2, 5 to 15 of the build order. We build items 1,
+3, 4 and 16, plus the GUI half of 17. The split, the contract and our own waves are in
+`FRONTEND_PLAN.md`.
+
+## 5. Open with the owner
 
 - The exact record file format shared with the input project.
 - The demo web form used in the exit test.
