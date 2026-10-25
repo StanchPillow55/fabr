@@ -5,25 +5,27 @@ import type { AnswerInput } from './answer';
 import { submitApproval, type ApprovalDecision } from './approval';
 import { BACKEND_LABEL, backendState } from './backend';
 import { loadReadPosition, parseEvents, reconcileReadPosition, saveReadPosition, unreadCount, type FabricEvent } from './events';
-import { COLUMNS, columnOf, folderName, folderOf, nodeFolder, type ColumnId, type Entry } from './folder';
+import { folderName, folderOf, nodeFolder, type Entry } from './folder';
 import { createFabricSource } from './live';
 import { parseRecord } from './parse';
 import { submitDone } from './done';
 import { submitSuspend, submitUnsuspend } from './suspend';
 import { submitRequest, type RequestKey } from './requests';
 import type { CreateFields, FabricSource } from './source';
-import { buildAgents, effectiveSuspended, leadOf, sortAgents, type AgentView } from './stage';
+import { minuteOf } from '../model';
+import { isActive, phaseOf, type Phase } from './phase';
+import { buildAgents, leadOf, sortAgents, type AgentView } from './stage';
 import { entryMap, findByTaskPath, loadRegistry } from './view';
 import { submitAnswer } from './write';
 import type { RegistryEntry } from './agents';
 
 export type Held = Entry & { text: string };
-export type FolderCounts = { byColumn: Record<ColumnId, number>; waiting: number; total: number; suspended: number };
+export type FolderCounts = { todo: number; active: number; needs_you: number; suspended: number; done: number; failed: number; total: number };
 
 const EMPTY: Held[] = [];
 
-function itemsSig(records: Held[]): string {
-  return records.map((h) => `${h.path}|${h.record.state}|${h.record.title}|${h.record.due ?? ''}|${h.record.pri}|${h.record.suspended}|${h.record.suspend_until ?? ''}`).join('\n');
+function itemsSig(records: Held[], now: string): string {
+  return records.map((h) => `${h.path}|${h.record.title}|${h.record.due ?? ''}|${h.record.pri}|${phaseOf(h.record, now)}`).join('\n');
 }
 
 export function localRoots(sources: Source[] | undefined): string[] {
@@ -60,6 +62,7 @@ export class FabricStore {
   agentReason = $state<string | null>(null);
   backendLabel = $derived(this.agentReason && this.backend !== 'connected' ? `${BACKEND_LABEL[this.backend]}: ${this.agentReason}` : BACKEND_LABEL[this.backend]);
   unread = $derived(unreadCount(this.events, this.readPosition));
+  phases = $derived(new Map(this.records.map((h) => [h.path, phaseOf(h.record, minuteOf(this.now))] as const)));
   byFolder = $derived.by(() => {
     const m = new Map<string, Held[]>();
     for (const h of this.records) {
@@ -68,17 +71,8 @@ export class FabricStore {
     }
     return m;
   });
-  #running = $derived.by(() => {
-    const m = new Map<string, RegistryEntry[]>();
-    for (const e of this.registry) {
-      const held = findByTaskPath(this.records, e.task_path);
-      const k = held ? folderOf(held.path) : folderOf(e.task_path);
-      m.set(k, [...(m.get(k) ?? []), e]);
-    }
-    return m;
-  });
   #entries = $derived(entryMap(this.records, this.registry));
-  agents = $derived(buildAgents(this.records, this.registry, this.backend, this.now));
+  agents = $derived(buildAgents(this.records, this.registry, this.backend, this.now, this.phases));
   agentList = $derived(sortAgents([...this.agents.values()]));
   openRecord = $derived(this.records.find((h) => h.path === this.openPath) ?? null);
 
@@ -135,7 +129,7 @@ export class FabricStore {
     }
     this.records = ok;
     this.errors = bad;
-    const sig = itemsSig(ok);
+    const sig = itemsSig(ok, minuteOf(this.now));
     const changed = this.#itemsSig !== null && sig !== this.#itemsSig;
     this.#itemsSig = sig;
     this.registry = loadRegistry(await src.listRegistry()).entries;
@@ -171,14 +165,18 @@ export class FabricStore {
 
   countsFor(folder: string | null): FolderCounts {
     const list = this.tasksFor(folder);
-    const byColumn = Object.fromEntries(COLUMNS.map((c) => [c.id, 0])) as Record<ColumnId, number>;
-    const shelved = list.filter((h) => effectiveSuspended(h.record, this.now));
-    for (const h of list) if (!shelved.includes(h)) byColumn[columnOf(h.record.state)]++;
-    return { byColumn, waiting: list.filter((h) => h.record.waiting && !shelved.includes(h)).length, total: list.length, suspended: shelved.length };
+    const c: FolderCounts = { todo: 0, active: 0, needs_you: 0, suspended: 0, done: 0, failed: 0, total: list.length };
+    for (const h of list) {
+      const p = this.phaseFor(h);
+      if (p === 'todo' || p === 'suspended' || p === 'done' || p === 'failed') c[p]++;
+      else if (isActive(p)) c.active++;
+      if (p === 'needs_you') c.needs_you++;
+    }
+    return c;
   }
 
-  runningFor(folder: string | null): RegistryEntry | null {
-    return (folder && this.#running.get(folder)?.[0]) || null;
+  phaseFor(h: Held): Phase {
+    return this.phases.get(h.path) ?? phaseOf(h.record, minuteOf(this.now));
   }
 
   entryFor(recordPath: string): RegistryEntry | null {
@@ -236,8 +234,14 @@ export class FabricStore {
     if (!h) throw new Error(`no loaded record for ${path}`);
     await submitDone(this.#source!, h.path, h.text);
     await this.#reread(h.path);
-    this.#itemsSig = itemsSig(this.records);
+    this.#itemsSig = itemsSig(this.records, minuteOf(this.now));
     this.onItemsChange?.();
+  }
+
+  async complete(h: Held): Promise<void> {
+    if (this.phaseFor(h) === 'todo') return this.markDone(h.path);
+    await submitRequest(this.#source!, h.path, await this.#fresh(h.path), 'complete');
+    await this.#reread(h.path);
   }
 
   async #fresh(path: string): Promise<string> {
@@ -267,7 +271,7 @@ export class FabricStore {
 
   async #shelved(path: string): Promise<void> {
     await this.#reread(path);
-    this.#itemsSig = itemsSig(this.records);
+    this.#itemsSig = itemsSig(this.records, minuteOf(this.now));
     this.onItemsChange?.();
   }
 

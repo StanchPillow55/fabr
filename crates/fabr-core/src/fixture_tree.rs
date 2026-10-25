@@ -1,9 +1,15 @@
-use crate::item::Status;
 use crate::meta::MetaValue;
 use crate::node::{META_FILE, NODE_DIR};
 use crate::taskrec::{self, Grants, Links, Requests, SCHEMA, State, TaskRecord};
 use std::io;
 use std::path::Path;
+
+#[derive(Clone, Copy)]
+enum Status {
+    Todo,
+    Wip,
+    Done,
+}
 
 type Todo = (Status, Option<i64>, String, Option<u8>);
 
@@ -185,7 +191,7 @@ fn write_records(node: &Path, todos: &[Todo], today: chrono::NaiveDate) -> io::R
             pri: pri.unwrap_or(0),
             state: match status {
                 Status::Todo => State::Reminder,
-                Status::Wip => State::Defined,
+                Status::Wip => State::InProgress,
                 Status::Done => State::Succeeded,
             },
             step: None,
@@ -195,7 +201,7 @@ fn write_records(node: &Path, todos: &[Todo], today: chrono::NaiveDate) -> io::R
             suspend_until: None,
             created_at: now.clone(),
             updated_at: now.clone(),
-            requests: Requests { delegate: false, cancel: false, redelegate: false, pause: false, resume: false },
+            requests: Requests { delegate: false, cancel: false, redelegate: false, pause: false, resume: false, complete: false },
             question: None,
             answers: Vec::new(),
             grants: Grants { requested: Vec::new(), granted: Vec::new() },

@@ -33,7 +33,7 @@ pub use error::{ErrorDto, FabrError, client_error};
 #[doc(hidden)]
 pub use fixture_tree::write_fixture_tree;
 pub use fs::{Fs, LocalFs, TarSnapshot};
-pub use item::{Item, Status, due_sort_key, is_overdue_at, items_in, now_minute};
+pub use item::{Item, Phase, Phased, due_sort_key, is_overdue_at, items_in, now_minute};
 pub use meta::{Meta, MetaValue, parse_meta, render_meta, validate_meta};
 pub use node::{Node, load_node, version_of};
 pub use ops::{Desktop, Done, OPS, Op, Verb, dispatch, url_allowed};

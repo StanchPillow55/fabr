@@ -4,7 +4,7 @@ use fabr_agent::model::{DraftAssertion, DraftCheck, PlanDraft, ScriptedModel, To
 use fabr_agent::{approval_allows_execute, run_once};
 use fabr_core::fabric::{self, FabricWriteReq};
 use fabr_core::taskrec::{self, State, Step, TaskRecord};
-use fabr_core::{NodeRef, Status, Workspace};
+use fabr_core::{NodeRef, Phase, Workspace};
 use std::path::{Path, PathBuf};
 
 fn workspace(root: &Path) -> Workspace {
@@ -280,7 +280,7 @@ fn failed_check_does_not_succeed() {
     assert_eq!(rec.state, State::Failed);
     assert_eq!(rec.verdict.as_ref().unwrap().result, "fail");
     let node = ws.get_node(NodeRef { source: "local".into(), path: String::new() }).unwrap();
-    assert_eq!(node.items[0].status, Status::Wip);
+    assert_eq!(node.items[0].phase, Phase::Failed);
 }
 
 #[test]
@@ -344,12 +344,12 @@ fn end_to_end_greet_file() {
     let registry_files = std::fs::read_dir(&registry).map(|rd| rd.flatten().count()).unwrap_or(0);
     assert_eq!(registry_files, 0);
     let node = ws.get_node(NodeRef { source: "local".into(), path: String::new() }).unwrap();
-    assert_eq!(node.items[0].status, Status::Done);
+    assert_eq!(node.items[0].phase, Phase::Done);
     let id = node.items[0].id.clone();
     run_once(&ws, "local", "", &fabric, &model).unwrap();
     let final_node = ws.get_node(NodeRef { source: "local".into(), path: String::new() }).unwrap();
     assert_eq!(final_node.items[0].id, id);
-    assert_eq!(final_node.items[0].status, Status::Done);
+    assert_eq!(final_node.items[0].phase, Phase::Done);
     assert_eq!(load(&path).state, State::Succeeded);
 }
 
@@ -381,12 +381,12 @@ fn waiting_on_approval(rec: &TaskRecord) -> bool {
 #[test]
 fn ten_fixtures_one_stage_matches_fabric_updated_at() {
     let fixtures = fixture_markdown();
-    assert_eq!(fixtures.len(), 10, "expected ten fixture records");
+    assert_eq!(fixtures.len(), 12, "expected twelve fixture records");
     for fixture in fixtures {
         let text = std::fs::read_to_string(&fixture).unwrap();
         let original = taskrec::parse(&text).unwrap_or_else(|e| panic!("{}: {}", fixture.display(), e.message()));
-        assert!(text.starts_with("---\nschema: 2\n"), "{}", fixture.display());
-        assert_eq!((original.schema, original.pri), (4, 0), "{}", fixture.display());
+        assert!(text.starts_with("---\nschema: 4\n"), "{}", fixture.display());
+        assert_eq!((original.schema, original.pri), (5, 0), "{}", fixture.display());
         assert!(original.source.is_none(), "{}", fixture.display());
         assert_eq!(fabric::updated_at(&text), original.updated_at, "{}", fixture.display());
 
@@ -439,6 +439,10 @@ fn ten_fixtures_one_stage_matches_fabric_updated_at() {
                     assert_eq!(again.step, Some(Step::Plan), "{}", fixture.display());
                     assert!(!again.waiting, "{}", fixture.display());
                 }
+                (State::InProgress, Some(Step::Execute)) if before.paused => {
+                    assert_eq!((again.state, again.step), (before.state, before.step), "{}", fixture.display());
+                    assert_eq!(again.updated_at, before.updated_at, "{}", fixture.display());
+                }
                 (State::InProgress, Some(Step::Execute)) => {
                     assert_eq!(again.state, State::InProgress, "{}", fixture.display());
                     assert_eq!(again.step, Some(Step::Evaluate), "{}", fixture.display());
@@ -450,7 +454,7 @@ fn ten_fixtures_one_stage_matches_fabric_updated_at() {
                 }
                 _ => panic!("no scripted stage for {} {:?}", fixture.display(), (before.state, before.step)),
             }
-            if !matches!(before.state, State::Succeeded | State::Failed) {
+            if !before.paused && !matches!(before.state, State::Succeeded | State::Failed) {
                 assert_ne!(again.updated_at, before.updated_at, "{}", fixture.display());
             }
         }

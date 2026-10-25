@@ -1,22 +1,22 @@
 import { describe, expect, it } from 'vitest';
 import { parseFrontMatter, parseLogLine, parseRecord } from './parse';
 import { FixtureSource, fixtureName } from './source';
-import { FIELDS, OPTIONAL_FIELDS } from './types';
+import { FIELDS } from './types';
 
 const records = await new FixtureSource().listRecords();
 
 describe('fixtures', () => {
-  it('finds all ten fixtures', () => {
-    expect(new Set(records.map((r) => fixtureName(r.path))).size).toBe(9);
-    expect(records.length).toBe(10);
+  it('finds all twelve fixtures', () => {
+    expect(new Set(records.map((r) => fixtureName(r.path))).size).toBe(11);
+    expect(records.length).toBe(12);
   });
 
   for (const { path, text } of records) {
     it(`parses ${path.split('fixtures/')[1]}`, () => {
-      expect(Object.keys(parseFrontMatter(text).data)).toEqual(FIELDS.filter((f) => !OPTIONAL_FIELDS.includes(f)));
+      expect(Object.keys(parseFrontMatter(text).data)).toEqual([...FIELDS]);
       const r = parseRecord(text);
-      expect(r.schema).toBe(2);
-      expect(r.pri).toBe(0);
+      expect(r.schema).toBe(4);
+      expect(r.pri).toBeGreaterThanOrEqual(0);
       expect(typeof r.state).toBe('string');
       expect(r.step === null || typeof r.step === 'string').toBe(true);
       expect(typeof r.waiting).toBe('boolean');

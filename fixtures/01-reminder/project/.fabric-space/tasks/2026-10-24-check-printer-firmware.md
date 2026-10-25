@@ -1,15 +1,19 @@
 ---
-schema: 2
+schema: 4
 id: 2026-10-24-check-printer-firmware
 source: null
 title: "check for a printer firmware update"
 due: 2026-10-30
+pri: 0
 state: reminder
 step: null
 waiting: false
+paused: false
+suspended: false
+suspend_until: null
 created_at: 2026-10-24T18:02:11Z
 updated_at: 2026-10-24T18:02:11Z
-requests: {delegate: false, cancel: false, redelegate: false}
+requests: {delegate: false, cancel: false, redelegate: false, pause: false, resume: false}
 question: null
 answers: []
 grants:

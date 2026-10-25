@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { Item, Node, Source, SourceError } from '../api/types';
   import { MAX_ROWS } from '../constants';
+  import { isOpen } from '../fabric/phase';
   import { cardAside, cardTitle, dueLabel, isHidden, isVirtualRoot, rollup, rootCounts, sourceLines, type BoxModel, type Key } from '../model';
   import ErrorText from '../ui/ErrorText.svelte';
   import DueBadge from '../ui/DueBadge.svelte';
@@ -8,7 +9,6 @@
   import Pill from '../ui/Pill.svelte';
   import Priority from '../ui/Priority.svelte';
   import AddTask from '../fabric/AddTask.svelte';
-  import { canMarkDone } from '../fabric/done';
   import TaskStrip from '../fabric/TaskStrip.svelte';
   import type { FabricStore, Held } from '../fabric/tasks.svelte';
 
@@ -60,7 +60,7 @@
   }
   async function markDone(h: Held) {
     try {
-      await fabric?.markDone(h.path);
+      await fabric?.complete(h);
     } catch (e) {
       if (fabric) fabric.actionError = (e as Error).message;
     }
@@ -147,12 +147,12 @@
       {#each model.shown as item}
         {@const h = held(item)}
         {@const dead = remote && !h}
-        <li class="row row--{item.status}" class:row--suspended={item.suspended && item.status !== 'done'}>
-          <Pill status={item.status} />
+        <li class="row row--{item.phase}">
+          <Pill phase={item.phase} />
           <button type="button" class="row__title row__link" title={dead ? REMOTE_TITLE : item.title} aria-disabled={dead || undefined} onclick={stop(() => openItem(item))} ondblclick={(e) => e.stopPropagation()}>{item.title}</button>
           <Priority pri={item.pri} />
           <DueBadge {item} {today} />
-          {#if h && !remote && canMarkDone(h.record)}
+          {#if h && !remote && isOpen(item.phase) && !h.record.requests.complete}
             <button type="button" class="row__tick" title="Mark done" aria-label="Mark {item.title} done" onclick={stop(() => markDone(h))} ondblclick={(e) => e.stopPropagation()}><Icon name="check" size={12} /></button>
           {/if}
         </li>
@@ -174,10 +174,10 @@
   {#if roll}
     <div class="card__rollup" title="This node and {roll.nodes} below; {roll.done} done{roll.suspended ? `, ${roll.suspended} suspended` : ''}">
       <span><b>{roll.todo}</b> todo</span>
-      <span><b>{roll.wip}</b> active</span>
+      <span><b>{roll.active}</b> active</span>
       <span><b>{roll.done}</b> done</span>
       {#if roll.overdue}<span class="card__overdue">{roll.overdue} overdue</span>{/if}
-      {#if roll.next}<span class="card__next">next {dueLabel({ id: '', due: roll.next, status: 'todo', title: '', pri: 0 }, today)}</span>{/if}
+      {#if roll.next}<span class="card__next">next {dueLabel({ id: '', due: roll.next, phase: 'todo', title: '', pri: 0 }, today)}</span>{/if}
     </div>
   {/if}
 </div>

@@ -216,6 +216,7 @@ code { font: 0.92em ui-monospace, "SF Mono", "JetBrains Mono", Menlo, monospace;
 .row__title { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .row--done .row__title { color: var(--label-3); text-decoration: line-through; text-decoration-color: var(--label-4); }
 .row--suspended .row__title { color: var(--label-3); font-style: italic; }
+.row--paused .row__title { color: var(--label-2); }
 .row--add { padding: 0; border-bottom: 0.5px solid var(--sep); }
 .row--adding { padding: 0 10px; }
 .row__addbtn { all: unset; box-sizing: border-box; display: flex; align-items: center; gap: 8px; width: 100%; height: 100%; padding: 0 10px; color: var(--label-3); font-size: var(--fs-12); cursor: text; }
@@ -252,26 +253,26 @@ code { font: 0.92em ui-monospace, "SF Mono", "JetBrains Mono", Menlo, monospace;
   flex: none;
   display: inline-grid;
   place-items: center;
-  width: 38px;
+  min-width: 38px;
   height: 16px;
-  padding: 0;
-  border: 0;
+  padding: 0 5px;
+  box-sizing: border-box;
   border-radius: var(--radius-pill);
   font-size: 10px;
   font-weight: 650;
   letter-spacing: 0.03em;
   line-height: 1;
   text-transform: uppercase;
+  white-space: nowrap;
   background: var(--fill-3);
-  cursor: pointer;
-  transition: background-color 120ms;
 }
-.pill:hover:not(:disabled) { background: color-mix(in srgb, currentColor 22%, transparent); }
-.pill:active:not(:disabled) { background: color-mix(in srgb, currentColor 32%, transparent); }
-.pill:disabled { cursor: default; }
 .pill--todo { color: var(--status-todo); }
-.pill--wip { color: var(--status-wip); background: color-mix(in srgb, var(--orange) 16%, transparent); }
+.pill--working { color: var(--tint); background: color-mix(in srgb, var(--tint) 16%, transparent); }
+.pill--needs_you { color: var(--orange); background: color-mix(in srgb, var(--orange) 16%, transparent); }
+.pill--paused { color: var(--label-2); }
+.pill--suspended { color: var(--label-3); font-style: italic; }
 .pill--done { color: var(--status-done); background: transparent; box-shadow: inset 0 0 0 0.5px var(--sep); }
+.pill--failed { color: var(--red); background: color-mix(in srgb, var(--red) 14%, transparent); }
 
 .pri { flex: none; font-weight: 800; font-size: var(--fs-11); letter-spacing: -0.02em; }
 .pri--1 { color: var(--red); }

@@ -1,4 +1,5 @@
 import type { Node } from './api/types';
+import { isActive } from './fabric/phase';
 import { isOverdue, passes, type Filter, type ItemFilter, type Rollup, type ViewMode } from './model';
 
 export interface ShowPrefs {
@@ -36,21 +37,21 @@ export interface CountPart {
   tone: CountTone;
 }
 
-export function countParts(r: Pick<Rollup, 'todo' | 'wip' | 'overdue'>): CountPart[] {
+export function countParts(r: Pick<Rollup, 'todo' | 'active' | 'overdue'>): CountPart[] {
   return [
     { n: r.todo, label: 'todo', tone: r.todo ? 'plain' : 'zero' },
-    { n: r.wip, label: 'active', tone: r.wip ? 'wip' : 'zero' },
+    { n: r.active, label: 'active', tone: r.active ? 'wip' : 'zero' },
     { n: r.overdue, label: 'overdue', tone: r.overdue ? 'overdue' : 'zero' },
   ];
 }
 
-export function shownCounts(root: Node, f: ItemFilter): Pick<Rollup, 'todo' | 'wip' | 'overdue'> {
-  const r = { todo: 0, wip: 0, overdue: 0 };
+export function shownCounts(root: Node, f: ItemFilter): Pick<Rollup, 'todo' | 'active' | 'overdue'> {
+  const r = { todo: 0, active: 0, overdue: 0 };
   (function walk(n: Node) {
     for (const i of n.items) {
-      if (!passes(i, f) || (i.suspended && i.status !== 'done')) continue;
-      if (i.status === 'todo') r.todo++;
-      else if (i.status === 'wip') r.wip++;
+      if (!passes(i, f) || i.phase === 'suspended') continue;
+      if (i.phase === 'todo') r.todo++;
+      else if (isActive(i.phase)) r.active++;
       if (isOverdue(i, f.today, f.now)) r.overdue++;
     }
     n.children.forEach(walk);
@@ -58,7 +59,7 @@ export function shownCounts(root: Node, f: ItemFilter): Pick<Rollup, 'todo' | 'w
   return r;
 }
 
-export function countsLabel(r: Pick<Rollup, 'todo' | 'wip' | 'overdue'>): string {
+export function countsLabel(r: Pick<Rollup, 'todo' | 'active' | 'overdue'>): string {
   return countParts(r).map((p) => `${p.n} ${p.label}`).join(' · ');
 }
 

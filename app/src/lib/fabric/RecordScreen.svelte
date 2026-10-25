@@ -10,10 +10,11 @@
   import { splitContext } from './parse';
   import QuestionPanel from './QuestionPanel.svelte';
   import { BACKEND_LABEL } from './backend';
-  import { backendSilent, canPauseResume, pendingRequests, requestFor, type RequestKey } from './requests';
-  import { effectiveSuspended, suspendLabel } from './stage';
-  import { canSuspend } from './suspend';
+  import { backendSilent, canComplete, canPauseResume, COMPLETE_PENDING, pendingRequests, requestFor, type RequestKey } from './requests';
+  import { isOpen, phaseOf } from './phase';
+  import { suspendLabel } from './stage';
   import StateRibbon from './StateRibbon.svelte';
+  import { minuteOf } from '../model';
   import type { TaskRecord } from './types';
 
   let { record, name, backLabel = 'Records', agent, onback, onanswer, onapprove, onrequest, onsuspend, onunsuspend, now = new Date(), onreload, readonly = false }: {
@@ -32,14 +33,16 @@
     readonly?: boolean;
   } = $props();
 
-  const labels: Record<RequestKey, string> = { delegate: 'Delegate', cancel: 'Cancel', redelegate: 'Re-delegate', pause: 'Pause', resume: 'Resume' };
+  const labels: Record<RequestKey, string> = { delegate: 'Delegate', cancel: 'Cancel', redelegate: 'Re-delegate', pause: 'Pause', resume: 'Resume', complete: 'Mark done' };
   const wanted = $derived(requestFor(record.state));
   const canAsk = $derived(wanted !== null && !record.requests[wanted] && !(wanted === 'redelegate' && record.links.redelegated_to));
-  const queued = $derived(pendingRequests(record).filter((k) => k !== 'pause' && k !== 'resume'));
-  const flip = $derived(canPauseResume(record));
+  const queued = $derived(pendingRequests(record).filter((k) => k !== 'pause' && k !== 'resume' && k !== 'complete'));
+  const phase = $derived(phaseOf(record, minuteOf(now)));
+  const flip = $derived(canPauseResume(record, phase));
   const flipping = $derived(record.requests.pause ? 'pause' : record.requests.resume ? 'resume' : null);
-  const shelved = $derived(effectiveSuspended(record, now));
-  const mayShelve = $derived(canSuspend(record));
+  const mayComplete = $derived(canComplete(record, phase));
+  const shelved = $derived(phase === 'suspended');
+  const mayShelve = $derived(isOpen(phase));
   let picking = $state(false);
   let mode = $state<'none' | 'date' | 'time'>('none');
   let day = $state('');
@@ -86,19 +89,20 @@
 <Page title={record.title} back={backLabel} {onback}>
   <div class="rec">
     <header class="rec__head">
-      <h1 class="rec__title">{record.title}</h1>
       <p class="rec__meta">{name}{#if record.due} · due {record.due}{/if} · cost ${record.cost_usd}</p>
     </header>
 
-    <StateRibbon state={record.state} step={record.step} waiting={record.waiting} />
+    <StateRibbon state={record.state} step={record.step} {phase} />
 
     {#if agent}{@render agent()}{/if}
 
-    {#if !readonly && (canAsk || queued.length || flip || flipping || shelved || mayShelve)}
+    {#if !readonly && (canAsk || queued.length || flip || flipping || mayComplete || record.requests.complete || shelved || mayShelve)}
       <div class="req">
         {#if canAsk && wanted}
           <Button variant={wanted === 'cancel' ? 'danger' : 'primary'} disabled={busy} onclick={() => ask(wanted)}>{labels[wanted]}</Button>
         {/if}
+        {#if mayComplete}<Button variant="tint" disabled={busy} data-testid="mark-done" onclick={() => ask('complete')}>{labels.complete}</Button>{/if}
+        {#if record.requests.complete}<span class="req__queued" data-testid="complete-pending">{COMPLETE_PENDING}</span>{/if}
         {#if flip}<Button variant="tint" disabled={busy} data-testid="pause-resume" onclick={() => ask(flip)}>{labels[flip]}</Button>{/if}
         {#if flipping}<span class="req__queued">{flipping} requested</span>{/if}
         {#if shelved}
@@ -230,7 +234,6 @@
 
 <style>
   .rec { display: flex; flex-direction: column; gap: 18px; padding: 8px 0 24px; }
-  .rec__title { margin: 0; font-size: 20px; }
   .rec__meta { margin: 4px 0 0; font-size: var(--fs-12); color: var(--label-2); }
   .blk { padding: 10px 16px; display: flex; flex-direction: column; gap: 6px; }
   .txt { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }

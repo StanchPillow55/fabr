@@ -109,6 +109,10 @@ pub struct SecretsWriteReq {
 pub struct SecretsStatus {
     pub anthropic_api_key: bool,
     pub telegram_bot_token: bool,
+    #[serde(default)]
+    pub anthropic_api_key_fingerprint: Option<String>,
+    #[serde(default)]
+    pub telegram_bot_token_fingerprint: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -223,9 +227,13 @@ pub fn secrets_write(ctx: &Ctx, req: SecretsWriteReq) -> Result<SecretsStatus, F
 }
 
 pub fn secrets_status(ctx: &Ctx) -> SecretsStatus {
+    let key = read_secret(ctx, "anthropic_api_key");
+    let token = read_secret(ctx, "telegram_bot_token");
     SecretsStatus {
-        anthropic_api_key: read_secret(ctx, "anthropic_api_key").is_some(),
-        telegram_bot_token: read_secret(ctx, "telegram_bot_token").is_some(),
+        anthropic_api_key: key.is_some(),
+        telegram_bot_token: token.is_some(),
+        anthropic_api_key_fingerprint: key.as_deref().map(crate::redact::fingerprint),
+        telegram_bot_token_fingerprint: token.as_deref().map(crate::redact::fingerprint),
     }
 }
 
@@ -515,13 +523,15 @@ mod tests {
     fn secrets_are_private_merged_and_never_reported() {
         let d = tempfile::tempdir().unwrap();
         let c = Ctx::new(d.path());
-        assert_eq!(secrets_status(&c), SecretsStatus { anthropic_api_key: false, telegram_bot_token: false });
+        let st = secrets_status(&c);
+        assert!(!st.anthropic_api_key && !st.telegram_bot_token && st.anthropic_api_key_fingerprint.is_none());
         let st = secrets_write(&c, SecretsWriteReq { anthropic_api_key: Some("sk-ant-FIXTURE-NOT-REAL".into()), telegram_bot_token: None })
             .unwrap();
-        assert_eq!(st, SecretsStatus { anthropic_api_key: true, telegram_bot_token: false });
+        assert!(st.anthropic_api_key && !st.telegram_bot_token);
+        assert_eq!(st.anthropic_api_key_fingerprint.as_deref(), Some("sk-ant-…REAL"));
         let st =
             secrets_write(&c, SecretsWriteReq { anthropic_api_key: None, telegram_bot_token: Some("123456:FAKE-TOKEN".into()) }).unwrap();
-        assert_eq!(st, SecretsStatus { anthropic_api_key: true, telegram_bot_token: true });
+        assert!(st.anthropic_api_key && st.telegram_bot_token);
         assert_eq!(read_secret(&c, "anthropic_api_key").as_deref(), Some("sk-ant-FIXTURE-NOT-REAL"));
         assert!(!serde_json::to_string(&st).unwrap().contains("FIXTURE"));
         #[cfg(unix)]

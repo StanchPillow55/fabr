@@ -87,6 +87,8 @@ pub struct Requests {
     pub pause: bool,
     #[serde(default)]
     pub resume: bool,
+    #[serde(default)]
+    pub complete: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -301,7 +303,7 @@ pub struct TaskRecord {
     pub log: String,
 }
 
-pub const SCHEMA: i64 = 4;
+pub const SCHEMA: i64 = 5;
 
 pub fn valid_due(s: &str) -> bool {
     match s.len() {
@@ -319,7 +321,7 @@ pub fn parse(text: &str) -> Result<TaskRecord, FabrError> {
     let yaml = &rest[..end];
     let body = rest[end + 4..].strip_prefix('\n').unwrap_or(&rest[end + 4..]);
     let fm: FrontMatter = serde_yaml::from_str(yaml).map_err(|e| FabrError::Unprocessable(format!("front matter: {e}")))?;
-    if !matches!(fm.schema, 2..=4) {
+    if !matches!(fm.schema, 2..=5) {
         return Err(FabrError::Unprocessable(format!("unsupported record schema {}", fm.schema)));
     }
     if fm.pri > 3 {
@@ -623,13 +625,13 @@ mod tests {
     #[test]
     fn loads_every_fixture() {
         let recs = records();
-        assert_eq!(recs.len(), 10, "expected ten fixture records, found {}", recs.len());
+        assert_eq!(recs.len(), 12, "expected twelve fixture records, found {}", recs.len());
         for path in recs {
             let text = std::fs::read_to_string(&path).unwrap();
             let rec = parse(&text).unwrap_or_else(|e| panic!("{}: {}", path.display(), e.message()));
-            assert_eq!(rec.schema, 4, "{}", path.display());
+            assert_eq!(rec.schema, 5, "{}", path.display());
             assert_eq!(rec.pri, 0, "{}", path.display());
-            assert!(render(&rec).starts_with("---\nschema: 4\n"), "{}", path.display());
+            assert!(render(&rec).starts_with("---\nschema: 5\n"), "{}", path.display());
             assert!(!rec.id.is_empty(), "{}", path.display());
         }
     }
@@ -638,22 +640,33 @@ mod tests {
     fn schema_two_upgrades_and_bad_values_are_refused() {
         let text =
             std::fs::read_to_string(fixtures_dir().join("01-reminder/project/.fabric-space/tasks/2026-10-24-check-printer-firmware.md"))
-                .unwrap();
+                .unwrap()
+                .replacen("schema: 4", "schema: 2", 1)
+                .replace("pri: 0\n", "")
+                .replace("paused: false\nsuspended: false\nsuspend_until: null\n", "")
+                .replace(", pause: false, resume: false", "");
         assert!(text.starts_with("---\nschema: 2\n"));
         let rec = parse(&text).unwrap();
-        assert_eq!((rec.schema, rec.pri), (4, 0));
-        assert!(!rec.paused && !rec.suspended && rec.suspend_until.is_none() && !rec.requests.pause && !rec.requests.resume);
+        assert_eq!((rec.schema, rec.pri), (5, 0));
+        assert!(
+            !rec.paused
+                && !rec.suspended
+                && rec.suspend_until.is_none()
+                && !rec.requests.pause
+                && !rec.requests.resume
+                && !rec.requests.complete
+        );
         let out = render(&rec);
         assert!(
-            out.starts_with("---\nschema: 4\n")
+            out.starts_with("---\nschema: 5\n")
                 && out.contains("\npri: 0\n")
                 && out.contains("\npaused: false\nsuspended: false\nsuspend_until: null\n")
         );
         let mut rec = rec;
         rec.pri = 2;
         assert_eq!(parse(&render(&rec)).unwrap().pri, 2);
-        assert!(parse(&text.replacen("schema: 2", "schema: 5", 1)).is_err());
-        assert!(parse(&text.replacen("schema: 2\n", "schema: 4\npri: 4\n", 1)).is_err());
+        assert!(parse(&text.replacen("schema: 2", "schema: 6", 1)).is_err());
+        assert!(parse(&text.replacen("schema: 2\n", "schema: 5\npri: 4\n", 1)).is_err());
     }
 
     #[test]

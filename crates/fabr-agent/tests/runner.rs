@@ -793,3 +793,64 @@ fn a_paused_task_does_not_block_the_next_one_in_the_folder() {
     assert!(b.paused && b.state == State::InProgress);
     r.shutdown(true);
 }
+
+#[test]
+fn complete_during_execute_succeeds_and_emits_done() {
+    let fake = Fake::new(0);
+    let e = ready(&fake);
+    let path = new_record(&e, "long job");
+    edit(&path, |r| {
+        r.state = State::InProgress;
+        r.step = Some(Step::Execute);
+        r.requests.complete = true;
+    });
+    let rec = load(&path);
+    fabr_agent::lifecycle::write_registry(&e.ctx.space(), &e.proj, &path, &rec, 5).unwrap();
+    let (mut r, _) = runner(&e);
+    r.start().unwrap();
+    r.tick();
+    let rec = load(&path);
+    assert_eq!((rec.state, rec.step), (State::Succeeded, None));
+    assert!(!rec.requests.complete && !rec.paused && rec.verdict.is_none());
+    assert!(rec.log.contains("execute: completed by user"), "{}", rec.log);
+    assert!(registry_files(&e).is_empty());
+    assert_eq!(fake.calls(), 0);
+    assert!(events(&e).iter().any(|l| l.contains(" done ")), "{:?}", events(&e));
+    r.shutdown(true);
+}
+
+#[test]
+fn complete_while_paused_succeeds() {
+    let fake = Fake::new(0);
+    let e = ready(&fake);
+    let (mut r, _) = runner(&e);
+    r.start().unwrap();
+    let path = to_awaiting_approval(&e, &mut r, "pause then done");
+    edit(&path, |rec| rec.requests.pause = true);
+    r.tick();
+    assert!(load(&path).paused);
+    edit(&path, |rec| rec.requests.complete = true);
+    r.tick();
+    let rec = load(&path);
+    assert_eq!((rec.state, rec.step), (State::Succeeded, None));
+    assert!(!rec.paused && !rec.requests.complete);
+    assert!(rec.log.contains("approve: completed by user"), "{}", rec.log);
+    assert!(registry_files(&e).is_empty());
+    r.shutdown(true);
+}
+
+#[test]
+fn complete_on_a_reminder_goes_through_the_runner() {
+    let fake = Fake::new(0);
+    let e = ready(&fake);
+    let path = new_record(&e, "by hand");
+    edit(&path, |rec| rec.requests.complete = true);
+    let (mut r, _) = runner(&e);
+    r.start().unwrap();
+    r.tick();
+    let rec = load(&path);
+    assert_eq!(rec.state, State::Succeeded);
+    assert!(!rec.requests.complete);
+    assert!(rec.log.contains("done: completed by user"), "{}", rec.log);
+    r.shutdown(true);
+}

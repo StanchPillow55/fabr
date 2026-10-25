@@ -3,7 +3,7 @@ import { render } from 'svelte/server';
 import { parseRegistryEntry, type RegistryEntry } from './agents';
 import { newRecord } from './source';
 import StageBar from './StageBar.svelte';
-import { GATES, GROUPS, STAGES, effectiveSuspended, leadOf, statusOf, activityOf, aliveOf, ariaText, buildAgents, finishedView, groupOf, mostAdvanced, sortAgents, stageOf, usageLine, viewOf, waitingOf } from './stage';
+import { GATES, GROUPS, STAGES, leadOf, statusOf, activityOf, aliveOf, ariaText, buildAgents, finishedView, groupOf, mostAdvanced, sortAgents, stageOf, usageLine, viewOf, waitingOf } from './stage';
 import type { Question, TaskRecord } from './types';
 
 const NOW = '2026-10-25T09:00:00Z';
@@ -26,7 +26,7 @@ describe('stageOf, table A', () => {
     expect(GATES).toEqual(['define', 'approve']);
   });
   it('1 delegate: a reminder with the delegate request', () => {
-    expect(stageOf(rec({ requests: { delegate: true, cancel: false, redelegate: false, pause: false, resume: false } }))).toBe('delegate');
+    expect(stageOf(rec({ requests: { delegate: true, cancel: false, redelegate: false, pause: false, resume: false, complete: false } }))).toBe('delegate');
     expect(stageOf(rec())).toBeNull();
   });
   it('2 gather: task with step gather or null', () => {
@@ -217,14 +217,6 @@ describe('StageBar', () => {
 
 describe('pause and suspend', () => {
   const held = (record: TaskRecord) => ({ path: '/x/.fabric-space/tasks/2026-10-25-t.md', record });
-  it('effectiveSuspended honours the until time', () => {
-    const r = { suspended: true, suspend_until: null as string | null };
-    expect(effectiveSuspended(r, NOW)).toBe(true);
-    expect(effectiveSuspended({ ...r, suspend_until: '2026-10-26' }, NOW)).toBe(true);
-    expect(effectiveSuspended({ ...r, suspend_until: '2026-10-25' }, NOW)).toBe(false);
-    expect(effectiveSuspended({ ...r, suspend_until: '2026-10-24T08:00' }, NOW)).toBe(false);
-    expect(effectiveSuspended({ suspended: false, suspend_until: '2099-01-01' }, NOW)).toBe(false);
-  });
   it('a paused entry keeps its stage and is live while the heartbeat is fresh', () => {
     const r = rec({ state: 'in_progress', step: 'execute', paused: true });
     const e = entry({ activity: 'paused' });

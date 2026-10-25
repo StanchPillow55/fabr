@@ -62,7 +62,7 @@ describe('sample records render in RecordScreen', () => {
     for (const withEntry of [false, true]) {
       it(`${r.file} ${withEntry ? 'with' : 'without'} a registry entry`, () => {
         const body = screen(r.text, withEntry);
-        expect(body).toContain('rec__title');
+        expect(body).toContain('page-bar__title');
       });
     }
   }
@@ -86,7 +86,7 @@ describe('sample records open from the task panel', () => {
         fabric.open(h.path);
         const folder = h.path.replace(/\/\.fabric-space\/tasks\/[^/]+$/, '');
         const { body } = render(TaskSection, { props: { fabric, folder } });
-        expect(body).toContain('rec__title');
+        expect(body).toContain('page-bar__title');
       }
     });
   }

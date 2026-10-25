@@ -6,6 +6,7 @@ import { nodeFolder } from './folder';
 import TaskSection from './TaskSection.svelte';
 import AgentsBadge from './AgentsBadge.svelte';
 import TaskStrip from './TaskStrip.svelte';
+import StateRibbon from './StateRibbon.svelte';
 import { FabricStore, localRoots } from './tasks.svelte';
 
 const read = (p: string) => readFileSync(new URL(p, import.meta.url), 'utf8');
@@ -36,23 +37,29 @@ async function realPathStore(): Promise<FabricStore> {
 describe('FabricStore over the fixtures', () => {
   it('groups records by folder', async () => {
     const f = await fixtureStore();
-    expect(f.records.length).toBe(10);
-    expect(f.byFolder.size).toBe(9);
+    expect(f.records.length).toBe(12);
+    expect(f.byFolder.size).toBe(11);
     expect(f.tasksFor('09-redelegated-pair').length).toBe(2);
     expect(f.tasksFor('nowhere')).toEqual([]);
     expect(f.tasksFor(null)).toEqual([]);
   });
-  it('counts the five states and waiting', async () => {
+  it('counts by phase', async () => {
     const f = await fixtureStore();
-    expect(f.countsFor('09-redelegated-pair')).toMatchObject({ byColumn: { task: 1, done: 1, reminder: 0 }, total: 2 });
-    expect(f.countsFor('02-open-question')).toMatchObject({ byColumn: { task: 1 }, waiting: 1, total: 1 });
-    expect(Object.keys(f.countsFor('02-open-question').byColumn)).toEqual(['reminder', 'task', 'defined', 'in_progress', 'done']);
-  });
-  it('finds the running agent for the in-progress folder only', async () => {
-    const f = await fixtureStore();
-    expect(f.runningFor('05-running')?.step).toBeTruthy();
-    expect(f.runningFor('02-open-question')).toBeNull();
+    expect(f.countsFor('09-redelegated-pair')).toMatchObject({ todo: 0, active: 1, done: 0, failed: 1, total: 2 });
+    expect(f.countsFor('02-open-question')).toMatchObject({ active: 1, needs_you: 1, total: 1 });
     expect(f.entryFor(f.tasksFor('05-running')[0].path)).not.toBeNull();
+  });
+  it('derives paused and suspended phases from the paused and suspended fixtures', async () => {
+    const f = await fixtureStore();
+    expect(f.countsFor('11-paused')).toMatchObject({ active: 1, total: 1 });
+    expect(f.phaseFor(f.tasksFor('11-paused')[0])).toBe('paused');
+    expect(f.countsFor('12-suspended')).toMatchObject({ active: 0, suspended: 1, total: 1 });
+    const body = render(TaskSection, { props: { fabric: f, folder: '11-paused' } }).body;
+    expect(body).toContain('data-phase="paused"');
+  });
+  it('the ribbon names the phase', () => {
+    const body = render(StateRibbon, { props: { state: 'in_progress', step: 'execute', phase: 'suspended' } }).body;
+    expect(body).toMatch(/data-testid="phase"[^>]*>suspended</);
   });
   it('parses events and starts with everything unread', async () => {
     const f = await fixtureStore();
@@ -134,7 +141,7 @@ describe('task strip', () => {
     expect(body).toContain('data-testid="task-strip"');
     expect(body).toMatch(/1<span class="tstrip__k[^"]*">todo/);
     expect(body).toMatch(/1<span class="tstrip__k[^"]*">active/);
-    expect(body).toContain('waiting');
+    expect(body).toContain('needs you');
     expect(body).not.toContain('running');
     expect(body).not.toContain('defined');
   });
@@ -160,7 +167,7 @@ describe('task section', () => {
     const f = await realPathStore();
     const { body } = render(TaskSection, { props: { fabric: f, folder: '/home/me/proj' } });
     for (const h of f.tasksFor('/home/me/proj')) expect(body).toContain(h.record.title);
-    expect(body).toContain('waiting');
+    expect(body).toContain('needs you');
     expect(body).not.toContain('role="dialog"');
   });
   it('renders the record screen with the question panel once a record is selected', async () => {

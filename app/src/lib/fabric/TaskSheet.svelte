@@ -15,7 +15,7 @@
 
 {#if open}
   {@const h = open}
-  <Sheet open={true} title={h.record.title} width={720} onclose={() => fabric.open(null)}>
+  <Sheet open={true} title={folderName(folderOf(h.path))} width={720} onclose={() => fabric.open(null)}>
     <RecordScreen
       record={h.record}
       name={folderName(folderOf(h.path))}

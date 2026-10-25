@@ -9,7 +9,7 @@ export const FIELDS = [
   'question', 'answers', 'grants', 'plan_meta', 'assertions', 'approval', 'verdict', 'cost_usd', 'links',
 ] as const;
 
-export const SCHEMA = 4;
+export const SCHEMA = 5;
 export const OPTIONAL_FIELDS: readonly string[] = ['pri', 'paused', 'suspended', 'suspend_until'];
 
 export const SECTION_HEADINGS = ['Context', 'Spec', 'Success', 'Plan', 'Log'] as const;
@@ -17,7 +17,7 @@ export const SECTION_HEADINGS = ['Context', 'Spec', 'Success', 'Plan', 'Log'] as
 export type QuestionKind = 'open' | 'choice' | 'grant';
 export type Scope = 'task' | 'project' | 'always';
 
-export interface Requests { delegate: boolean; cancel: boolean; redelegate: boolean; pause: boolean; resume: boolean }
+export interface Requests { delegate: boolean; cancel: boolean; redelegate: boolean; pause: boolean; resume: boolean; complete: boolean }
 
 export interface Answer {
   value: string | null;

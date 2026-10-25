@@ -93,8 +93,8 @@ fn items_loaded() {
     );
     let pris: Vec<_> = api.items.iter().map(|i| i.pri).collect();
     assert_eq!(pris, [0, 0, 2, 3, 0]);
-    let status: Vec<_> = api.items.iter().map(|i| i.status).collect();
-    assert_eq!(status, [Status::Done, Status::Done, Status::Wip, Status::Todo, Status::Todo]);
+    let status: Vec<_> = api.items.iter().map(|i| i.phase).collect();
+    assert_eq!(status, [Phase::Done, Phase::Done, Phase::Working, Phase::Todo, Phase::Todo]);
     let tax = find(&tree.root, "personal/finance").unwrap().items.iter().find(|i| i.title == "File tax return").unwrap();
     assert_eq!(tax.pri, 1);
     assert!(tax.due.is_some() && !tax.id.is_empty());
@@ -393,7 +393,8 @@ fn json_shapes() {
     let api = &v["root"]["children"][0]["children"].as_array().unwrap().iter().find(|c| c["path"] == "work").unwrap()["children"][0];
     assert_eq!(api["path"], "work/api-server");
     let item = &api["items"][2];
-    assert_eq!(item["status"], "wip");
+    assert_eq!(item["phase"], "working");
+    assert!(item.get("status").is_none() && item.get("suspended").is_none());
     assert_eq!(item["pri"], 2);
     assert!(item["id"].is_string() && item["due"].is_string() && item["title"] == "Migrate auth to OAuth2");
     assert!(api["items"][4]["due"].is_null() && api["items"][4]["pri"] == 0);

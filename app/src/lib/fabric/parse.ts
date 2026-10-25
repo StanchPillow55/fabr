@@ -41,7 +41,7 @@ export function splitContext(context: string): { own: string; gathered: string }
 
 export function parseRecord(text: string): TaskRecord {
   const { data, body } = parseFrontMatter(text);
-  if (data.schema !== 2 && data.schema !== 3 && data.schema !== 4) throw new Error(`unsupported schema ${String(data.schema)}`);
+  if (![2, 3, 4, 5].includes(data.schema as number)) throw new Error(`unsupported schema ${String(data.schema)}`);
   for (const f of FIELDS) if (!(f in data) && !OPTIONAL_FIELDS.includes(f)) throw new Error(`missing front matter field "${f}"`);
   if (!(STATES as readonly string[]).includes(data.state as string)) throw new Error(`invalid state "${String(data.state)}"`);
   if (data.step !== null && !(STEPS as readonly string[]).includes(data.step as string)) throw new Error(`invalid step "${String(data.step)}"`);
@@ -54,7 +54,7 @@ export function parseRecord(text: string): TaskRecord {
   const pri = data.pri ?? 0;
   if (typeof pri !== 'number' || !Number.isInteger(pri) || pri < 0 || pri > 3) throw new Error(`invalid pri "${String(pri)}"`);
   const req = data.requests as Record<string, unknown>;
-  const requests = { ...req, pause: req.pause === true, resume: req.resume === true };
+  const requests = { ...req, pause: req.pause === true, resume: req.resume === true, complete: req.complete === true };
   const until = typeof data.suspend_until === 'string' && data.suspend_until !== '' ? data.suspend_until : null;
   return { ...(data as unknown as FrontMatter), pri, requests: requests as unknown as FrontMatter['requests'], paused: data.paused === true, suspended: data.suspended === true, suspend_until: until, sections: parseSections(body) };
 }

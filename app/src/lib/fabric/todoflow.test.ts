@@ -15,6 +15,8 @@ import { FixtureSource, guardState } from './source';
 import { serializeRecord } from './serialize';
 import { FabricStore } from './tasks.svelte';
 import TaskSection from './TaskSection.svelte';
+import RecordScreen from './RecordScreen.svelte';
+import { applyRequest, canComplete, COMPLETE_PENDING } from './requests';
 
 const FOLDER = '/home/me/p';
 const today = '2026-10-25';
@@ -66,7 +68,7 @@ describe('AddFlow', () => {
     flow.ask();
     await flow.finish({ title: 'Pay rent', due: '2026-11-01T09:30', pri: 2, context: 'ctx' }, false);
     const [h] = fabric.tasksFor(FOLDER);
-    expect(h.record).toMatchObject({ state: 'reminder', title: 'Pay rent', due: '2026-11-01T09:30', pri: 2, schema: 4 });
+    expect(h.record).toMatchObject({ state: 'reminder', title: 'Pay rent', due: '2026-11-01T09:30', pri: 2, schema: 5 });
     expect(h.record.requests.delegate).toBe(false);
     expect(h.text).toMatch(/^pri: 2$/m);
     expect(flow.sheet).toBe(false);
@@ -112,7 +114,7 @@ describe('mark done', () => {
     await fabric.markDone(h.path);
     expect(writes).toHaveBeenCalledTimes(1);
     const sent = parseRecord(writes.mock.calls[0][1]);
-    expect(sent).toMatchObject({ state: 'succeeded', title: 'Pay rent', pri: 3, schema: 4 });
+    expect(sent).toMatchObject({ state: 'succeeded', title: 'Pay rent', pri: 3, schema: 5 });
     expect(sent.sections.log).toBe('');
     const after = fabric.tasksFor(FOLDER)[0].record;
     expect(after.state).toBe('succeeded');
@@ -128,20 +130,20 @@ describe('mark done', () => {
     await expect(submitDone(source, run.path, run.text)).rejects.toThrow(/only a reminder/);
   });
 
-  it('shows the tick on reminders only and moves a ticked row into the collapsed done section', async () => {
+  it('shows the tick on every open row and moves a ticked row into the collapsed done section', async () => {
     const { fabric } = await fresh();
     await fabric.createTask(FOLDER, { title: 'Pay rent' });
     const src = fabric.records.find((h) => h.record.state === 'in_progress')!;
     fabric.records = [...fabric.records, { ...src, path: `${FOLDER}/.fabric-space/tasks/active.md`, record: { ...src.record, title: 'Order filament' } }];
     let body = render(TaskSection, { props: { fabric, folder: FOLDER } }).body;
-    expect(body.match(/data-testid="mark-done"/g)).toHaveLength(1);
+    expect(body.match(/data-testid="mark-done"/g)).toHaveLength(2);
     expect(body.match(/data-testid="task-row" data-state="reminder"/g)).toHaveLength(1);
-    expect(body.indexOf('Pay rent')).toBeLessThan(body.indexOf('Order filament'));
+    expect(body.indexOf('Order filament')).toBeLessThan(body.indexOf('Pay rent'));
     expect(body).toContain('1 todo · 1 active');
     expect(body).not.toContain('data-testid="task-done"');
     await fabric.markDone(fabric.tasksFor(FOLDER).find((h) => h.record.title === 'Pay rent')!.path);
     body = render(TaskSection, { props: { fabric, folder: FOLDER } }).body;
-    expect(body).not.toContain('data-testid="mark-done"');
+    expect(body.match(/data-testid="mark-done"/g)).toHaveLength(1);
     expect(body).toContain('0 todo · 1 active');
     const done = body.slice(body.indexOf('data-testid="task-done"'));
     expect(done).toContain('Pay rent');
@@ -186,14 +188,14 @@ describe('items change hook', () => {
   });
 });
 
-const item = (o: Partial<Item> = {}): Item => ({ id: 'i', status: 'todo', due: null, title: 'Item', pri: 0, ...o });
+const item = (o: Partial<Item> = {}): Item => ({ id: 'i', phase: 'todo', due: null, title: 'Item', pri: 0, ...o });
 const node = (path: string, o: Partial<Node> = {}): Node => ({
   source: 'local', path, name: path || 'root', managed: true, meta: {}, items: [], warnings: [], version: 'v', via: null, children: [], ...o,
 });
 
 describe('remote and local nodes', () => {
   async function storeFor(host: string | null) {
-    const work = node('work', { items: [item({ id: 'a', title: 'Reply to vendor', status: 'todo', pri: 1 }), item({ id: 'b', title: 'Migrate auth', status: 'wip' })] });
+    const work = node('work', { items: [item({ id: 'a', title: 'Reply to vendor', phase: 'todo', pri: 1 }), item({ id: 'b', title: 'Migrate auth', phase: 'working' })] });
     const tree: Tree = {
       root: { ...node('', { managed: false, source: '' }), children: [node('', { children: [work] })] },
       sources: [{ id: 'local', name: 'Lab', host, root: '/srv/x', prune: null }],
@@ -279,17 +281,17 @@ describe('remote and local nodes', () => {
     expect(body).not.toContain('Mark Verify restore done');
   });
 
-  it('a local card shows the tick for a reminder row that has a record and not for a wip row', async () => {
+  it('a local card shows the tick for open rows that have a record', async () => {
     const { fabric } = await fresh();
     await fabric.createTask(FOLDER, { title: 'Pay rent' });
     const src = fabric.records.find((h) => h.record.state === 'in_progress')!;
     fabric.records = [...fabric.records, { ...src, path: `${FOLDER}/.fabric-space/tasks/active.md`, record: { ...src.record, id: 'active', title: 'Order filament' } }];
     const reminder = fabric.tasksFor(FOLDER).find((h) => h.record.state === 'reminder')!;
     const n = node('work', {
-      items: [item({ id: reminder.record.id, title: 'Pay rent', status: 'todo' }), item({ id: 'active', title: 'Order filament', status: 'wip' })],
+      items: [item({ id: reminder.record.id, title: 'Pay rent', phase: 'todo' }), item({ id: 'active', title: 'Order filament', phase: 'working' })],
     });
     const body = card(n, { fabric, folder: FOLDER });
-    expect(body.match(/aria-label="Mark [^"]* done"/g)).toEqual(['aria-label="Mark Pay rent done"']);
+    expect(body.match(/aria-label="Mark [^"]* done"/g)).toEqual(['aria-label="Mark Pay rent done"', 'aria-label="Mark Order filament done"']);
     expect(body).toContain('>active<');
   });
 });
@@ -301,7 +303,7 @@ describe('pause and suspend through the store', () => {
     await fabric.pause(run.path);
     const after = parseRecord(await source.readRecord(run.path));
     expect(after.requests).toEqual({ ...run.record.requests, pause: true });
-    expect({ ...after, updated_at: '', requests: run.record.requests }).toEqual({ ...run.record, schema: 4, updated_at: '' });
+    expect({ ...after, updated_at: '', requests: run.record.requests }).toEqual({ ...run.record, schema: 5, updated_at: '' });
     await expect(fabric.resume(run.path)).rejects.toThrow(/paused/);
   });
   it('Suspend writes suspended and suspend_until, Unsuspend clears them; a paused flip is refused', async () => {
@@ -314,5 +316,54 @@ describe('pause and suspend through the store', () => {
     expect(parseRecord(await source.readRecord(todo.path))).toMatchObject({ suspended: false, suspend_until: null });
     const text = await source.readRecord(todo.path);
     await expect(source.writeRecord(todo.path, serializeRecord({ ...parseRecord(text), paused: true }), parseRecord(text).updated_at)).rejects.toThrow(/400/);
+  });
+});
+
+describe('mark done before the agent finishes', () => {
+  it('a tick on a working row writes only requests.complete, a todo row still writes state', async () => {
+    const { source, fabric } = await fresh();
+    const run = fabric.records.find((h) => h.record.state === 'in_progress')!;
+    const writes = vi.spyOn(source, 'writeRecord');
+    await fabric.complete(run);
+    expect(writes).toHaveBeenCalledTimes(1);
+    const sent = parseRecord(writes.mock.calls[0][1]);
+    expect(sent).toMatchObject({ state: 'in_progress', step: run.record.step, requests: { complete: true } });
+    expect({ ...sent, requests: run.record.requests, updated_at: '' }).toEqual({ ...run.record, schema: 5, updated_at: '', sections: sent.sections });
+    await fabric.createTask(FOLDER, { title: 'Pay rent' });
+    await fabric.complete(fabric.tasksFor(FOLDER).find((h) => h.record.title === 'Pay rent')!);
+    expect(fabric.tasksFor(FOLDER).find((h) => h.record.title === 'Pay rent')!.record.state).toBe('succeeded');
+  });
+
+  it('schema 4 parses with complete false and serializes as schema 5', async () => {
+    const { fabric } = await fresh();
+    const text = serializeRecord(fabric.records[0].record).replace(/^schema: 5$/m, 'schema: 4').replace(', complete: false', '');
+    const r = parseRecord(text);
+    expect(r.requests.complete).toBe(false);
+    expect(serializeRecord(r)).toMatch(/^schema: 5$/m);
+    expect(serializeRecord(r)).toContain('resume: false, complete: false}');
+  });
+
+  it('is requestable on any open phase, not on done or failed, and shows the pending label', async () => {
+    const { fabric } = await fresh();
+    const open = fabric.records.filter((h) => !['succeeded', 'failed'].includes(h.record.state));
+    for (const h of open) {
+      expect(applyRequest(h.record, 'complete').requests.complete).toBe(true);
+      expect(() => applyRequest(applyRequest(h.record, 'complete'), 'complete')).toThrow(/already/);
+    }
+    for (const h of fabric.records.filter((x) => ['succeeded', 'failed'].includes(x.record.state))) {
+      expect(() => applyRequest(h.record, 'complete')).toThrow(/does not apply/);
+      expect(canComplete(h.record, fabric.phaseFor(h))).toBe(false);
+    }
+    const run = fabric.records.find((h) => h.record.state === 'in_progress')!;
+    expect(canComplete(run.record, fabric.phaseFor(run))).toBe(true);
+    const asked = applyRequest(run.record, 'complete');
+    expect(canComplete(asked, 'working')).toBe(false);
+    const body = render(RecordScreen, { props: { record: asked, name: 'x' } }).body;
+    expect(body).toContain(COMPLETE_PENDING);
+    expect(body).not.toContain('data-testid="mark-done"');
+    const idle = render(RecordScreen, { props: { record: run.record, name: 'x' } }).body;
+    expect(idle).toContain('data-testid="mark-done"');
+    const fin = fabric.records.find((h) => h.record.state === 'succeeded')!;
+    expect(render(RecordScreen, { props: { record: fin.record, name: 'x' } }).body).not.toContain('data-testid="mark-done"');
   });
 });

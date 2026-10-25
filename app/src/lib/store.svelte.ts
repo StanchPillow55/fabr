@@ -4,6 +4,7 @@ import { isTauri } from './api/env';
 import { ApiError, errText, type Meta, type Node, type Settings, type Source, type Tree } from './api/types';
 import type { Filter, GroupBy, Key, SortBy, SortDir, ViewMode } from './model';
 import { COLOR_NAMES, COLOR_RE, colorSpec, computeForceOpen, effectiveColors, indexTree, isCollapsed, isVirtualRoot, nodeKey, pruneEmpty, visibleTree } from './model';
+import { isOpen } from './fabric/phase';
 import { getPref, persist, restore, setPref } from './prefs';
 import { crumbSegments, type PathSegment } from './viewstate';
 import { nameFromPath, slugify } from './addnodes';
@@ -659,7 +660,7 @@ export function metaPayload(p: Pick<NodeSettingsState, 'meta' | 'original'>): Me
 
 export function removeSummary(n: Pick<Node, 'items'>): { tasks: number; open: number; text: string } {
   const tasks = n.items.length;
-  const open = n.items.filter((i) => i.status !== 'done').length;
+  const open = n.items.filter((i) => isOpen(i.phase)).length;
   const text = tasks === 0 ? 'there are no tasks' : `its tasks stay in .fabric-space (${tasks}, ${open} open)`;
   return { tasks, open, text };
 }

@@ -4,15 +4,16 @@ import type { Store } from '../store.svelte';
 import {
   buildSource, firstError, hasErrors, isUntouched, rowError, sourceStatus, suggestId, validateDraft, type DraftErrors, type SourceStatus,
 } from './drafts';
+import { SetupPanel } from './setuppanel.svelte';
 import { SshFlow } from './sshflow.svelte';
 import { advancedToText, validateAdvanced, type AdvField, type AdvancedText } from './units';
 
 export type Page =
-  | { kind: 'root' | 'appearance' | 'sources' | 'advanced' | 'keys' }
+  | { kind: 'root' | 'appearance' | 'sources' | 'advanced' | 'keys' | 'api' | 'telegram' }
   | { kind: 'source'; uid: number };
 
 export const PAGE_TITLES: Record<Exclude<Page['kind'], 'source'>, string> = {
-  root: 'Settings', appearance: 'Appearance', sources: 'Sources', advanced: 'Advanced', keys: 'Keyboard shortcuts',
+  root: 'Settings', appearance: 'Appearance', sources: 'Sources', advanced: 'Advanced', keys: 'Keyboard shortcuts', api: 'API', telegram: 'Telegram',
 };
 
 let nextUid = 1;
@@ -68,10 +69,12 @@ export class SettingsController {
   errors = $state<DraftErrors>({});
   error = $state<string | null>(null);
   busy = $state(false);
+  setup: SetupPanel;
   private store: Store;
 
-  constructor(store: Store) {
+  constructor(store: Store, setup: SetupPanel = new SetupPanel()) {
     this.store = store;
+    this.setup = setup;
     this.reset();
   }
 
@@ -83,6 +86,7 @@ export class SettingsController {
     this.errors = {};
     this.error = null;
     this.busy = false;
+    this.setup.clearResults();
   }
 
   private makeDraft(src: Source, isNew: boolean): Draft {

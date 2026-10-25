@@ -28,27 +28,27 @@ describe('showLabel', () => {
 
 describe('countsLabel / countParts', () => {
   it('counts todo and active apart', () => {
-    expect(countsLabel({ todo: 28, wip: 6, overdue: 2 })).toBe('28 todo · 6 active · 2 overdue');
+    expect(countsLabel({ todo: 28, active: 6, overdue: 2 })).toBe('28 todo · 6 active · 2 overdue');
   });
   it('keeps zeros, marked quiet', () => {
-    expect(countsLabel({ todo: 0, wip: 0, overdue: 0 })).toBe('0 todo · 0 active · 0 overdue');
-    expect(countParts({ todo: 0, wip: 0, overdue: 0 }).map((p) => p.tone)).toEqual(['zero', 'zero', 'zero']);
+    expect(countsLabel({ todo: 0, active: 0, overdue: 0 })).toBe('0 todo · 0 active · 0 overdue');
+    expect(countParts({ todo: 0, active: 0, overdue: 0 }).map((p) => p.tone)).toEqual(['zero', 'zero', 'zero']);
   });
   it('tints wip and overdue only above zero', () => {
-    expect(countParts({ todo: 3, wip: 1, overdue: 2 }).map((p) => p.tone)).toEqual(['plain', 'wip', 'overdue']);
-    expect(countParts({ todo: 3, wip: 0, overdue: 0 }).map((p) => p.tone)).toEqual(['plain', 'zero', 'zero']);
+    expect(countParts({ todo: 3, active: 1, overdue: 2 }).map((p) => p.tone)).toEqual(['plain', 'wip', 'overdue']);
+    expect(countParts({ todo: 3, active: 0, overdue: 0 }).map((p) => p.tone)).toEqual(['plain', 'zero', 'zero']);
   });
 });
 
 describe('shownCounts', () => {
-  const it_ = (status: 'todo' | 'wip' | 'done', due: string | null = null) => ({ status, due, title: 'x', pri: 0 }) as never;
+  const it_ = (phase: 'todo' | 'working' | 'done', due: string | null = null) => ({ phase, due, title: 'x', pri: 0 }) as never;
   const node = (items: never[], children: unknown[] = []) => ({ source: 's', path: '', name: 'n', items, children, managed: true, meta: {} }) as never;
-  const tree = node([it_('todo'), it_('wip', '2026-01-01'), it_('done', '2026-01-01')], [node([it_('todo', '2026-01-01'), it_('wip')])]);
+  const tree = node([it_('todo'), it_('working', '2026-01-01'), it_('done', '2026-01-01')], [node([it_('todo', '2026-01-01'), it_('working')])]);
   const f = (filter: 'all' | 'open' | 'wip' | 'overdue', hideDone = false) => ({ today: '2026-06-01', filter, hideDone });
-  it('counts the whole subtree', () => expect(shownCounts(tree, f('all'))).toEqual({ todo: 2, wip: 2, overdue: 2 }));
+  it('counts the whole subtree', () => expect(shownCounts(tree, f('all'))).toEqual({ todo: 2, active: 2, overdue: 2 }));
   it('follows the See filter', () => {
-    expect(shownCounts(tree, f('wip'))).toEqual({ todo: 0, wip: 2, overdue: 1 });
-    expect(shownCounts(tree, f('overdue'))).toEqual({ todo: 1, wip: 1, overdue: 2 });
+    expect(shownCounts(tree, f('wip'))).toEqual({ todo: 0, active: 2, overdue: 1 });
+    expect(shownCounts(tree, f('overdue'))).toEqual({ todo: 1, active: 1, overdue: 2 });
     expect(countsLabel(shownCounts(tree, f('wip')))).toBe('0 todo · 2 active · 1 overdue');
   });
 });

@@ -235,6 +235,7 @@ fn gui_record(disk: &TaskRecord, incoming: &TaskRecord) -> Result<TaskRecord, Fa
         rec.suspend_until = disk.suspend_until.clone();
         rec.requests.pause = disk.requests.pause;
         rec.requests.resume = disk.requests.resume;
+        rec.requests.complete = disk.requests.complete;
     }
     rec.schema = disk.schema;
     rec.id = disk.id.clone();
@@ -408,7 +409,7 @@ pub fn create_in(req: &FabricCreateReq, user_home: &Path) -> Result<FabricCreate
             continue;
         }
         let text = format!(
-            "---\nschema: 4\nid: {id}\nsource: null\ntitle: {}\ndue: {}\npri: {pri}\nstate: reminder\nstep: null\nwaiting: false\npaused: false\nsuspended: false\nsuspend_until: null\ncreated_at: {stamp}\nupdated_at: {stamp}\nrequests: {{delegate: false, cancel: false, redelegate: false, pause: false, resume: false}}\nquestion: null\nanswers: []\ngrants: {{requested: [], granted: []}}\nplan_meta: null\nassertions: []\napproval: null\nverdict: null\ncost_usd: 0\nlinks: {{redelegated_from: null, redelegated_to: null}}\n---\n## Context\n{}## Spec\n{}## Success\n{}## Plan\n## Log\n",
+            "---\nschema: 5\nid: {id}\nsource: null\ntitle: {}\ndue: {}\npri: {pri}\nstate: reminder\nstep: null\nwaiting: false\npaused: false\nsuspended: false\nsuspend_until: null\ncreated_at: {stamp}\nupdated_at: {stamp}\nrequests: {{delegate: false, cancel: false, redelegate: false, pause: false, resume: false, complete: false}}\nquestion: null\nanswers: []\ngrants: {{requested: [], granted: []}}\nplan_meta: null\nassertions: []\napproval: null\nverdict: null\ncost_usd: 0\nlinks: {{redelegated_from: null, redelegated_to: null}}\n---\n## Context\n{}## Spec\n{}## Success\n{}## Plan\n## Log\n",
             yaml_title(title),
             due.unwrap_or("null"),
             section_text(&req.context),
@@ -593,6 +594,11 @@ mod tests {
         let mut bad = disk.clone();
         bad.paused = true;
         assert!(put(&bad, &disk.updated_at).unwrap_err().message().contains("paused"));
+        let mut ask = disk.clone();
+        ask.requests.complete = true;
+        put(&ask, &disk.updated_at).unwrap();
+        let disk = taskrec::parse(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        assert!(disk.requests.complete && !disk.paused);
     }
 
     #[test]
@@ -770,13 +776,15 @@ mod tests {
         };
         let r = create_in(&req, d.path()).unwrap();
         let text = read(&FabricReadReq { path: r.path.clone() }).unwrap().text;
-        assert!(text.starts_with("---\nschema: 4\n"));
+        assert!(text.starts_with("---\nschema: 5\n"));
         assert_eq!(updated_at(&text).len(), 20);
         assert!(text.contains(&format!("id: {}\n", r.id)));
         assert!(text.contains("title: \"order: \\\"filament\\\"\"\ndue: null\npri: 0\nstate: reminder\nstep: null\nwaiting: false\n"));
         assert!(
             text.contains("created_at: ")
-                && text.contains("requests: {delegate: false, cancel: false, redelegate: false, pause: false, resume: false}\n")
+                && text.contains(
+                    "requests: {delegate: false, cancel: false, redelegate: false, pause: false, resume: false, complete: false}\n"
+                )
         );
         assert!(text.contains(
             "grants: {requested: [], granted: []}\nplan_meta: null\nassertions: []\napproval: null\nverdict: null\ncost_usd: 0\n"
@@ -836,7 +844,7 @@ mod tests {
         let req = FabricCreateReq { due: Some("2026-10-28T09:30".into()), pri: Some(3), ..create_req(d.path(), "call the bank") };
         let made = create_in(&req, d.path()).unwrap();
         let rec = taskrec::parse(&read(&FabricReadReq { path: made.path }).unwrap().text).unwrap();
-        assert_eq!((rec.schema, rec.pri, rec.due.as_deref(), rec.state), (4, 3, Some("2026-10-28T09:30"), State::Reminder));
+        assert_eq!((rec.schema, rec.pri, rec.due.as_deref(), rec.state), (5, 3, Some("2026-10-28T09:30"), State::Reminder));
         for bad in ["2026-10-28T25:00", "2026-10-28T9:30", "2026-10-28 09:30"] {
             let r = create_in(&FabricCreateReq { due: Some(bad.into()), ..create_req(d.path(), "x") }, d.path());
             assert!(matches!(r, Err(FabrError::BadRequest(_))), "{bad}");
@@ -869,7 +877,7 @@ mod tests {
         assert_eq!(after.state, State::Succeeded);
         assert!(after.verdict.is_none() && after.step.is_none());
         assert!(after.log.trim_end().ends_with(" done by hand") && after.log.starts_with("- 20"), "{}", after.log);
-        assert_eq!(front_matter_items(d.path())[0].status, crate::item::Status::Done);
+        assert_eq!(front_matter_items(d.path())[0].phase, crate::item::Phase::Done);
     }
 
     #[test]
@@ -907,7 +915,7 @@ mod tests {
         assert_eq!(items.iter().map(|i| i.title.as_str()).collect::<Vec<_>>(), ["Call the bank", "Migrate auth"]);
         assert_eq!((items[0].due.as_deref(), items[0].pri), (Some("2026-10-20T09:30"), 0));
         assert_eq!((items[1].due.as_deref(), items[1].pri), (Some("2026-10-19"), 2));
-        assert!(items.iter().all(|i| i.status == crate::item::Status::Todo));
+        assert!(items.iter().all(|i| i.phase == crate::item::Phase::Todo));
         let text = std::fs::read_to_string(d.path().join(".fabric-space/tasks").join(format!("{}.md", items[1].id))).unwrap();
         assert!(taskrec::parse(&text).unwrap().context.contains("Imported from .fabr/.todo"));
         assert_eq!(import_todos_in(&req, d.path()).unwrap().created, 0);

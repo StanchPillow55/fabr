@@ -8,7 +8,7 @@ import {
 import { HEAD, LIST_PAD, MAX_ROWS, ROLLUP, ROW } from './constants';
 
 const TODAY = '2026-10-19';
-const it_ = (o: Partial<Item> = {}): Item => ({ id: 'r', status: 'todo', due: null, title: 't', pri: 0, ...o });
+const it_ = (o: Partial<Item> = {}): Item => ({ id: 'r', phase: 'todo', due: null, title: 't', pri: 0, ...o });
 const node = (path: string, o: Partial<Node> = {}): Node => ({
   source: 'local', path, name: path.split('/').pop() || 'root', managed: true, meta: {}, items: [],
   warnings: [], version: 'v', via: null, children: [], ...o,
@@ -26,7 +26,7 @@ describe('dates', () => {
     expect(dueClass(it_({ due: '2026-10-18' }), TODAY)).toBe('overdue');
     expect(dueClass(it_({ due: '2026-10-22' }), TODAY)).toBe('soon');
     expect(dueClass(it_({ due: '2026-10-23' }), TODAY)).toBe('');
-    expect(dueClass(it_({ due: '2026-10-01', status: 'done' }), TODAY)).toBe('');
+    expect(dueClass(it_({ due: '2026-10-01', phase: 'done' }), TODAY)).toBe('');
     expect(dueClass(it_(), TODAY)).toBe('');
   });
   it('dueLabel', () => {
@@ -34,24 +34,24 @@ describe('dates', () => {
     expect(dueLabel(it_({ due: '2026-10-20' }), TODAY)).toBe('tomorrow');
     expect(dueLabel(it_({ due: '2026-12-01' }), TODAY)).toBe('12-01');
     expect(dueLabel(it_({ due: '2027-01-05' }), TODAY)).toBe('2027-01-05');
-    expect(dueLabel(it_({ due: TODAY, status: 'done' }), TODAY)).toBe('10-19');
+    expect(dueLabel(it_({ due: TODAY, phase: 'done' }), TODAY)).toBe('10-19');
     expect(dueLabel(it_(), TODAY)).toBe('');
   });
   it('isOverdue', () => {
     expect(isOverdue(it_({ due: '2026-10-18' }), TODAY)).toBe(true);
     expect(isOverdue(it_({ due: TODAY }), TODAY)).toBe(false);
-    expect(isOverdue(it_({ due: '2026-10-18', status: 'done' }), TODAY)).toBe(false);
+    expect(isOverdue(it_({ due: '2026-10-18', phase: 'done' }), TODAY)).toBe(false);
   });
 });
 
 describe('filters', () => {
   const f = (filter: any, hideDone = false) => ({ today: TODAY, filter, hideDone });
   it('passes', () => {
-    expect(passes(it_({ status: 'done' }), f('all', true))).toBe(false);
-    expect(passes(it_({ status: 'done' }), f('all'))).toBe(true);
-    expect(passes(it_({ status: 'done' }), f('open'))).toBe(false);
-    expect(passes(it_({ status: 'wip' }), f('wip'))).toBe(true);
-    expect(passes(it_({ status: 'todo' }), f('wip'))).toBe(false);
+    expect(passes(it_({ phase: 'done' }), f('all', true))).toBe(false);
+    expect(passes(it_({ phase: 'done' }), f('all'))).toBe(true);
+    expect(passes(it_({ phase: 'done' }), f('open'))).toBe(false);
+    expect(passes(it_({ phase: 'working' }), f('wip'))).toBe(true);
+    expect(passes(it_({ phase: 'todo' }), f('wip'))).toBe(false);
     expect(passes(it_({ due: '2026-10-01' }), f('overdue'))).toBe(true);
     expect(passes(it_(), f('overdue'))).toBe(false);
   });
@@ -67,7 +67,7 @@ describe('filters', () => {
 
 describe('tree', () => {
   const leaf = node('a/b', { items: [it_({ title: 'needle' })] });
-  const mid = node('a', { children: [leaf], items: [it_({ status: 'wip', due: '2026-10-25' }), it_({ status: 'done' }), it_({ due: '2026-10-01' })] });
+  const mid = node('a', { children: [leaf], items: [it_({ phase: 'working', due: '2026-10-25' }), it_({ phase: 'done' }), it_({ due: '2026-10-01' })] });
   const root = node('', { children: [mid] });
   it('indexTree and nodeKey', () => {
     const ix = indexTree(root);
@@ -79,7 +79,7 @@ describe('tree', () => {
   });
   it('rollup', () => {
     const r = rollup(root, TODAY);
-    expect(r).toEqual({ todo: 2, wip: 1, done: 1, suspended: 0, overdue: 1, next: '2026-10-01', nodes: 2 });
+    expect(r).toEqual({ todo: 2, active: 1, needs_you: 0, done: 1, suspended: 0, overdue: 1, next: '2026-10-01', nodes: 2 });
   });
   it('computeForceOpen opens ancestors of matches', () => {
     const fo = computeForceOpen(indexTree(root), 'needle');
@@ -116,7 +116,7 @@ describe('boxModel', () => {
     expect(boxModel(n, ctx({ collapsed: new Set(['local:h']), forceOpen: new Set(['local:h']) })).collapsed).toBe(false);
   });
   it('filter shrinks visible rows', () => {
-    const n = node('f', { items: [it_({ status: 'done' }), it_()] });
+    const n = node('f', { items: [it_({ phase: 'done' }), it_()] });
     expect(boxModel(n, ctx({ hideDone: true })).visible.length).toBe(1);
   });
 });
@@ -124,7 +124,7 @@ describe('boxModel', () => {
 describe('priority and list', () => {
   it('compareItems: pri then due then title, done last', () => {
     const items = [
-      it_({ title: 'z', status: 'done', pri: 1 }),
+      it_({ title: 'z', phase: 'done', pri: 1 }),
       it_({ title: 'none' }),
       it_({ title: 'p3', pri: 3 }),
       it_({ title: 'p1late', pri: 1, due: '2026-12-01' }),
@@ -140,11 +140,11 @@ describe('priority and list', () => {
     expect(dueBucket(it_({ due: '2026-10-26' }), TODAY)).toBe('week');
     expect(dueBucket(it_({ due: '2026-10-27' }), TODAY)).toBe('later');
     expect(dueBucket(it_(), TODAY)).toBe('none');
-    expect(dueBucket(it_({ due: '2026-10-01', status: 'done' }), TODAY)).toBe('done');
+    expect(dueBucket(it_({ due: '2026-10-01', phase: 'done' }), TODAY)).toBe('done');
   });
   const root = node('', {
-    children: [node('a', { source: 'local', items: [it_({ title: 'b', pri: 2 }), it_({ title: 'a', status: 'wip', due: '2026-10-01' })] })],
-    items: [it_({ title: 'c', status: 'done' })],
+    children: [node('a', { source: 'local', items: [it_({ title: 'b', pri: 2 }), it_({ title: 'a', phase: 'working', due: '2026-10-01' })] })],
+    items: [it_({ title: 'c', phase: 'done' })],
   });
   const f = { today: TODAY, filter: 'all' as const, hideDone: false };
   it('flattenItems', () => {
@@ -161,9 +161,9 @@ describe('priority and list', () => {
     expect(sortRows(rows, 'due', 'asc', TODAY)[0].item.title).toBe('a');
     expect(sortRows(rows, 'due', 'desc', TODAY)[0].item.title).toBe('a');
     expect(sortRows(rows, 'pri', 'asc', TODAY)[0].item.title).toBe('b');
-    expect(sortRows(rows, 'status', 'asc', TODAY).map((r) => r.item.status)).toEqual(['wip', 'todo', 'done']);
+    expect(sortRows(rows, 'status', 'asc', TODAY).map((r) => r.item.phase)).toEqual(['working', 'todo', 'done']);
     expect(groupRows(rows, 'none', TODAY)).toHaveLength(1);
-    expect(groupRows(rows, 'status', TODAY).map((g) => g.id)).toEqual(['wip', 'todo', 'done']);
+    expect(groupRows(rows, 'status', TODAY).map((g) => g.id)).toEqual(['working', 'todo', 'done']);
     expect(groupRows(rows, 'due', TODAY).map((g) => g.id)).toEqual(['overdue', 'none', 'done']);
     expect(groupRows(rows, 'node', TODAY).map((g) => g.id)).toEqual(['local:', 'local:a']);
   });
@@ -189,7 +189,7 @@ describe('due time', () => {
     expect(isOverdue(it_({ due: '2026-10-19T14:29' }), TODAY, NOW)).toBe(true);
     expect(isOverdue(it_({ due: '2026-10-19T14:30' }), TODAY, NOW)).toBe(false);
     expect(isOverdue(it_({ due: '2026-10-19T14:31' }), TODAY, NOW)).toBe(false);
-    expect(isOverdue(it_({ due: '2026-10-19T09:00', status: 'done' }), TODAY, NOW)).toBe(false);
+    expect(isOverdue(it_({ due: '2026-10-19T09:00', phase: 'done' }), TODAY, NOW)).toBe(false);
     expect(isOverdue(it_({ due: '2026-10-18T23:59' }), TODAY, undefined)).toBe(true);
     expect(isOverdue(it_({ due: '2999-01-01T00:00' }), '2999-01-01', undefined)).toBe(false);
   });
@@ -197,7 +197,7 @@ describe('due time', () => {
     expect(dueClass(it_({ due: '2026-10-19T08:00' }), TODAY, NOW)).toBe('overdue');
     expect(dueClass(it_({ due: '2026-10-19T20:00' }), TODAY, NOW)).toBe('soon');
     expect(dueClass(it_({ due: '2026-10-23T08:00' }), TODAY, NOW)).toBe('');
-    expect(dueClass(it_({ due: '2026-10-19T08:00', status: 'done' }), TODAY, NOW)).toBe('');
+    expect(dueClass(it_({ due: '2026-10-19T08:00', phase: 'done' }), TODAY, NOW)).toBe('');
   });
   it('dueLabel', () => {
     expect(dueLabel(it_({ due: '2026-10-21' }), TODAY)).toBe('10-21');
@@ -206,7 +206,7 @@ describe('due time', () => {
     expect(dueLabel(it_({ due: '2026-10-20' }), TODAY)).toBe('tomorrow');
     expect(dueLabel(it_({ due: '2026-10-20T08:00' }), TODAY)).toBe('tomorrow 08:00');
     expect(dueLabel(it_({ due: '2027-01-05T08:00' }), TODAY)).toBe('2027-01-05 08:00');
-    expect(dueLabel(it_({ due: '2026-10-19T14:30', status: 'done' }), TODAY)).toBe('10-19 14:30');
+    expect(dueLabel(it_({ due: '2026-10-19T14:30', phase: 'done' }), TODAY)).toBe('10-19 14:30');
     expect(dueLabel(it_({ due: '2026-10-21T14:30' }), TODAY, true)).toBe('2026-10-21 14:30');
     expect(dueLabel(it_({ due: '2026-10-21' }), TODAY, true)).toBe('2026-10-21');
   });
@@ -257,7 +257,7 @@ describe('isHidden', () => {
 describe('view modes and hidden nodes', () => {
   const a = node('work/plain/a', { via: null, items: [it_({ title: 'in a' })] });
   const plain = node('work/plain', { managed: false, children: [a], via: null });
-  const work = node('work', { children: [plain], items: [it_({ status: 'wip' })] });
+  const work = node('work', { children: [plain], items: [it_({ phase: 'working' })] });
   const b = node('plain2/deep/b', { via: 'x' });
   const deep = node('plain2/deep', { managed: false, children: [b] });
   const plain2 = node('plain2', { managed: false, children: [deep] });
@@ -300,7 +300,7 @@ describe('view modes and hidden nodes', () => {
     const all = visibleTree(root, { mode: 'nodes', showHidden: true });
     expect(titles(all, 'old')).toEqual(['old stuff']);
     expect(rollup(shown, TODAY).nodes).toBe(3);
-    expect(rollup(shown, TODAY).todo + rollup(shown, TODAY).wip).toBe(2);
+    expect(rollup(shown, TODAY).todo + rollup(shown, TODAY).active).toBe(2);
     expect(rollup(all, TODAY).nodes).toBe(5);
     expect(indexTree(shown).byKey.has('local:arch')).toBe(false);
     expect([...computeForceOpen(indexTree(shown), 'old')]).toEqual([]);
@@ -354,7 +354,7 @@ describe('accent colour', () => {
 describe('the / root', () => {
   const tree = (): Node => node('', {
     source: '', managed: false, name: '/', version: null, children: [
-      node('', { source: 'a', items: [it_(), it_({ status: 'wip', due: '2026-10-01' })], children: [node('x', { source: 'a', items: [it_({ status: 'done' }), it_({ due: '2026-10-18' })] })] }),
+      node('', { source: 'a', items: [it_(), it_({ phase: 'working', due: '2026-10-01' })], children: [node('x', { source: 'a', items: [it_({ phase: 'done' }), it_({ due: '2026-10-18' })] })] }),
       node('', { source: 'b', name: 'b', managed: false, version: null, warnings: ['ssh: timeout'] }),
     ],
   });
@@ -366,7 +366,7 @@ describe('the / root', () => {
   it('rootCounts: todo and active apart, overdue over the whole tree (the rollup of collapsed cards)', () => {
     expect(rootCounts(tree(), TODAY)).toEqual({ todo: 2, active: 1, overdue: 2 });
     const r = rollup(tree(), TODAY);
-    expect(rootCounts(tree(), TODAY)).toEqual({ todo: r.todo, active: r.wip, overdue: r.overdue });
+    expect(rootCounts(tree(), TODAY)).toEqual({ todo: r.todo, active: r.active, overdue: r.overdue });
   });
   it('sourceLines: name, host or local, open count and the source error', () => {
     const sources = [
@@ -419,8 +419,8 @@ describe('visibleTree hideEmpty', () => {
   const tree = (o: { hiddenWip?: boolean } = {}) => node('', {
     source: '', managed: false, children: [
       src('local', [
-        node('done', { items: [it_({ status: 'done' })] }),
-        node('proj', { children: [node('proj/wip', { items: [it_({ status: 'wip' })], meta: o.hiddenWip ? { hidden: true } : {} })] }),
+        node('done', { items: [it_({ phase: 'done' })] }),
+        node('proj', { children: [node('proj/wip', { items: [it_({ phase: 'working' })], meta: o.hiddenWip ? { hidden: true } : {} })] }),
         node('p1', { managed: false, children: [node('p1/p2', { managed: false, children: [node('p1/p2/x', { items: [it_()] })] })] }),
         node('p3', { managed: false }),
       ]),
@@ -507,10 +507,10 @@ describe('priority 0 means none', () => {
 });
 
 describe('suspended items', () => {
-  const sus = it_({ title: 'later', status: 'wip', due: '2026-10-01', suspended: true });
+  const sus = it_({ title: 'later', phase: 'suspended', due: '2026-10-01' });
   const n = node('a', { items: [it_({ title: 'now' }), sus] });
   it('leave the todo, active and overdue counts and never nag', () => {
-    expect(rollup(n, TODAY)).toMatchObject({ todo: 1, wip: 0, suspended: 1, overdue: 0, next: null });
+    expect(rollup(n, TODAY)).toMatchObject({ todo: 1, active: 0, suspended: 1, overdue: 0, next: null });
     expect(isOverdue(sus, TODAY)).toBe(false);
     expect(passes(sus, { today: TODAY, filter: 'open', hideDone: false })).toBe(false);
   });

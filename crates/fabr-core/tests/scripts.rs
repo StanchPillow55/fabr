@@ -125,7 +125,7 @@ fn snapshot_carries_task_records_and_follows_their_changes() {
     std::fs::write(&path, text.replace("state: reminder", "state: succeeded")).unwrap();
     let after = snapshot_of(&f.root);
     assert_ne!(before.hash(), after.hash());
-    assert_eq!(load_node(&after, "r", "work").items.iter().filter(|i| i.status == Status::Done).count(), 1);
+    assert_eq!(load_node(&after, "r", "work").items.iter().filter(|i| i.phase == Phase::Done).count(), 1);
 }
 
 #[test]

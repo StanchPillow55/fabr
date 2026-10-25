@@ -1,0 +1,17 @@
+task_path: /home/me/3d/.fabric-space/tasks/2026-10-24-order-filament.md
+task_id: 2026-10-24-order-filament
+folder: /home/me/3d
+step: execute
+activity: paused
+started_at: 2026-10-24T18:50:00Z
+heartbeat_at: 2026-10-24T18:59:56Z
+heartbeat_interval_s: 10
+cost_usd: 0.42
+log_tail:
+  - "2026-10-24T18:55:30Z execute: reached the checkout form"
+  - "2026-10-24T18:58:05Z execute: filled name.first (granted for task)"
+  - "2026-10-24T18:58:20Z execute: filled address.line_1 (granted for task)"
+  - "2026-10-24T18:58:35Z execute: filled address.zip (granted for task)"
+  - "2026-10-24T18:59:40Z execute: selected standard shipping"
+question: null
+pid: 48213

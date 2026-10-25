@@ -325,6 +325,14 @@ impl Runner {
             let r = if rec.state == State::InProgress { self.cancel(path) } else { self.ignore(path, "cancel", rec.state) };
             self.note_err("cancel", path, r.err());
         }
+        if rec.requests.complete {
+            let r = if matches!(rec.state, State::Reminder | State::Task | State::Defined | State::InProgress) {
+                self.complete(path)
+            } else {
+                self.ignore(path, "complete", rec.state)
+            };
+            self.note_err("complete", path, r.err());
+        }
         if rec.requests.redelegate {
             if rec.state == State::Failed {
                 let r = self.redelegate(path, &rec, &node_dir);
@@ -506,6 +514,22 @@ impl Runner {
         Ok(())
     }
 
+    fn complete(&self, path: &Path) -> Result<(), FabrError> {
+        let (rec, ()) = mutate(path, |r| {
+            let label = if r.state == State::Reminder { "done" } else { stage_label(r) };
+            r.requests.complete = false;
+            r.state = State::Succeeded;
+            r.step = None;
+            r.waiting = false;
+            r.paused = false;
+            r.verdict = None;
+            append_log(&mut r.log, label, "completed by user");
+        })?;
+        self.board.remove(&rec.id, &task_path_key(path));
+        self.sink.info(format!("completed {}", rec.id));
+        Ok(())
+    }
+
     fn ignore(&self, path: &Path, key: &str, state: State) -> Result<(), FabrError> {
         let msg = format!("ignored request {key} in state {}", state_name(state));
         mutate(path, |r| {
@@ -514,6 +538,7 @@ impl Runner {
                 "delegate" => r.requests.delegate = false,
                 "pause" => r.requests.pause = false,
                 "resume" => r.requests.resume = false,
+                "complete" => r.requests.complete = false,
                 _ => r.requests.redelegate = false,
             }
             append_log(&mut r.log, "notify", &msg);
@@ -545,7 +570,7 @@ impl Runner {
                     suspend_until: None,
                     created_at: now.clone(),
                     updated_at: now,
-                    requests: Requests { delegate: true, cancel: false, redelegate: false, pause: false, resume: false },
+                    requests: Requests { delegate: true, cancel: false, redelegate: false, pause: false, resume: false, complete: false },
                     question: None,
                     answers: Vec::new(),
                     grants: Grants { requested: Vec::new(), granted: Vec::new() },

@@ -126,7 +126,7 @@ fn base(c: &Clock, title: &str, created: i64, state: State) -> TaskRecord {
         suspend_until: None,
         created_at: at.clone(),
         updated_at: at,
-        requests: Requests { delegate: false, cancel: false, redelegate: false, pause: false, resume: false },
+        requests: Requests { delegate: false, cancel: false, redelegate: false, pause: false, resume: false, complete: false },
         question: None,
         answers: Vec::new(),
         grants: Grants { requested: Vec::new(), granted: Vec::new() },

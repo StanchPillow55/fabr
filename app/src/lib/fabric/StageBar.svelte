@@ -6,8 +6,8 @@
 
   const status = $derived(statusOf(view, now));
   const down = $derived(view.alive === 'dead' || view.alive === 'backend-down');
-  const pulse = $derived(!view.finished && !view.suspended && view.alive === 'live' && !view.waiting && (view.activity === 'model' || view.activity === 'tool' || view.activity === 'check'));
-  const tone = $derived(view.suspended ? 'off' : view.activity === 'paused' && view.alive === 'live' ? 'paused' : view.finished === 'failed' ? 'bad' : view.alive === 'dead' ? 'bad' : view.alive === 'backend-down' ? 'off' : view.waiting ? 'wait' : view.activity === 'retry' ? 'retry' : 'ok');
+  const pulse = $derived(!view.finished && view.phase !== 'suspended' && view.alive === 'live' && !view.waiting && (view.activity === 'model' || view.activity === 'tool' || view.activity === 'check'));
+  const tone = $derived(view.phase === 'suspended' ? 'off' : view.phase === 'paused' && view.alive === 'live' ? 'paused' : view.finished === 'failed' ? 'bad' : view.alive === 'dead' ? 'bad' : view.alive === 'backend-down' ? 'off' : view.waiting ? 'wait' : view.activity === 'retry' ? 'retry' : 'ok');
 
   function seg(i: number): string {
     if (view.finished === 'succeeded') return 'done';

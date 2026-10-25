@@ -1,14 +1,13 @@
-export type Status = 'todo' | 'wip' | 'done';
+import type { Phase } from '../fabric/phase';
 
 export type Pri = 0 | 1 | 2 | 3;
 
 export interface Item {
   id: string;
-  status: Status;
+  phase: Phase;
   due: string | null;
   title: string;
   pri: Pri;
-  suspended?: boolean;
 }
 
 export type MetaValue = string | number | boolean;
@@ -187,7 +186,10 @@ export interface FabricSettings {
 }
 export interface FabricSettingsRead { exists: boolean; settings: FabricSettings }
 export interface FabricSecretsWriteReq { anthropic_api_key?: string; telegram_bot_token?: string }
-export interface FabricSecretsStatus { anthropic_api_key: boolean; telegram_bot_token: boolean }
+export interface FabricSecretsStatus {
+  anthropic_api_key: boolean; telegram_bot_token: boolean;
+  anthropic_api_key_fingerprint?: string | null; telegram_bot_token_fingerprint?: string | null;
+}
 export interface FabricAgentStatus { running: boolean; reason: string | null }
 export type FabricCheckKind = 'folder' | 'api_key' | 'model' | 'telegram_token';
 export interface FabricCheckReq { kind: FabricCheckKind; path?: string; model?: string }

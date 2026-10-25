@@ -29,7 +29,7 @@ describe('FixtureSource data path', () => {
     ]);
     expect(by('05-running')).toHaveLength(1);
     expect(by('06-waiting-mid-run')).toHaveLength(1);
-    expect(reg).toHaveLength(5);
+    expect(reg).toHaveLength(6);
     expect(reg[0].text).toContain('task_path:');
   });
 

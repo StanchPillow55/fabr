@@ -79,7 +79,7 @@ export function serializeFrontMatter(r: TaskRecord): string[] {
       case 'schema': add(`schema: ${SCHEMA}`); break;
       case 'requests': {
         const q = r.requests;
-        add(`requests: ${flowMap({ delegate: q.delegate, cancel: q.cancel, redelegate: q.redelegate, pause: !!q.pause, resume: !!q.resume })}`);
+        add(`requests: ${flowMap({ delegate: q.delegate, cancel: q.cancel, redelegate: q.redelegate, pause: !!q.pause, resume: !!q.resume, complete: !!q.complete })}`);
         break;
       }
       case 'links': add(`links: ${flowMap(r.links)}`); break;

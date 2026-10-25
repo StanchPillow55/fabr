@@ -3,7 +3,7 @@ mod server;
 use clap::{Parser, Subcommand};
 use fabr_core::fabric::{FabricCreateReq, ImportTodosReq};
 use fabr_core::workspace::{Workspace, today};
-use fabr_core::{AppDirs, FabrError, InitChildrenReq, Item, ListDirsReq, Node, NodeRef, RemoveNodeReq, Status, write_sample};
+use fabr_core::{AppDirs, FabrError, InitChildrenReq, Item, ListDirsReq, Node, NodeRef, Phase, RemoveNodeReq, write_sample};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::sync::Arc;
@@ -152,7 +152,7 @@ fn workspace(root: Option<PathBuf>) -> Result<Workspace, FabrError> {
 }
 
 fn print_tree(n: &Node, depth: usize, out: &mut String) {
-    let open = n.items.iter().filter(|i| i.status != Status::Done).count();
+    let open = n.items.iter().filter(|i| i.phase != Phase::Done).count();
     let mut line = format!("{}{}", "  ".repeat(depth), if n.name.is_empty() { "." } else { &n.name });
     if !n.managed {
         line.push('/');
@@ -260,22 +260,22 @@ fn cmd_ls(path: Option<PathBuf>, all: bool, overdue: bool, wip: bool) -> Result<
     let today = today();
     let mut rows = Vec::new();
     collect_rows(&tree.root, &mut rows);
-    rows.sort_by_key(|(_, i)| (fabr_core::due_sort_key(i.due.as_deref()), std::cmp::Reverse(i.pri)));
+    rows.sort_by_key(|(_, i)| (fabr_core::due_sort_key(i.due.as_deref()), fabr_core::item::pri_rank(i.pri)));
     let now = fabr_core::now_minute();
     for (n, i) in rows {
         let keep = if all {
             true
         } else if overdue {
-            i.status != Status::Done && i.due.as_deref().is_some_and(|d| fabr_core::is_overdue_at(d, &today, &now))
+            i.phase != Phase::Done && i.due.as_deref().is_some_and(|d| fabr_core::is_overdue_at(d, &today, &now))
         } else if wip {
-            i.status == Status::Wip
+            !matches!(i.phase, Phase::Todo | Phase::Done)
         } else {
-            i.status != Status::Done
+            i.phase != Phase::Done
         };
         if keep {
             let marks = "!".repeat(i.pri.min(3) as usize);
             let node = if n.path.is_empty() { "." } else { &n.path };
-            println!("{:<4} {:<16} {:<3} {}  [{}]", i.status.as_str(), i.due.as_deref().unwrap_or("-"), marks, i.title, node);
+            println!("{:<10} {:<16} {:<3} {}  [{}]", i.phase.as_str(), i.due.as_deref().unwrap_or("-"), marks, i.title, node);
         }
     }
     Ok(())

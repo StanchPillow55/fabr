@@ -1,5 +1,5 @@
 use crate::now_utc;
-use fabr_core::item::now_minute;
+use fabr_core::item::{Phased, now_minute};
 use fabr_core::taskrec::{State, Step, TaskRecord};
 use std::fmt::Write as _;
 
@@ -50,26 +50,19 @@ pub fn is_terminal(rec: &TaskRecord) -> bool {
 }
 
 pub fn question_open(rec: &TaskRecord) -> bool {
-    rec.question.as_ref().is_some_and(|q| q.answer.is_none())
-}
-
-pub fn approval_status(rec: &TaskRecord) -> &str {
-    rec.approval.as_ref().map(|a| a.status.as_str()).unwrap_or("")
+    rec.question_open()
 }
 
 pub fn parked(rec: &TaskRecord) -> bool {
-    if rec.waiting && question_open(rec) {
-        return true;
-    }
-    rec.state == State::Defined && !matches!(approval_status(rec), "approved" | "refused")
+    rec.needs_you()
 }
 
 pub fn suspended_now(rec: &TaskRecord) -> bool {
-    rec.suspended && rec.suspend_until.as_deref().is_none_or(|u| u > now_minute().as_str())
+    rec.suspended_at(&now_minute())
 }
 
 pub fn suspend_expired(rec: &TaskRecord) -> bool {
-    rec.suspended && rec.suspend_until.as_deref().is_some_and(|u| u <= now_minute().as_str())
+    rec.suspend_flag() && !suspended_now(rec)
 }
 
 pub fn driven(rec: &TaskRecord) -> bool {

@@ -1,4 +1,5 @@
 import type { Item, Node, Source, SourceError } from './api/types';
+import { PHASE_LABEL, isActive, isOpen, type Phase } from './fabric/phase';
 import { HEAD, ROW, LIST_PAD, ROLLUP, MAX_ROWS } from './constants';
 
 export type Key = string;
@@ -46,6 +47,10 @@ export function clockMinute(d = new Date()): string {
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
 }
 
+export function minuteOf(now: Date | string): string {
+  return now instanceof Date ? clockMinute(now) : now.length > 16 ? clockMinute(new Date(now)) : now;
+}
+
 export function nowFor(today: string, now?: string): string {
   if (now) return now;
   const c = clockMinute();
@@ -53,7 +58,7 @@ export function nowFor(today: string, now?: string): string {
 }
 
 export function isOverdue(item: Item, today: string, now?: string): boolean {
-  if (item.status === 'done' || item.suspended || !item.due) return false;
+  if (!isOpen(item.phase) || item.phase === 'suspended' || !item.due) return false;
   return item.due.length > 10 ? item.due < nowFor(today, now) : item.due < today;
 }
 
@@ -73,7 +78,7 @@ export function compareDue(a: string | null, b: string | null): number {
 }
 
 export function dueClass(item: Item, today: string, now?: string): '' | 'overdue' | 'soon' {
-  if (!item.due || item.status === 'done' || item.suspended) return '';
+  if (!item.due || !isOpen(item.phase) || item.phase === 'suspended') return '';
   if (isOverdue(item, today, now)) return 'overdue';
   return dayDiff(item.due, today) <= 3 ? 'soon' : '';
 }
@@ -83,7 +88,7 @@ export function dueLabel(item: Item, today: string, full = false): string {
   const time = dueTime(item.due);
   if (full) return time ? `${dueDate(item.due)} ${time}` : item.due;
   const date = dueDate(item.due);
-  if (item.status !== 'done') {
+  if (isOpen(item.phase)) {
     const d = dayDiff(date, today);
     if (d === 0) return time ? `today ${time}` : 'today';
     if (d === 1) return time ? `tomorrow ${time}` : 'tomorrow';
@@ -93,10 +98,10 @@ export function dueLabel(item: Item, today: string, full = false): string {
 }
 
 export function passes(item: Item, f: ItemFilter): boolean {
-  if (f.hideDone && item.status === 'done') return false;
+  if (f.hideDone && item.phase === 'done') return false;
   switch (f.filter) {
-    case 'open': return item.status !== 'done' && !item.suspended;
-    case 'wip': return item.status === 'wip' && !item.suspended;
+    case 'open': return isOpen(item.phase) && item.phase !== 'suspended';
+    case 'wip': return isActive(item.phase);
     case 'overdue': return isOverdue(item, f.today, f.now);
     default: return true;
   }
@@ -104,7 +109,8 @@ export function passes(item: Item, f: ItemFilter): boolean {
 
 export interface Rollup {
   todo: number;
-  wip: number;
+  active: number;
+  needs_you: number;
   done: number;
   suspended: number;
   overdue: number;
@@ -113,13 +119,16 @@ export interface Rollup {
 }
 
 export function rollup(n: Node, today: string, now?: string): Rollup {
-  const r: Rollup = { todo: 0, wip: 0, done: 0, suspended: 0, overdue: 0, next: null, nodes: 0 };
+  const r: Rollup = { todo: 0, active: 0, needs_you: 0, done: 0, suspended: 0, overdue: 0, next: null, nodes: 0 };
   (function walk(k: Node) {
     for (const i of k.items) {
-      if (i.suspended && i.status !== 'done') { r.suspended++; continue; }
-      r[i.status]++;
+      if (i.phase === 'suspended') { r.suspended++; continue; }
+      if (i.phase === 'todo') r.todo++;
+      else if (i.phase === 'done') r.done++;
+      else if (isActive(i.phase)) r.active++;
+      if (i.phase === 'needs_you') r.needs_you++;
       if (isOverdue(i, today, now)) r.overdue++;
-      if (i.status !== 'done' && i.due && (!r.next || compareDue(i.due, r.next) < 0)) r.next = i.due;
+      if (isOpen(i.phase) && i.due && (!r.next || compareDue(i.due, r.next) < 0)) r.next = i.due;
     }
     r.nodes += k.children.filter((c) => c.managed).length;
     k.children.forEach(walk);
@@ -229,7 +238,7 @@ export interface SourceLine {
 
 export function rootCounts(root: Node, today: string, now?: string): { todo: number; active: number; overdue: number } {
   const r = rollup(root, today, now);
-  return { todo: r.todo, active: r.wip, overdue: r.overdue };
+  return { todo: r.todo, active: r.active, overdue: r.overdue };
 }
 
 export interface ErrorPart {
@@ -260,7 +269,7 @@ export function sourceLines(root: Node, sources: Source[], errors: SourceError[]
       source: c.source,
       name: src?.name || c.name || c.source,
       where: src?.host || 'local',
-      open: r.todo + r.wip,
+      open: r.todo + r.active,
       error: errors.find((e) => e.source === c.source)?.message ?? null,
       pending: pending.includes(c.source),
     };
@@ -268,7 +277,7 @@ export function sourceLines(root: Node, sources: Source[], errors: SourceError[]
 }
 
 export function compareItems(a: Item, b: Item): number {
-  const rank = (i: Item) => (i.suspended && i.status !== 'done' ? 2 : i.status === 'done' ? 1 : 0);
+  const rank = (i: Item) => (i.phase === 'suspended' ? 2 : isOpen(i.phase) ? 0 : 1);
   const da = rank(a);
   const db = rank(b);
   if (da !== db) return da - db;
@@ -281,7 +290,7 @@ export function compareItems(a: Item, b: Item): number {
 }
 
 export function dueBucket(item: Item, today: string, now?: string): DueBucket {
-  if (item.status === 'done') return 'done';
+  if (!isOpen(item.phase)) return 'done';
   if (!item.due) return 'none';
   if (isOverdue(item, today, now)) return 'overdue';
   const d = dayDiff(item.due, today);
@@ -325,7 +334,7 @@ export function flattenItems(root: Node, f: ItemFilter, query = ''): ListRow[] {
   return rows;
 }
 
-const STATUS_ORDER: Record<string, number> = { wip: 0, todo: 1, done: 2 };
+const STATUS_ORDER: Record<Phase, number> = { needs_you: 0, working: 1, paused: 2, todo: 3, suspended: 4, done: 5, failed: 6 };
 
 export function sortRows(rows: ListRow[], by: SortBy, dir: SortDir, today: string): ListRow[] {
   const sign = dir === 'asc' ? 1 : -1;
@@ -334,7 +343,7 @@ export function sortRows(rows: ListRow[], by: SortBy, dir: SortDir, today: strin
       case 'source': return a.source.localeCompare(b.source);
       case 'node': return a.path.localeCompare(b.path);
       case 'pri': return (a.item.pri || 99) - (b.item.pri || 99);
-      case 'status': return STATUS_ORDER[a.item.status] - STATUS_ORDER[b.item.status];
+      case 'status': return STATUS_ORDER[a.item.phase] - STATUS_ORDER[b.item.phase];
       case 'title': return a.item.title.localeCompare(b.item.title);
       case 'due':
         if (!a.item.due && !b.item.due) return 0;
@@ -360,7 +369,7 @@ export function groupRows(rows: ListRow[], by: GroupBy, today: string, now?: str
   const idOf = (r: ListRow): [string, string] => {
     switch (by) {
       case 'node': return [r.nodeKey, r.path || r.nodeName];
-      case 'status': return [r.item.status, r.item.status];
+      case 'status': return [r.item.phase, PHASE_LABEL[r.item.phase]];
       case 'source': return [r.source, r.source];
       case 'due': {
         const b = dueBucket(r.item, today, now);
@@ -377,7 +386,7 @@ export function groupRows(rows: ListRow[], by: GroupBy, today: string, now?: str
   }
   const groups = [...map.values()];
   if (by === 'due') groups.sort((a, b) => DUE_BUCKET_ORDER.indexOf(a.id as DueBucket) - DUE_BUCKET_ORDER.indexOf(b.id as DueBucket));
-  if (by === 'status') groups.sort((a, b) => STATUS_ORDER[a.id] - STATUS_ORDER[b.id]);
+  if (by === 'status') groups.sort((a, b) => STATUS_ORDER[a.id as Phase] - STATUS_ORDER[b.id as Phase]);
   return groups;
 }
 

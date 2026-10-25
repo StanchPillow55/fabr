@@ -47,7 +47,7 @@ describe('mock api', () => {
   it('items look like records: record-style ids, pri 0..3, no has_todo, no saveTodo', async () => {
     const api = createMockApi({ today: '2026-10-19', latency: 0 });
     const work = find((await api.getTree(false)).root, 'work')!;
-    expect(work.items[0]).toEqual({ id: '2026-10-19-submit-timesheet', status: 'todo', due: '2026-10-20T17:00', title: 'Submit timesheet', pri: 2 });
+    expect(work.items[0]).toEqual({ id: '2026-10-19-submit-timesheet', phase: 'todo', due: '2026-10-20T17:00', title: 'Submit timesheet', pri: 2 });
     expect(work.items.every((i) => [0, 1, 2, 3].includes(i.pri))).toBe(true);
     expect('has_todo' in work).toBe(false);
     expect('saveTodo' in api).toBe(false);
@@ -65,7 +65,7 @@ describe('mock api', () => {
     const done = serializeRecord({ ...rec, state: 'succeeded', updated_at: '2030-01-01T00:00:00Z' });
     await api.fabricWrite({ path: rem.path, text: done, expected_updated_at: rec.updated_at });
     const after = parseRecord((await api.fabricRead(rem.path)).text);
-    expect(after).toMatchObject({ state: 'succeeded', schema: 4 });
+    expect(after).toMatchObject({ state: 'succeeded', schema: 5 });
     expect(after.sections.logEntries.at(-1)?.message).toMatch(/done by hand/);
     const run = await read('05-running');
     const forged = serializeRecord({ ...parseRecord(run.text), state: 'succeeded' });

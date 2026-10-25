@@ -1,19 +1,21 @@
 <script lang="ts">
   import StageBar from './StageBar.svelte';
+  import { PHASE_LABEL } from './phase';
   import { leadOf, statusOf } from './stage';
   import type { FabricStore } from './tasks.svelte';
 
   let { fabric, folder }: { fabric: FabricStore; folder: string | null } = $props();
 
   const c = $derived(fabric.countsFor(folder));
-  const active = $derived(fabric.agentsFor(folder).filter((v) => v.activity !== 'parked' && v.activity !== 'paused' && !v.suspended));
+  const active = $derived(fabric.agentsFor(folder).filter((v) => v.phase === 'working'));
   const lead = $derived(leadOf(fabric.agentsFor(folder)));
   const shown = $derived(
     [
-      { id: 'todo', label: 'Todo (reminders)', n: c.byColumn.reminder },
-      { id: 'active', label: 'Active tasks', n: c.byColumn.task + c.byColumn.defined + c.byColumn.in_progress },
+      { id: 'todo', label: 'Todo (reminders)', n: c.todo },
+      { id: 'active', label: 'Working, needs you or paused', n: c.active },
       { id: 'suspended', label: 'Suspended', n: c.suspended },
-      { id: 'done', label: 'Succeeded or failed', n: c.byColumn.done },
+      { id: 'done', label: 'Done', n: c.done },
+      { id: 'failed', label: 'Failed', n: c.failed },
     ].filter((x) => x.n > 0),
   );
 </script>
@@ -21,7 +23,7 @@
 {#if c.total > 0}
   <span class="tstrip" data-testid="task-strip" title="{c.total} {c.total === 1 ? 'task' : 'tasks'}">
     {#each shown as col (col.id)}<span class="tstrip__n" title={col.label}>{col.n}<span class="tstrip__k">{col.id}</span></span>{/each}
-    {#if c.waiting > 0}<span class="tstrip__wait" title="Waiting for you">waiting</span>{/if}
+    {#if c.needs_you > 0}<span class="tstrip__wait" title="Waiting for you">{PHASE_LABEL.needs_you}</span>{/if}
     {#if lead}
       <span class="tstrip__bar" title="Agent {statusOf(lead, fabric.now)}: {lead.stage}"><StageBar view={lead} now={fabric.now} /></span>
       {#if active.length > 1}<span class="tstrip__more">+{active.length - 1}</span>{/if}

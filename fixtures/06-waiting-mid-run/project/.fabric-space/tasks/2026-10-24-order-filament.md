@@ -1,15 +1,19 @@
 ---
-schema: 2
+schema: 4
 id: 2026-10-24-order-filament
 source: null
 title: "order 2 kg of black PLA"
 due: 2026-10-28
+pri: 0
 state: in_progress
 step: execute
 waiting: true
+paused: false
+suspended: false
+suspend_until: null
 created_at: 2026-10-24T18:02:11Z
 updated_at: 2026-10-24T18:59:30Z
-requests: {delegate: false, cancel: false, redelegate: false}
+requests: {delegate: false, cancel: false, redelegate: false, pause: false, resume: false}
 question:
   id: q3
   kind: grant

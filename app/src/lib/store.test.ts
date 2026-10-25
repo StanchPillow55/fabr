@@ -6,7 +6,7 @@ import { createMockApi } from '../mock/api';
 import { Store, metaPayload, removeSummary } from './store.svelte';
 
 const TODAY = '2026-10-19';
-const item = (o: Partial<Item> = {}): Item => ({ id: 'a1', status: 'todo', due: null, title: 'Write tests', pri: 0, ...o });
+const item = (o: Partial<Item> = {}): Item => ({ id: 'a1', phase: 'todo', due: null, title: 'Write tests', pri: 0, ...o });
 const node = (path: string, o: Partial<Node> = {}): Node => ({
   source: 'local', path, name: path.split('/').pop() || 'root', managed: true, meta: {}, items: [],
   warnings: [], version: `v-${path}`, via: null, children: [], ...o,
@@ -14,7 +14,7 @@ const node = (path: string, o: Partial<Node> = {}): Node => ({
 const vroot = (children: Node[]): Node => ({
   source: '', path: '', name: '/', managed: false, meta: {}, items: [], warnings: [], version: null, via: null, children,
 });
-const makeTree = (version = 'v-work', items: Item[] = [item(), item({ id: 'b2', status: 'wip', title: 'Ship' })]): Tree => ({
+const makeTree = (version = 'v-work', items: Item[] = [item(), item({ id: 'b2', phase: 'working', title: 'Ship' })]): Tree => ({
   root: vroot([node('', { meta: { name: 'fabr' }, children: [node('work', { version, items }), node('plain', { managed: false, version: null })] })]),
   sources: [{ id: 'local', name: 'Home', host: null, root: '/tmp/x', prune: null }],
   today: TODAY,
@@ -178,9 +178,9 @@ describe('Store: empty nodes and collapse all at /', () => {
       node('', {
         meta: { name: 'fabr' },
         children: [
-          node('work', { items: [item({ status: 'wip' })], children: [node('work/a', { items: [item({ status: 'done' })], children: [node('work/a/b')] })] }),
+          node('work', { items: [item({ phase: 'working' })], children: [node('work/a', { items: [item({ phase: 'done' })], children: [node('work/a/b')] })] }),
           node('plain', { managed: false, version: null, children: [node('plain/x', { items: [item()] })] }),
-          node('idle', { items: [item({ status: 'done' })] }),
+          node('idle', { items: [item({ phase: 'done' })] }),
         ],
       }),
     ]),
@@ -620,8 +620,8 @@ describe('accent colour', () => {
 describe('remove node', () => {
   it('removeSummary counts tasks and open tasks and says they stay', () => {
     expect(removeSummary({ items: [] })).toEqual({ tasks: 0, open: 0, text: 'there are no tasks' });
-    expect(removeSummary({ items: [item({ status: 'done' })] }).text).toBe('its tasks stay in .fabric-space (1, 0 open)');
-    const r = removeSummary({ items: [item(), item({ id: 'b', status: 'wip' }), item({ id: 'c', status: 'done' })] });
+    expect(removeSummary({ items: [item({ phase: 'done' })] }).text).toBe('its tasks stay in .fabric-space (1, 0 open)');
+    const r = removeSummary({ items: [item(), item({ id: 'b', phase: 'working' }), item({ id: 'c', phase: 'done' })] });
     expect([r.tasks, r.open, r.text]).toEqual([3, 2, 'its tasks stay in .fabric-space (3, 2 open)']);
   });
 
@@ -693,7 +693,7 @@ describe('remove node', () => {
 describe('the / root', () => {
   const twoSources = (): Tree => ({
     root: vroot([
-      node('', { source: 'a', name: 'Alpha', items: [item()], children: [node('work', { source: 'a', items: [item({ id: 'w', status: 'wip' })], children: [node('work/api', { source: 'a' })] })] }),
+      node('', { source: 'a', name: 'Alpha', items: [item()], children: [node('work', { source: 'a', items: [item({ id: 'w', phase: 'working' })], children: [node('work/api', { source: 'a' })] })] }),
       node('', { source: 'b', name: 'Beta', managed: false, version: null, warnings: ['ssh: timeout'] }),
     ]),
     sources: [

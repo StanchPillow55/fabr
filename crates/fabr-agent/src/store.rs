@@ -20,6 +20,7 @@ pub fn merge(disk: &mut TaskRecord, base: &TaskRecord, mine: &TaskRecord) {
     take(&mut disk.paused, &base.paused, &mine.paused);
     take(&mut disk.requests.delegate, &base.requests.delegate, &mine.requests.delegate);
     take(&mut disk.requests.cancel, &base.requests.cancel, &mine.requests.cancel);
+    take(&mut disk.requests.complete, &base.requests.complete, &mine.requests.complete);
     take(&mut disk.requests.redelegate, &base.requests.redelegate, &mine.requests.redelegate);
     take(&mut disk.grants.requested, &base.grants.requested, &mine.grants.requested);
     take(&mut disk.grants.granted, &base.grants.granted, &mine.grants.granted);

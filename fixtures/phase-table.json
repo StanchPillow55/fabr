@@ -1,0 +1,157 @@
+[
+  {
+    "name": "succeeded is done",
+    "front_matter": {
+      "state": "succeeded"
+    },
+    "now": "2026-10-25T12:00",
+    "phase": "done"
+  },
+  {
+    "name": "failed is failed",
+    "front_matter": {
+      "state": "failed"
+    },
+    "now": "2026-10-25T12:00",
+    "phase": "failed"
+  },
+  {
+    "name": "failed and suspended stays failed",
+    "front_matter": {
+      "state": "failed",
+      "suspended": true
+    },
+    "now": "2026-10-25T12:00",
+    "phase": "failed"
+  },
+  {
+    "name": "succeeded and paused stays done",
+    "front_matter": {
+      "state": "succeeded",
+      "paused": true
+    },
+    "now": "2026-10-25T12:00",
+    "phase": "done"
+  },
+  {
+    "name": "suspended without until",
+    "front_matter": {
+      "state": "in_progress",
+      "suspended": true
+    },
+    "now": "2026-10-25T12:00",
+    "phase": "suspended"
+  },
+  {
+    "name": "suspended until a future time",
+    "front_matter": {
+      "state": "task",
+      "suspended": true,
+      "suspend_until": "2027-01-15T09:00"
+    },
+    "now": "2026-10-25T12:00",
+    "phase": "suspended"
+  },
+  {
+    "name": "expired suspend_until is not suspended",
+    "front_matter": {
+      "state": "task",
+      "suspended": true,
+      "suspend_until": "2026-10-24T09:00"
+    },
+    "now": "2026-10-25T12:00",
+    "phase": "working"
+  },
+  {
+    "name": "suspended reminder is suspended",
+    "front_matter": {
+      "state": "reminder",
+      "suspended": true
+    },
+    "now": "2026-10-25T12:00",
+    "phase": "suspended"
+  },
+  {
+    "name": "reminder is todo",
+    "front_matter": {
+      "state": "reminder"
+    },
+    "now": "2026-10-25T12:00",
+    "phase": "todo"
+  },
+  {
+    "name": "paused",
+    "front_matter": {
+      "state": "in_progress",
+      "paused": true
+    },
+    "now": "2026-10-25T12:00",
+    "phase": "paused"
+  },
+  {
+    "name": "paused and waiting is paused",
+    "front_matter": {
+      "state": "task",
+      "paused": true,
+      "waiting": true,
+      "question": {
+        "id": "q1",
+        "kind": "open",
+        "text": "which shop?"
+      }
+    },
+    "now": "2026-10-25T12:00",
+    "phase": "paused"
+  },
+  {
+    "name": "waiting on an open question",
+    "front_matter": {
+      "state": "task",
+      "waiting": true,
+      "question": {
+        "id": "q1",
+        "kind": "open",
+        "text": "which shop?"
+      }
+    },
+    "now": "2026-10-25T12:00",
+    "phase": "needs_you"
+  },
+  {
+    "name": "defined with no approval",
+    "front_matter": {
+      "state": "defined",
+      "approval": null
+    },
+    "now": "2026-10-25T12:00",
+    "phase": "needs_you"
+  },
+  {
+    "name": "defined with approval decided",
+    "front_matter": {
+      "state": "defined",
+      "approval": {
+        "status": "approved"
+      }
+    },
+    "now": "2026-10-25T12:00",
+    "phase": "working"
+  },
+  {
+    "name": "answered question is working",
+    "front_matter": {
+      "state": "task",
+      "waiting": true,
+      "question": {
+        "id": "q1",
+        "kind": "open",
+        "text": "which shop?",
+        "answer": {
+          "value": "this one"
+        }
+      }
+    },
+    "now": "2026-10-25T12:00",
+    "phase": "working"
+  }
+]

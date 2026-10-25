@@ -24,6 +24,11 @@ export class ApiSetupSource implements SetupSource {
   telegramLink(timeoutS: number) { return this.api.fabricTelegramLink(timeoutS); }
 }
 
+export function fingerprint(key: string): string {
+  const c = [...key];
+  return c.length < 20 ? '…' : `${c.slice(0, 7).join('')}…${c.slice(-4).join('')}`;
+}
+
 export type StubKey = FabricCheckKind | 'telegram_link';
 
 export function emptySettings(): FabricSettings {
@@ -68,8 +73,14 @@ export class StubSetupSource implements SetupSource {
   }
   async writeSecrets(partial: FabricSecretsWriteReq) {
     this.calls.push('writeSecrets');
-    if (partial.anthropic_api_key) this.secrets.anthropic_api_key = true;
-    if (partial.telegram_bot_token) this.secrets.telegram_bot_token = true;
+    if (partial.anthropic_api_key) {
+      this.secrets.anthropic_api_key = true;
+      this.secrets.anthropic_api_key_fingerprint = fingerprint(partial.anthropic_api_key.trim());
+    }
+    if (partial.telegram_bot_token) {
+      this.secrets.telegram_bot_token = true;
+      this.secrets.telegram_bot_token_fingerprint = fingerprint(partial.telegram_bot_token.trim());
+    }
     return { ...this.secrets };
   }
   async secretsStatus() { return { ...this.secrets }; }
