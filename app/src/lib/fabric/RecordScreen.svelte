@@ -1,4 +1,5 @@
 <script lang="ts">
+  import type { Snippet } from 'svelte';
   import Button from '../ui/Button.svelte';
   import Group from '../ui/Group.svelte';
   import Page from '../ui/Page.svelte';
@@ -13,9 +14,11 @@
   import StateRibbon from './StateRibbon.svelte';
   import type { TaskRecord } from './types';
 
-  let { record, name, onback, onanswer, onapprove, onrequest, now = new Date(), onreload }: {
+  let { record, name, backLabel = 'Records', agent, onback, onanswer, onapprove, onrequest, now = new Date(), onreload }: {
     record: TaskRecord;
     name: string;
+    backLabel?: string;
+    agent?: Snippet;
     onback?: () => void;
     onanswer?: (a: AnswerInput) => Promise<void>;
     onapprove?: (d: ApprovalDecision) => Promise<void>;
@@ -52,7 +55,7 @@
   const pm = $derived(record.plan_meta);
 </script>
 
-<Page title={record.title} back="Records" {onback}>
+<Page title={record.title} back={backLabel} {onback}>
   <div class="rec">
     <header class="rec__head">
       <h1 class="rec__title">{record.title}</h1>
@@ -60,6 +63,8 @@
     </header>
 
     <StateRibbon state={record.state} step={record.step} waiting={record.waiting} />
+
+    {#if agent}{@render agent()}{/if}
 
     {#if canAsk || queued.length}
       <div class="req">

@@ -7,14 +7,17 @@
   import Button from './ui/Button.svelte';
   import Icon from './ui/Icon.svelte';
   import Segmented from './ui/Segmented.svelte';
+  import NoticesBadge from './fabric/NoticesBadge.svelte';
+  import type { FabricStore } from './fabric/tasks.svelte';
 
-  let { store, onrescan, onexpand, oncollapse, onsearchenter, onfabric }: {
+  let { store, onrescan, onexpand, oncollapse, onsearchenter, fabric = null, onnotices }: {
     store: Store;
     onrescan: () => void;
     onexpand: () => void;
     oncollapse: () => void;
     onsearchenter: () => void;
-    onfabric?: () => void;
+    fabric?: FabricStore | null;
+    onnotices?: () => void;
   } = $props();
 
   let search = $state<HTMLInputElement>();
@@ -132,7 +135,10 @@
       />
       <kbd class="search__kbd" aria-hidden="true">/</kbd>
     </label>
-    {#if onfabric}<Button variant="tint" title="Tasks (g)" onclick={onfabric}>Tasks</Button>{/if}
+    {#if fabric}
+      <span class="backend backend--{fabric.backend}" title={fabric.backendLabel} aria-label={fabric.backendLabel} role="status"><span class="backend__dot"></span></span>
+      <NoticesBadge events={fabric.events} readPosition={fabric.readPosition} onclick={onnotices} />
+    {/if}
     <Button variant="icon" title="Rescan (r)" aria-label="Rescan" onclick={onrescan}><Icon name="refresh" size={15} /></Button>
     <Button variant="icon" title="Settings" aria-label="Settings" onclick={() => (store.sheetOpen = true)}><Icon name="gear" size={17} /></Button>
   </div>
@@ -140,3 +146,10 @@
     <Crumbs {store} />
   </div>
 </header>
+
+<style>
+  .backend { display: inline-flex; align-items: center; padding: 0 4px; }
+  .backend__dot { width: 8px; height: 8px; border-radius: 50%; background: var(--label-3); }
+  .backend--connected .backend__dot { background: var(--green); }
+  .backend--stale .backend__dot { background: var(--orange); }
+</style>

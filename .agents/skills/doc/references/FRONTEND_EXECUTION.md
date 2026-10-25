@@ -85,6 +85,11 @@ Status 2026-10-25: all eight points verified against the fixtures and in serve m
 fix-up for real-path folder grouping, wording and the notices read position. The check against
 dev 2's first real record is still open.
 
+Revised 2026-10-25 for release 0.2.1: the Tasks view, the board and the second tree from steps 1,
+2 and 8 were removed. The panels, the record screen, the agents row, the notices and the file
+source moved into the existing tree: counts on folder nodes, details in the node panel, notices
+and backend state in the toolbar. See FRONTEND_PLAN.md section 4.
+
 ## 3. F2, setup
 
 1. The wizard shell: one screen at a time, a back button, resume from the completed steps list in

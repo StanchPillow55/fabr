@@ -87,7 +87,6 @@ export type KeyAction =
   | { type: 'fit' }
   | { type: 'search' }
   | { type: 'help' }
-  | { type: 'fabric' }
   | { type: 'escape' };
 
 export function keyAction(e: { key: string; ctrlKey?: boolean; metaKey?: boolean; altKey?: boolean }, typing: boolean): KeyAction | null {
@@ -105,7 +104,6 @@ export function keyAction(e: { key: string; ctrlKey?: boolean; metaKey?: boolean
     case 'f': return { type: 'fit' };
     case '/': return { type: 'search' };
     case '?': return { type: 'help' };
-    case 'g': return { type: 'fabric' };
   }
   return null;
 }
@@ -121,6 +119,5 @@ export const SHORTCUTS: { keys: string[]; what: string }[] = [
   { keys: ['/'], what: 'Search' },
   { keys: ['Enter'], what: 'In search: jump to the next match' },
   { keys: ['Esc'], what: 'Close this, the View menu or the panel; leave a field' },
-  { keys: ['g'], what: 'Open Tasks' },
   { keys: ['?'], what: 'This list' },
 ];

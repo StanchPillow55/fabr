@@ -8,6 +8,8 @@
   import Icon from '../ui/Icon.svelte';
   import Pill from '../ui/Pill.svelte';
   import Priority from '../ui/Priority.svelte';
+  import TaskStrip from '../fabric/TaskStrip.svelte';
+  import type { FabricStore } from '../fabric/tasks.svelte';
 
   interface Props {
     node: Node;
@@ -30,10 +32,12 @@
     pending?: string[];
     onsource?: (key: Key) => void;
     onurl?: (url: string) => void;
+    fabric?: FabricStore | null;
+    folder?: string | null;
   }
   let {
     node, tally, model, selected, match, dim, ontoggle, oncycle, onadd, onmore, onopen, onfocus, today = '', source = null, accent = null,
-    sources = [], errors = [], pending = [], onsource, onurl,
+    sources = [], errors = [], pending = [], onsource, onurl, fabric = null, folder = null,
   }: Props = $props();
 
   const hidden = $derived(isHidden(node));
@@ -119,6 +123,7 @@
     {#if node.warnings.length}
       <span class="card__warn" title={node.warnings.join('\n')}><Icon name="warning" size={12} /></span>
     {/if}
+    {#if fabric && folder}<TaskStrip {fabric} {folder} />{/if}
     {#if aside}<span class="card__kind">{aside}</span>{/if}
   </div>
 

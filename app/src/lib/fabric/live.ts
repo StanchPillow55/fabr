@@ -19,12 +19,12 @@ export function pickLocations(env: { root?: string; home?: string }, homeDir: st
   return { roots: [root], home };
 }
 
-export async function createFabricSource(settings?: FabricSettingsRead | null): Promise<FabricSource> {
+export async function createFabricSource(settings?: FabricSettingsRead | null, treeRoots: string[] = []): Promise<FabricSource> {
   if (!isTauri() && import.meta.env.VITE_MOCK === '1') return new FixtureSource();
   let homeDir: string | null = null;
   if (isTauri()) homeDir = (await (await import('@tauri-apps/api/path')).homeDir()).replace(/\/+$/, '');
   const api = await createApi();
   const read = settings ?? (await api.fabricSettingsRead());
   const { roots, home } = pickLocations({ root: import.meta.env.VITE_FABRIC_ROOT, home: import.meta.env.VITE_FABRIC_HOME }, homeDir, read);
-  return new TauriSource(api, roots, home);
+  return new TauriSource(api, treeRoots.length ? treeRoots : roots, home);
 }

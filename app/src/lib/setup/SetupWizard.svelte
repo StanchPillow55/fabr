@@ -174,7 +174,7 @@
         <Row label="Bot" value={botName ?? (secrets.telegram_bot_token ? 'saved' : 'missing')} />
         <Row label="Telegram user id" value={String(settings.telegram_user_id ?? '')} />
       </Group>
-      <Button variant="primary" onclick={() => ondone?.()}>Open tasks</Button>
+      <Button variant="primary" onclick={() => ondone?.()}>Open</Button>
     {/if}
 
     <div class="setup-nav">

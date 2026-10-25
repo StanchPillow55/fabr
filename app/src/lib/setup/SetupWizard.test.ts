@@ -27,9 +27,9 @@ describe('SetupWizard render', () => {
       expect(body.includes('>Back<')).toBe(n > 0);
     });
   });
-  it('offers Open tasks on the last screen', () => {
+  it('offers Open on the last screen', () => {
     const { body } = render(SetupWizard, { props: { initial: settingsAt(5), source: new StubSetupSource({ settings: settingsAt(5) }) } });
-    expect(body).toContain('Open tasks');
+    expect(body).toContain('>Open<');
   });
 });
 

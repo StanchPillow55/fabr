@@ -7,8 +7,10 @@
   import BannerView from './Banner.svelte';
   import ItemEditor from './ItemEditor.svelte';
   import MetaEditor from './MetaEditor.svelte';
+  import TaskSection from '../fabric/TaskSection.svelte';
+  import type { FabricStore } from '../fabric/tasks.svelte';
 
-  let { store }: { store: Store } = $props();
+  let { store, fabric = null }: { store: Store; fabric?: FabricStore | null } = $props();
 
   let editor = $state<ItemEditor>();
   let busy = $state(false);
@@ -23,6 +25,7 @@
   const tallyRoot = $derived(shownRoot ? store.tallyNode(shownRoot) : null);
   const counts = $derived(shownRoot ? rootCounts(tallyRoot!, store.today) : null);
   const lines = $derived(shownRoot && store.tree ? sourceLines(tallyRoot!, store.tree.sources, store.tree.errors, store.today, undefined, store.tree.pending ?? []) : []);
+  const taskFolder = $derived(fabric && p && !virtual ? fabric.folderFor(src, p.path) : null);
   const hidden = $derived(p ? p.meta.some(([k, v]) => k === 'hidden' && (v === true || v === 'true')) : false);
   const open = $derived(p ? p.items.filter((i) => i.status !== 'done').length : 0);
 
@@ -75,6 +78,8 @@
           {#each p.warnings as w, i (i)}<li><Icon name="warning" size={12} /> {w}</li>{/each}
         </ul>
       {/if}
+
+      {#if fabric && taskFolder}<TaskSection {fabric} folder={taskFolder} />{/if}
 
       {#if virtual}
         <section class="panel__section">

@@ -81,17 +81,21 @@ record, the fixtures change in the same commit.
 
 | Screen | Shows | User can |
 |---|---|---|
-| Tree | folders of the default folder, each with its task count by state | open a folder, open a task, add a reminder by hand |
-| Board | all tasks grouped by the five states, waiting ones marked | filter by folder, open a task |
-| Task record | the record as it is on disk: title, due, context, spec, success assertions, plan, log, verdict; unfilled sections shown as empty slots, so progress is visible | press delegate, answer a pending question, cancel, re-delegate a failed task, edit title, due and context on a reminder |
-| Question | the pending question in its kind: open text, the three options once, always, no with a text field, or a grant request with the field tree | answer; the answer lands in the slot |
-| Approval | plan, success assertions, grants requested with scope choice per field, reversibility, tools, assumptions from always-rules | approve in one tap, refuse with a note, change a grant's scope before approving |
-| Agents | every registry entry: task, folder, step, elapsed, cost, last log lines, pending question; dead ones marked by heartbeat age | open the task, cancel |
+| Tree, the primary and only main view | the existing folder tree; a folder node with tasks carries a compact strip of counts by state, a waiting mark, and a running mark when an agent is on it | open a node's panel, add a reminder by hand |
+| Node panel, Tasks section | the folder's tasks: title, state, step, waiting or running mark; selecting one expands the full record in place | answer a pending question, approve or refuse, delegate, cancel, re-delegate, edit title, due and context on a reminder, close or go back with a visible control |
+| Task record, inside the panel | the record as it is on disk: title, due, ribbon, context, spec, success assertions, plan, log, verdict; unfilled sections shown as empty slots; for a running task the agent's step, elapsed, cost, heartbeat age and last log lines with Cancel | everything the panel allows |
+| Question, inside the record | the pending question in its kind: open text, the three options once, always, no with a text field, or a grant request with the field tree | answer; the answer lands in the slot |
+| Approval, inside the record | plan, success assertions, grants requested with a scope choice per field, reversibility, tools, assumptions from always-rules | approve in one tap, refuse with a note, change a grant's scope before approving |
+| Notices, in the toolbar | a badge with the unread count and a backend-state indicator; a sheet with the list | open a notice, which selects the node and opens its record; mark all read |
 | Setup | six screens, one at a time, with the check result per screen | go back, retry a failed check |
 | Rules and preferences | global and per-folder: a textarea for the prose file, typed fields for the structured file | edit and save; the two files never mix |
 | Data bank policy | the field tree with always-allow or always-ask per field or subtree | change a policy; add, rename or remove a field |
 | Audit | the audit log newest first: task, field, sink, time | filter by task or field |
 | Learned preferences (wave 2) | learned records with scope, count, source tasks, last confirmed | promote, demote, delete |
+
+Changed 2026-10-25 after the owner saw the 0.2.0 build: the separate Tasks view with Board, Tree
+and Agents tabs is gone. Tasks never leave their tree node. There is no board; the tree's
+strips and the node panel carry the same information.
 
 Design rules for all screens: the record is shown as it is, not reinterpreted. Progress is
 which sections are filled. Anything the user can change writes to a file, and the screen
