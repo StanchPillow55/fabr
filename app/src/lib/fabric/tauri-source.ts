@@ -1,8 +1,8 @@
 import type { Api } from '../api/commands';
-import type { FabricSource, RawRecord } from './source';
+import type { CreateFields, FabricSource, RawRecord } from './source';
 import { parseYaml } from './yaml';
 
-type FabricApi = Pick<Api, 'fabricList' | 'fabricRead' | 'fabricWrite' | 'fabricStamp'>;
+type FabricApi = Pick<Api, 'fabricList' | 'fabricRead' | 'fabricWrite' | 'fabricStamp' | 'fabricCreate'>;
 
 export class TauriSource implements FabricSource {
   constructor(private api: FabricApi, private roots: string[], private home: string | null = null) {}
@@ -24,6 +24,9 @@ export class TauriSource implements FabricSource {
   }
   async writeRecord(path: string, text: string, expectedUpdatedAt: string): Promise<void> {
     await this.api.fabricWrite({ path, text, expected_updated_at: expectedUpdatedAt });
+  }
+  async createRecord(folder: string, fields: CreateFields): Promise<{ path: string; id: string }> {
+    return this.api.fabricCreate({ folder, ...fields });
   }
   async listRegistry(): Promise<RawRecord[]> {
     if (!this.home) return [];

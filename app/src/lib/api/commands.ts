@@ -1,6 +1,6 @@
 import type {
   Tree, Stamp, Node, NodeRef, RemoveNodeReq, SaveTodoReq, SaveMetaReq, Source, TestResult, Settings, ListDirsReq, DirEntry,
-  InitChildrenReq, FabricListReq, FabricListRes, FabricReadRes, FabricWriteReq, FabricWriteRes, FabricStampReq, HostKey, TrustResult, PasswordState, InstallKeyReq, InstallKeyResult,
+  InitChildrenReq, FabricListReq, FabricListRes, FabricReadRes, FabricWriteReq, FabricWriteRes, FabricStampReq, FabricCreateReq, FabricCreateRes, HostKey, TrustResult, PasswordState, InstallKeyReq, InstallKeyResult,
   FabricSettings, FabricSettingsRead, FabricSecretsWriteReq, FabricSecretsStatus, FabricCheckReq, FabricCheckResult,
 } from './types';
 
@@ -37,6 +37,7 @@ export const COMMANDS = {
   fabricList: op<[req: FabricListReq], FabricListRes>({ req: self }),
   fabricRead: op<[path: string], FabricReadRes>({ req: (path) => ({ path }) }),
   fabricWrite: op<[req: FabricWriteReq], FabricWriteRes>({ req: self }),
+  fabricCreate: op<[req: FabricCreateReq], FabricCreateRes>({ req: self }),
   fabricStamp: op<[req: FabricStampReq], Stamp>({ req: self }),
   fabricSettingsRead: op<[], FabricSettingsRead>({}),
   fabricSettingsWrite: op<[settings: FabricSettings], FabricSettingsRead>({ req: (settings) => ({ settings }) }),

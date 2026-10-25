@@ -143,6 +143,8 @@ export interface FabricListRes { records: FabricFile[]; registry: FabricFile[]; 
 export interface FabricReadRes { text: string; mtime: number }
 export interface FabricWriteReq { path: string; text: string; expected_updated_at: string }
 export interface FabricWriteRes { mtime: number }
+export interface FabricCreateReq { folder: string; title: string; due?: string | null; context?: string; spec?: string; success?: string }
+export interface FabricCreateRes { path: string; id: string }
 export interface FabricStampReq { roots: string[]; home?: string | null }
 
 export interface ErrorDto {

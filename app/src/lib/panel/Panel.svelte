@@ -7,6 +7,7 @@
   import BannerView from './Banner.svelte';
   import ItemEditor from './ItemEditor.svelte';
   import MetaEditor from './MetaEditor.svelte';
+  import AddTask from '../fabric/AddTask.svelte';
   import TaskSection from '../fabric/TaskSection.svelte';
   import type { FabricStore } from '../fabric/tasks.svelte';
 
@@ -79,7 +80,10 @@
         </ul>
       {/if}
 
-      {#if fabric && taskFolder}<TaskSection {fabric} folder={taskFolder} />{/if}
+      {#if fabric && taskFolder}
+        <TaskSection {fabric} folder={taskFolder} />
+        <section class="panel__section"><AddTask {fabric} folder={taskFolder} /></section>
+      {/if}
 
       {#if virtual}
         <section class="panel__section">

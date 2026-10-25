@@ -9,7 +9,7 @@ import { COLUMNS, columnOf, folderName, folderOf, nodeFolder, type ColumnId, typ
 import { createFabricSource } from './live';
 import { parseRecord } from './parse';
 import { submitRequest, type RequestKey } from './requests';
-import type { FabricSource } from './source';
+import type { CreateFields, FabricSource } from './source';
 import { findByTaskPath, loadRegistry } from './view';
 import { submitAnswer } from './write';
 import type { RegistryEntry } from './agents';
@@ -185,6 +185,20 @@ export class FabricStore {
   async request(h: Held, key: RequestKey): Promise<void> {
     await submitRequest(this.#source!, h.path, h.text, key);
     await this.#reread(h.path);
+  }
+
+  async createTask(folder: string, fields: CreateFields): Promise<Held> {
+    const { path } = await this.#source!.createRecord(folder, fields);
+    await this.load();
+    const held = this.records.find((h) => h.path === path);
+    if (!held) throw new Error(`created ${path} but could not read it back`);
+    return held;
+  }
+
+  async createAndDelegate(folder: string, fields: CreateFields): Promise<Held> {
+    const made = await this.createTask(folder, fields);
+    await this.request(made, 'delegate');
+    return this.records.find((h) => h.path === made.path)!;
   }
 
   async cancelTask(taskPath: string): Promise<void> {

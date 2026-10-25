@@ -3,7 +3,7 @@ use crate::dto::{
     SaveMetaReq, SaveSourcesReq, SaveTodoReq, SourceIdReq, SourcePasswordReq, Stamp,
 };
 use crate::error::FabrError;
-use crate::fabric::{self, FabricListReq, FabricReadReq, FabricStampReq, FabricWriteReq};
+use crate::fabric::{self, FabricCreateReq, FabricListReq, FabricReadReq, FabricStampReq, FabricWriteReq};
 use crate::settings::Settings;
 use crate::setup::{self, CheckReq, Ctx, LinkReq, SecretsWriteReq, SettingsWriteReq};
 use crate::sources::Source;
@@ -80,6 +80,7 @@ ops! {
     fabric_list Post true (FabricListReq) |_, r| json(fabric::list(&r)?);
     fabric_read Post true (FabricReadReq) |_, r| json(fabric::read(&r)?);
     fabric_write Post true (FabricWriteReq) |_, r| json(fabric::write(&r)?);
+    fabric_create Post true (FabricCreateReq) |_, r| json(fabric::create(&r)?);
     fabric_stamp Post true (FabricStampReq) |_, r| json(Stamp { stamp: fabric::stamp(&r)? });
     fabric_settings_read Post true (Empty) |_, _| json(setup::settings_read(&Ctx::from_env())?);
     fabric_settings_write Post true (SettingsWriteReq) |_, r| json(setup::settings_write(&Ctx::from_env(), r)?);

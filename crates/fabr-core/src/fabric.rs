@@ -235,6 +235,122 @@ pub fn write(req: &FabricWriteReq) -> Result<FabricWriteRes, FabrError> {
     Ok(FabricWriteRes { mtime: mtime_of(&m) })
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FabricCreateReq {
+    pub folder: String,
+    pub title: String,
+    #[serde(default)]
+    pub due: Option<String>,
+    #[serde(default)]
+    pub context: Option<String>,
+    #[serde(default)]
+    pub spec: Option<String>,
+    #[serde(default)]
+    pub success: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FabricCreateRes {
+    pub path: String,
+    pub id: String,
+}
+
+pub fn slugify(title: &str) -> String {
+    let mut out = String::new();
+    for c in title.chars().flat_map(char::to_lowercase) {
+        if c.is_ascii_alphanumeric() {
+            out.push(c);
+        } else if !out.is_empty() && !out.ends_with('-') {
+            out.push('-');
+        }
+    }
+    out.truncate(40);
+    let out = out.trim_matches('-');
+    if out.is_empty() { "task".into() } else { out.into() }
+}
+
+fn yaml_title(s: &str) -> String {
+    let plain = s.chars().all(|c| c.is_ascii_alphanumeric() || " _.,/+-".contains(c))
+        && s.starts_with(|c: char| c.is_ascii_alphanumeric())
+        && !s.ends_with(' ')
+        && s.parse::<f64>().is_err()
+        && !["null", "true", "false", "yes", "no", "on", "off"].contains(&s.to_ascii_lowercase().as_str());
+    if plain {
+        return s.to_string();
+    }
+    let esc: String = s
+        .chars()
+        .flat_map(|c| match c {
+            '\\' => vec!['\\', '\\'],
+            '"' => vec!['\\', '"'],
+            c => vec![c],
+        })
+        .collect();
+    format!("\"{esc}\"")
+}
+
+fn section_text(t: &Option<String>) -> String {
+    let t = t.as_deref().unwrap_or("").trim();
+    if t.is_empty() {
+        return String::new();
+    }
+    let lines: Vec<String> = t.lines().map(|l| if l.starts_with("## ") { format!(" {l}") } else { l.to_string() }).collect();
+    format!("{}\n", lines.join("\n"))
+}
+
+pub fn create(req: &FabricCreateReq) -> Result<FabricCreateRes, FabrError> {
+    create_in(req, &crate::setup::Ctx::from_env().home)
+}
+
+pub fn create_in(req: &FabricCreateReq, user_home: &Path) -> Result<FabricCreateRes, FabrError> {
+    let title = req.title.trim();
+    if title.is_empty() || title.contains('\n') {
+        return Err(FabrError::BadRequest("a task needs a one-line title".into()));
+    }
+    let due = req.due.as_deref().map(str::trim).filter(|d| !d.is_empty());
+    if let Some(d) = due
+        && chrono::NaiveDate::parse_from_str(d, "%Y-%m-%d").is_err()
+    {
+        return Err(FabrError::BadRequest(format!("due must be YYYY-MM-DD: {d}")));
+    }
+    let folder = crate::paths::expand_home(req.folder.trim(), user_home);
+    if !folder.is_absolute() || !folder.is_dir() {
+        return Err(FabrError::NotFound(format!("not a folder: {}", req.folder)));
+    }
+    let dir = folder.join(SPACE).join("tasks");
+    let io = |e: std::io::Error| FabrError::Io(format!("{}: {e}", dir.display()));
+    std::fs::create_dir_all(&dir).map_err(io)?;
+    let now = chrono::Utc::now();
+    let stamp = now.format("%Y-%m-%dT%H:%M:%SZ");
+    let base = format!("{}-{}", now.format("%Y-%m-%d"), slugify(title));
+    let mut n = 1;
+    loop {
+        let id = if n == 1 { base.clone() } else { format!("{base}-{n}") };
+        let path = dir.join(format!("{id}.md"));
+        if path.exists() {
+            n += 1;
+            continue;
+        }
+        let text = format!(
+            "---\nschema: 1\nid: {id}\ntitle: {}\ndue: {}\nstate: reminder\nstep: null\nwaiting: false\ncreated_at: {stamp}\nupdated_at: {stamp}\nrequests: {{delegate: false, cancel: false, redelegate: false}}\nquestion: null\nanswers: []\ngrants: {{requested: [], granted: []}}\nplan_meta: null\nassertions: []\napproval: null\nverdict: null\ncost_usd: 0\nlinks: {{redelegated_from: null, redelegated_to: null}}\n---\n## Context\n{}## Spec\n{}## Success\n{}## Plan\n## Log\n",
+            yaml_title(title),
+            due.unwrap_or("null"),
+            section_text(&req.context),
+            section_text(&req.spec),
+            section_text(&req.success),
+        );
+        let io = |e: std::io::Error| FabrError::Io(format!("{}: {e}", path.display()));
+        let mut tmp = tempfile::Builder::new().prefix(".fabr-write-").suffix(".tmp").tempfile_in(&dir).map_err(io)?;
+        tmp.write_all(text.as_bytes()).map_err(io)?;
+        tmp.as_file().sync_all().map_err(io)?;
+        match tmp.persist_noclobber(&path) {
+            Ok(_) => return Ok(FabricCreateRes { path: path.to_string_lossy().into_owned(), id }),
+            Err(e) if e.error.kind() == std::io::ErrorKind::AlreadyExists => n += 1,
+            Err(e) => return Err(io(e.error)),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -432,5 +548,84 @@ mod tests {
         let l = list(&FabricListReq { root: d.path().to_string_lossy().into_owned(), home: None }).unwrap();
         assert_eq!(l.records.len(), 1);
         assert!(l.records[0].path.ends_with("work/errands/.fabric-space/tasks/2026-10-24-order-filament.md"));
+    }
+
+    #[test]
+    fn create_derives_id_and_collides_to_suffix() {
+        let d = tempfile::tempdir().unwrap();
+        let req = FabricCreateReq {
+            folder: d.path().to_string_lossy().into_owned(),
+            title: "  Order 2 kg of Black PLA!! ".into(),
+            due: Some("2026-10-28".into()),
+            context: Some("Same brand as last time.".into()),
+            spec: None,
+            success: Some("it arrives".into()),
+        };
+        let a = create_in(&req, d.path()).unwrap();
+        let b = create_in(&req, d.path()).unwrap();
+        assert!(a.id.ends_with("-order-2-kg-of-black-pla") && a.id.len() == 11 + 23, "{}", a.id);
+        assert_eq!(b.id, format!("{}-2", a.id));
+        assert!(a.path.ends_with(&format!(".fabric-space/tasks/{}.md", a.id)));
+        let long = FabricCreateReq { title: "x".repeat(80), ..req.clone() };
+        assert_eq!(create_in(&long, d.path()).unwrap().id.len(), 11 + 40);
+        let left: Vec<_> = std::fs::read_dir(d.path().join(".fabric-space/tasks")).unwrap().flatten().collect();
+        assert_eq!(left.len(), 3);
+    }
+
+    #[test]
+    fn create_writes_the_minimal_record() {
+        let d = tempfile::tempdir().unwrap();
+        let req = FabricCreateReq {
+            folder: d.path().to_string_lossy().into_owned(),
+            title: "order: \"filament\"".into(),
+            due: None,
+            context: Some("ctx\n## Plan\nmore".into()),
+            spec: Some("do it".into()),
+            success: None,
+        };
+        let r = create_in(&req, d.path()).unwrap();
+        let text = read(&FabricReadReq { path: r.path.clone() }).unwrap().text;
+        assert!(text.starts_with("---\nschema: 1\n"));
+        assert_eq!(updated_at(&text).len(), 20);
+        assert!(text.contains(&format!("id: {}\n", r.id)));
+        assert!(text.contains("title: \"order: \\\"filament\\\"\"\ndue: null\nstate: reminder\nstep: null\nwaiting: false\n"));
+        assert!(text.contains("created_at: ") && text.contains("requests: {delegate: false, cancel: false, redelegate: false}\n"));
+        assert!(text.contains(
+            "grants: {requested: [], granted: []}\nplan_meta: null\nassertions: []\napproval: null\nverdict: null\ncost_usd: 0\n"
+        ));
+        assert!(text.ends_with("---\n## Context\nctx\n ## Plan\nmore\n## Spec\ndo it\n## Success\n## Plan\n## Log\n"));
+        let listed = list_in(&FabricListReq { root: req.folder.clone(), home: None }, d.path()).unwrap();
+        assert_eq!(listed.records.len(), 1);
+    }
+
+    #[test]
+    fn create_refuses_bad_requests() {
+        let d = tempfile::tempdir().unwrap();
+        let ok = FabricCreateReq {
+            folder: d.path().to_string_lossy().into_owned(),
+            title: "a".into(),
+            due: None,
+            context: None,
+            spec: None,
+            success: None,
+        };
+        for title in ["", "   "] {
+            let r = create_in(&FabricCreateReq { title: title.into(), ..ok.clone() }, d.path());
+            assert!(matches!(r, Err(FabrError::BadRequest(_))));
+        }
+        let missing = FabricCreateReq { folder: d.path().join("nope").to_string_lossy().into_owned(), ..ok.clone() };
+        assert!(matches!(create_in(&missing, d.path()), Err(FabrError::NotFound(_))));
+        let bad_due = FabricCreateReq { due: Some("tomorrow".into()), ..ok.clone() };
+        assert!(matches!(create_in(&bad_due, d.path()), Err(FabrError::BadRequest(_))));
+        assert!(!d.path().join(".fabric-space").exists());
+        let home = FabricCreateReq { folder: "~".into(), ..ok };
+        assert!(create_in(&home, d.path()).is_ok());
+    }
+
+    #[test]
+    fn slugs_follow_the_spec() {
+        assert_eq!(slugify("Hello,  World"), "hello-world");
+        assert_eq!(slugify("!!!"), "task");
+        assert_eq!(slugify(&format!("{} z", "a".repeat(39))), "a".repeat(39));
     }
 }

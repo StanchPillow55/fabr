@@ -217,6 +217,9 @@ export function createMockApi(opts: MockOpts = {}): Api {
       try { await fabric.writeRecord(req.path, req.text, req.expected_updated_at); } catch (e) { throw new ApiError(409, (e as Error).message); }
       return { mtime: 0 };
     },
+    async fabricCreate(req) {
+      try { return await fabric.createRecord(req.folder, req); } catch (e) { throw new ApiError(400, (e as Error).message); }
+    },
     async fabricStamp() { return { stamp: await fabric.stamp() }; },
     async fabricSettingsRead() { await wait(); return { exists: fabSettingsExist, settings: clone(fabSettings) }; },
     async fabricSettingsWrite(s) { await wait(); fabSettings = clone(s); fabSettingsExist = true; return { exists: true, settings: clone(fabSettings) }; },

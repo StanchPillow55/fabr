@@ -24,7 +24,7 @@ async function realPathStore(): Promise<FabricStore> {
       { path: '/home/me/proj/.fabric-space/tasks/a.md', text: pick('01-reminder') },
       { path: '/home/me/proj/.fabric-space/tasks/b.md', text: pick('02-open-question') },
     ],
-    readRecord: async () => '', writeRecord: async () => {}, listRegistry: async () => [], readEvents: async () => [],
+    readRecord: async () => '', createRecord: async () => ({ path: '', id: '' }), writeRecord: async () => {}, listRegistry: async () => [], readEvents: async () => [],
     eventsKey: () => 'k', readBackendHeartbeat: async () => null, stamp: async () => '0',
   };
   const f = new FabricStore(src);
