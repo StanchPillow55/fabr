@@ -1,0 +1,574 @@
+use crate::error::FabrError;
+use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum State {
+    Reminder,
+    Task,
+    Defined,
+    InProgress,
+    Succeeded,
+    Failed,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Step {
+    Gather,
+    Define,
+    Plan,
+    Approve,
+    Execute,
+    Evaluate,
+    Learn,
+    Notify,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ApprovalStatus {
+    Pending,
+    Approved,
+    Refused,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Actor {
+    Gui,
+    Telegram,
+    Auto,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Reversibility {
+    Reversible,
+    Irreversible,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum VerdictResult {
+    Pass,
+    Fail,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum QuestionKind {
+    Open,
+    Choice,
+    Grant,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Scope {
+    Task,
+    Project,
+    Always,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TaskSource {
+    pub node_path: String,
+    pub todo_id: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Requests {
+    pub delegate: bool,
+    pub cancel: bool,
+    pub redelegate: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Grant {
+    pub field: String,
+    pub scope: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Grants {
+    #[serde(default)]
+    pub requested: Vec<String>,
+    #[serde(default)]
+    pub granted: Vec<Grant>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Prior {
+    pub text: String,
+    #[serde(default)]
+    pub source_task: Option<String>,
+    #[serde(default)]
+    pub last_confirmed: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Answer {
+    #[serde(default)]
+    pub value: Option<String>,
+    #[serde(default)]
+    pub replacement: Option<String>,
+    #[serde(default)]
+    pub granted: Option<Vec<Grant>>,
+    #[serde(default)]
+    pub by: Option<String>,
+    #[serde(default)]
+    pub at: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Question {
+    pub id: String,
+    pub kind: String,
+    pub text: String,
+    #[serde(default)]
+    pub options: Option<Vec<String>>,
+    #[serde(default)]
+    pub prior: Option<Prior>,
+    #[serde(default)]
+    pub fields: Option<Vec<String>>,
+    #[serde(default)]
+    pub asked_at: Option<String>,
+    #[serde(default)]
+    pub answer: Option<Answer>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Assumption {
+    pub rule_id: String,
+    pub text: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Check {
+    pub cmd: String,
+    #[serde(default)]
+    pub args: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PlanMeta {
+    #[serde(default)]
+    pub reversibility: Option<String>,
+    #[serde(default)]
+    pub tools: Vec<String>,
+    #[serde(default)]
+    pub assumptions: Vec<Assumption>,
+    #[serde(default)]
+    pub checks: Vec<Check>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Assertion {
+    pub id: String,
+    pub text: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Approval {
+    pub status: String,
+    #[serde(default)]
+    pub by: Option<String>,
+    #[serde(default)]
+    pub at: Option<String>,
+    #[serde(default)]
+    pub note: Option<String>,
+    #[serde(default)]
+    pub digest: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct VerdictItem {
+    pub id: String,
+    pub pass: bool,
+    #[serde(default)]
+    pub evidence: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Verdict {
+    pub result: String,
+    pub at: String,
+    #[serde(default)]
+    pub items: Vec<VerdictItem>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Links {
+    #[serde(default)]
+    pub redelegated_from: Option<String>,
+    #[serde(default)]
+    pub redelegated_to: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+pub struct GuiPatch {
+    #[serde(default)]
+    pub requests: Option<Requests>,
+    #[serde(default)]
+    pub approval: Option<Approval>,
+    #[serde(default)]
+    pub grants_granted: Option<Vec<Grant>>,
+    #[serde(default)]
+    pub answer: Option<Answer>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct FrontMatter {
+    pub schema: i64,
+    pub id: String,
+    pub title: String,
+    #[serde(default)]
+    pub due: Option<String>,
+    pub state: State,
+    #[serde(default)]
+    pub step: Option<Step>,
+    #[serde(default)]
+    pub waiting: bool,
+    #[serde(default)]
+    pub source: Option<TaskSource>,
+    #[serde(default)]
+    pub created_at: String,
+    #[serde(default)]
+    pub updated_at: String,
+    pub requests: Requests,
+    #[serde(default)]
+    pub question: Option<Question>,
+    #[serde(default)]
+    pub answers: Vec<Question>,
+    pub grants: Grants,
+    #[serde(default)]
+    pub plan_meta: Option<PlanMeta>,
+    #[serde(default)]
+    pub assertions: Vec<Assertion>,
+    #[serde(default)]
+    pub approval: Option<Approval>,
+    #[serde(default)]
+    pub verdict: Option<Verdict>,
+    #[serde(default)]
+    pub cost_usd: f64,
+    pub links: Links,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct TaskRecord {
+    pub schema: i64,
+    pub id: String,
+    pub source: Option<TaskSource>,
+    pub title: String,
+    pub due: Option<String>,
+    pub state: State,
+    pub step: Option<Step>,
+    pub waiting: bool,
+    pub created_at: String,
+    pub updated_at: String,
+    pub requests: Requests,
+    pub question: Option<Question>,
+    pub answers: Vec<Question>,
+    pub grants: Grants,
+    pub plan_meta: Option<PlanMeta>,
+    pub assertions: Vec<Assertion>,
+    pub approval: Option<Approval>,
+    pub verdict: Option<Verdict>,
+    pub cost_usd: f64,
+    pub links: Links,
+    pub context: String,
+    pub spec: String,
+    pub success: String,
+    pub plan: String,
+    pub log: String,
+}
+
+const SECTIONS: [&str; 5] = ["Context", "Spec", "Success", "Plan", "Log"];
+
+pub fn parse(text: &str) -> Result<TaskRecord, FabrError> {
+    let rest = text.strip_prefix("---").ok_or_else(|| FabrError::Unprocessable("record has no front matter".into()))?;
+    let end = rest.find("\n---").ok_or_else(|| FabrError::Unprocessable("front matter is not closed".into()))?;
+    let yaml = &rest[..end];
+    let body = rest[end + 4..].strip_prefix('\n').unwrap_or(&rest[end + 4..]);
+    let fm: FrontMatter = serde_yaml::from_str(yaml).map_err(|e| FabrError::Unprocessable(format!("front matter: {e}")))?;
+    let mut sections = split_sections(body);
+    Ok(TaskRecord {
+        schema: fm.schema,
+        id: fm.id,
+        source: fm.source,
+        title: fm.title,
+        due: fm.due,
+        state: fm.state,
+        step: fm.step,
+        waiting: fm.waiting,
+        created_at: fm.created_at,
+        updated_at: fm.updated_at,
+        requests: fm.requests,
+        question: fm.question,
+        answers: fm.answers,
+        grants: fm.grants,
+        plan_meta: fm.plan_meta,
+        assertions: fm.assertions,
+        approval: fm.approval,
+        verdict: fm.verdict,
+        cost_usd: fm.cost_usd,
+        links: fm.links,
+        context: sections.remove("Context").unwrap_or_default(),
+        spec: sections.remove("Spec").unwrap_or_default(),
+        success: sections.remove("Success").unwrap_or_default(),
+        plan: sections.remove("Plan").unwrap_or_default(),
+        log: sections.remove("Log").unwrap_or_default(),
+    })
+}
+
+fn split_sections(body: &str) -> std::collections::HashMap<String, String> {
+    let mut out = std::collections::HashMap::new();
+    let mut current: Option<String> = None;
+    let mut buf = String::new();
+    for line in body.lines() {
+        if let Some(name) = line.strip_prefix("## ") {
+            if let Some(key) = current.take() {
+                out.insert(key, buf.trim_matches('\n').to_string());
+            }
+            buf = String::new();
+            current = Some(name.trim().to_string());
+        } else if current.is_some() {
+            buf.push_str(line);
+            buf.push('\n');
+        }
+    }
+    if let Some(key) = current.take() {
+        out.insert(key, buf.trim_matches('\n').to_string());
+    }
+    out
+}
+
+pub fn render(rec: &TaskRecord) -> String {
+    let fm = FrontMatter {
+        schema: rec.schema,
+        id: rec.id.clone(),
+        title: rec.title.clone(),
+        due: rec.due.clone(),
+        state: rec.state,
+        step: rec.step,
+        waiting: rec.waiting,
+        source: rec.source.clone(),
+        created_at: rec.created_at.clone(),
+        updated_at: rec.updated_at.clone(),
+        requests: rec.requests.clone(),
+        question: rec.question.clone(),
+        answers: rec.answers.clone(),
+        grants: rec.grants.clone(),
+        plan_meta: rec.plan_meta.clone(),
+        assertions: rec.assertions.clone(),
+        approval: rec.approval.clone(),
+        verdict: rec.verdict.clone(),
+        cost_usd: rec.cost_usd,
+        links: rec.links.clone(),
+    };
+    let yaml = serde_yaml::to_string(&fm).unwrap_or_default();
+    let mut out = String::from("---\n");
+    out.push_str(&yaml);
+    if !yaml.ends_with('\n') {
+        out.push('\n');
+    }
+    out.push_str("---\n");
+    for name in SECTIONS {
+        out.push_str("## ");
+        out.push_str(name);
+        out.push('\n');
+        let text = section_text(rec, name);
+        if !text.is_empty() {
+            out.push_str(text);
+            if !text.ends_with('\n') {
+                out.push('\n');
+            }
+        }
+    }
+    out
+}
+
+fn section_text<'a>(rec: &'a TaskRecord, name: &str) -> &'a str {
+    match name {
+        "Context" => &rec.context,
+        "Spec" => &rec.spec,
+        "Success" => &rec.success,
+        "Plan" => &rec.plan,
+        "Log" => &rec.log,
+        _ => "",
+    }
+}
+
+pub fn normalize_section(text: &str) -> String {
+    text.lines().map(str::trim_end).collect::<Vec<_>>().join("\n").trim_matches('\n').to_string()
+}
+
+pub fn approval_digest(rec: &TaskRecord) -> String {
+    let mut h = Sha256::new();
+    h.update(normalize_section(&rec.spec).as_bytes());
+    h.update([0]);
+    h.update(normalize_section(&rec.success).as_bytes());
+    h.update([0]);
+    h.update(normalize_section(&rec.plan).as_bytes());
+    h.update([0]);
+    for a in &rec.assertions {
+        h.update(a.id.as_bytes());
+        h.update([1]);
+        h.update(a.text.as_bytes());
+        h.update([2]);
+    }
+    h.update([0]);
+    if let Some(m) = &rec.plan_meta {
+        h.update(m.reversibility.as_deref().unwrap_or("").as_bytes());
+        h.update([3]);
+        for t in &m.tools {
+            h.update(t.as_bytes());
+            h.update([4]);
+        }
+        h.update([5]);
+        for c in &m.checks {
+            h.update(c.cmd.as_bytes());
+            h.update([6]);
+            for arg in &c.args {
+                h.update(arg.as_bytes());
+                h.update([7]);
+            }
+            h.update([8]);
+        }
+    }
+    format!("{:x}", h.finalize())
+}
+
+pub fn registry_filename(task_id: &str, task_path: &str) -> String {
+    let mut h = Sha256::new();
+    h.update(task_path.as_bytes());
+    let digest = h.finalize();
+    let hex: String = digest.iter().take(4).map(|b| format!("{b:02x}")).collect();
+    format!("{task_id}--{hex}.yaml")
+}
+
+pub fn stamp_updated(rec: &mut TaskRecord, now: &str) {
+    rec.updated_at = now.to_string();
+}
+
+pub fn write_record(path: &std::path::Path, rec: &TaskRecord, expected_updated_at: Option<&str>) -> Result<(), FabrError> {
+    if let Some(expected) = expected_updated_at
+        && path.exists()
+    {
+        let disk = parse(&std::fs::read_to_string(path).map_err(|e| FabrError::Io(format!("{}: {e}", path.display())))?)?;
+        if disk.updated_at != expected {
+            return Err(FabrError::Conflict { message: "record changed on disk".into(), node: None });
+        }
+    }
+    let text = render(rec);
+    let tmp = path.with_extension("md.tmp");
+    std::fs::write(&tmp, &text).map_err(|e| FabrError::Io(format!("{}: {e}", tmp.display())))?;
+    std::fs::rename(&tmp, path).map_err(|e| FabrError::Io(format!("{}: {e}", path.display())))
+}
+
+pub fn apply_gui(rec: &mut TaskRecord, patch: &GuiPatch) {
+    if let Some(r) = &patch.requests {
+        rec.requests = r.clone();
+    }
+    if let Some(a) = &patch.approval {
+        rec.approval = Some(a.clone());
+    }
+    if let Some(g) = &patch.grants_granted {
+        rec.grants.granted = g.clone();
+    }
+    if let Some(ans) = &patch.answer
+        && let Some(q) = rec.question.as_mut()
+    {
+        q.answer = Some(ans.clone());
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    fn fixtures_dir() -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../fixtures")
+    }
+
+    fn records() -> Vec<PathBuf> {
+        let mut out = Vec::new();
+        for ent in walk(&fixtures_dir()) {
+            if ent.extension().and_then(|e| e.to_str()) == Some("md") && ent.to_string_lossy().contains("tasks") {
+                out.push(ent);
+            }
+        }
+        out.sort();
+        out
+    }
+
+    fn walk(dir: &std::path::Path) -> Vec<PathBuf> {
+        let mut out = Vec::new();
+        if let Ok(rd) = std::fs::read_dir(dir) {
+            for ent in rd.flatten() {
+                let p = ent.path();
+                if p.is_dir() {
+                    out.extend(walk(&p));
+                } else {
+                    out.push(p);
+                }
+            }
+        }
+        out
+    }
+
+    #[test]
+    fn loads_every_fixture() {
+        let recs = records();
+        assert_eq!(recs.len(), 10, "expected ten fixture records, found {}", recs.len());
+        for path in recs {
+            let text = std::fs::read_to_string(&path).unwrap();
+            let rec = parse(&text).unwrap_or_else(|e| panic!("{}: {}", path.display(), e.message()));
+            assert_eq!(rec.schema, 2, "{}", path.display());
+            assert!(!rec.id.is_empty(), "{}", path.display());
+        }
+    }
+
+    #[test]
+    fn round_trip_preserves_fields() {
+        for path in records() {
+            let text = std::fs::read_to_string(&path).unwrap();
+            let rec = parse(&text).unwrap();
+            let again = parse(&render(&rec)).unwrap();
+            assert_eq!(rec.state, again.state, "{}", path.display());
+            assert_eq!(rec.id, again.id, "{}", path.display());
+            assert_eq!(rec.spec, again.spec, "{}", path.display());
+            assert_eq!(rec.plan, again.plan, "{}", path.display());
+            assert_eq!(rec.log, again.log, "{}", path.display());
+            assert_eq!(rec.assertions, again.assertions, "{}", path.display());
+            assert_eq!(rec.approval, again.approval, "{}", path.display());
+            assert_eq!(rec.verdict, again.verdict, "{}", path.display());
+            assert_eq!(rec.grants, again.grants, "{}", path.display());
+            assert_eq!(rec.question, again.question, "{}", path.display());
+        }
+    }
+
+    #[test]
+    fn digest_is_stable_and_sensitive() {
+        let mut rec = parse(
+            &std::fs::read_to_string(fixtures_dir().join("04-awaiting-approval/project/.fabric-space/tasks/2026-10-24-order-filament.md"))
+                .unwrap(),
+        )
+        .unwrap();
+        let d1 = approval_digest(&rec);
+        assert_eq!(d1, approval_digest(&rec));
+        rec.plan.push_str("\n7. extra step");
+        assert_ne!(d1, approval_digest(&rec));
+    }
+
+    #[test]
+    fn registry_filename_differs_by_path() {
+        let a = registry_filename("t", "/home/me/3d/.fabric-space/tasks/t.md");
+        let b = registry_filename("t", "/home/me/cnc/.fabric-space/tasks/t.md");
+        assert_ne!(a, b);
+        assert!(a.starts_with("t--") && a.ends_with(".yaml"));
+    }
+}

@@ -11,6 +11,7 @@ workspace = true
 [dependencies]
 serde.workspace = true
 serde_json.workspace = true
+serde_yaml.workspace = true
 toml_edit.workspace = true
 sha1_smol.workspace = true
 tempfile.workspace = true
@@ -35,4 +36,6 @@ keyring = { version = "=3.6.3", optional = true, features = ["apple-native"] }
 keyring = { version = "=3.6.3", optional = true, features = ["async-secret-service", "async-io", "crypto-rust"] }
 
 [dev-dependencies]
+sha2.workspace = true
+tempfile.workspace = true
 tiny_http.workspace = true

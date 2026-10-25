@@ -1,6 +1,7 @@
 ---
-schema: 1
+schema: 2
 id: 2026-10-24-order-replacement-nozzle
+source: null
 title: "order a spare 0.4 mm nozzle"
 due: 2026-11-05
 state: defined

@@ -1,6 +1,7 @@
 ---
-schema: 1
+schema: 2
 id: 2026-10-25-download-electric-bill
+source: null
 title: "download the October electric bill"
 due: 2026-10-28
 state: failed

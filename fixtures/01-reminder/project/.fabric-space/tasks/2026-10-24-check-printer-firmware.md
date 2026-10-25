@@ -1,6 +1,7 @@
 ---
-schema: 1
+schema: 2
 id: 2026-10-24-check-printer-firmware
+source: null
 title: "check for a printer firmware update"
 due: 2026-10-30
 state: reminder

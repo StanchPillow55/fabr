@@ -1,6 +1,7 @@
 ---
-schema: 1
+schema: 2
 id: 2026-10-24-order-filament-2
+source: null
 title: "order 2 kg of black PLA"
 due: 2026-10-28
 state: task

@@ -17,6 +17,7 @@ pub mod setup;
 pub mod sources;
 pub mod stamp;
 mod sync;
+pub mod taskrec;
 pub mod todo;
 pub mod workspace;
 
@@ -36,8 +37,14 @@ pub use remote::hostkey::HostKey;
 pub use remote::keyinstall::InstallKeyResult;
 pub use sample::write_sample;
 pub use scan::{ScanOpts, ScanResult, Watched, scan, scan_at};
+pub use secrets::Secret;
 pub use settings::{Settings, TestResult};
 pub use sources::{Source, default_local, load_sources, save_sources};
 pub use stamp::stamp_paths;
+pub use taskrec::{
+    Actor, Answer, Approval, ApprovalStatus, Assertion, Assumption, Check, Grant, Grants, GuiPatch, Links, PlanMeta, Prior, Question,
+    QuestionKind, Requests, Reversibility, Scope, State, Step, TaskRecord, TaskSource, Verdict, VerdictItem, apply_gui, approval_digest,
+    normalize_section, parse, registry_filename, render, stamp_updated, write_record,
+};
 pub use todo::{Item, Line, Status, due_sort_key, format_item, is_overdue_at, now_minute, parse_todo, render_todo, validate_items};
 pub use workspace::Workspace;

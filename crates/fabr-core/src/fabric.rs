@@ -1,4 +1,5 @@
 use crate::error::FabrError;
+use crate::taskrec::{self, TaskRecord};
 use serde::{Deserialize, Serialize};
 use std::io::Write;
 use std::path::{Component, Path, PathBuf};
@@ -206,6 +207,45 @@ pub fn updated_at(text: &str) -> String {
     String::new()
 }
 
+fn task_markdown(p: &Path) -> bool {
+    p.parent().and_then(|d| d.file_name()).and_then(|n| n.to_str()) == Some("tasks") && p.extension().and_then(|e| e.to_str()) == Some("md")
+}
+
+/// Keep fields the GUI does not own, then let the schema writer check
+/// `updated_at` and render the bytes.
+fn gui_record(disk: &TaskRecord, incoming: &TaskRecord) -> Result<TaskRecord, FabrError> {
+    if incoming.state != disk.state {
+        return Err(FabrError::BadRequest("the gui does not write state".into()));
+    }
+    if incoming.step != disk.step {
+        return Err(FabrError::BadRequest("the gui does not write step".into()));
+    }
+    let mut rec = incoming.clone();
+    rec.schema = disk.schema;
+    rec.id = disk.id.clone();
+    rec.source = disk.source.clone();
+    rec.waiting = disk.waiting;
+    rec.created_at = disk.created_at.clone();
+    rec.answers = disk.answers.clone();
+    rec.grants.requested = disk.grants.requested.clone();
+    rec.plan_meta = disk.plan_meta.clone();
+    rec.assertions = disk.assertions.clone();
+    rec.verdict = disk.verdict.clone();
+    rec.cost_usd = disk.cost_usd;
+    rec.links = disk.links.clone();
+    rec.spec = disk.spec.clone();
+    rec.success = disk.success.clone();
+    rec.plan = disk.plan.clone();
+    rec.log = disk.log.clone();
+    if let Some(kept) = &disk.approval {
+        match rec.approval.as_mut() {
+            Some(approval) => approval.digest = kept.digest.clone(),
+            None => rec.approval = Some(kept.clone()),
+        }
+    }
+    Ok(rec)
+}
+
 pub fn write(req: &FabricWriteReq) -> Result<FabricWriteRes, FabrError> {
     let p = checked(&req.path)?;
     if !writable(&p) {
@@ -215,22 +255,30 @@ pub fn write(req: &FabricWriteReq) -> Result<FabricWriteRes, FabrError> {
         std::io::ErrorKind::NotFound => FabrError::NotFound(format!("no such file: {}", req.path)),
         _ => FabrError::Io(format!("{}: {e}", req.path)),
     })?;
-    let current = updated_at(&old);
-    if current != req.expected_updated_at {
-        return Err(FabrError::Conflict {
-            message: format!("{} changed on disk: updated_at is {current:?}, expected {:?}", req.path, req.expected_updated_at),
-            node: None,
-        });
+    if task_markdown(&p) {
+        let disk = taskrec::parse(&old)?;
+        let incoming = taskrec::parse(&req.text)?;
+        let rec = gui_record(&disk, &incoming)?;
+        taskrec::write_record(&p, &rec, Some(&req.expected_updated_at))?;
+    } else {
+        let current = updated_at(&old);
+        if current != req.expected_updated_at {
+            return Err(FabrError::Conflict {
+                message: format!("{} changed on disk: updated_at is {current:?}, expected {:?}", req.path, req.expected_updated_at),
+                node: None,
+            });
+        }
+        let dir = p.parent().ok_or_else(|| FabrError::BadRequest("no parent folder".into()))?;
+        let io = |e: std::io::Error| FabrError::Io(format!("{}: {e}", req.path));
+        let mut tmp = tempfile::Builder::new().prefix(".fabr-write-").suffix(".tmp").tempfile_in(dir).map_err(io)?;
+        tmp.write_all(req.text.as_bytes()).map_err(io)?;
+        tmp.as_file().sync_all().map_err(io)?;
+        if let Ok(m) = std::fs::metadata(&p) {
+            let _ = std::fs::set_permissions(tmp.path(), m.permissions());
+        }
+        tmp.persist(&p).map_err(|e| io(e.error))?;
     }
-    let dir = p.parent().ok_or_else(|| FabrError::BadRequest("no parent folder".into()))?;
     let io = |e: std::io::Error| FabrError::Io(format!("{}: {e}", req.path));
-    let mut tmp = tempfile::Builder::new().prefix(".fabr-write-").suffix(".tmp").tempfile_in(dir).map_err(io)?;
-    tmp.write_all(req.text.as_bytes()).map_err(io)?;
-    tmp.as_file().sync_all().map_err(io)?;
-    if let Ok(m) = std::fs::metadata(&p) {
-        let _ = std::fs::set_permissions(tmp.path(), m.permissions());
-    }
-    tmp.persist(&p).map_err(|e| io(e.error))?;
     let m = std::fs::metadata(&p).map_err(io)?;
     Ok(FabricWriteRes { mtime: mtime_of(&m) })
 }
@@ -332,7 +380,7 @@ pub fn create_in(req: &FabricCreateReq, user_home: &Path) -> Result<FabricCreate
             continue;
         }
         let text = format!(
-            "---\nschema: 1\nid: {id}\ntitle: {}\ndue: {}\nstate: reminder\nstep: null\nwaiting: false\ncreated_at: {stamp}\nupdated_at: {stamp}\nrequests: {{delegate: false, cancel: false, redelegate: false}}\nquestion: null\nanswers: []\ngrants: {{requested: [], granted: []}}\nplan_meta: null\nassertions: []\napproval: null\nverdict: null\ncost_usd: 0\nlinks: {{redelegated_from: null, redelegated_to: null}}\n---\n## Context\n{}## Spec\n{}## Success\n{}## Plan\n## Log\n",
+            "---\nschema: 2\nid: {id}\nsource: null\ntitle: {}\ndue: {}\nstate: reminder\nstep: null\nwaiting: false\ncreated_at: {stamp}\nupdated_at: {stamp}\nrequests: {{delegate: false, cancel: false, redelegate: false}}\nquestion: null\nanswers: []\ngrants: {{requested: [], granted: []}}\nplan_meta: null\nassertions: []\napproval: null\nverdict: null\ncost_usd: 0\nlinks: {{redelegated_from: null, redelegated_to: null}}\n---\n## Context\n{}## Spec\n{}## Success\n{}## Plan\n## Log\n",
             yaml_title(title),
             due.unwrap_or("null"),
             section_text(&req.context),
@@ -356,7 +404,9 @@ mod tests {
     use super::*;
 
     fn rec(updated: &str) -> String {
-        format!("---\nid: a\nupdated_at: {updated}\n---\n\n## Context\n")
+        format!(
+            "---\nschema: 2\nid: a\nsource: null\ntitle: t\nstate: reminder\nstep: null\nwaiting: false\ncreated_at: T0\nupdated_at: {updated}\nrequests:\n  delegate: false\n  cancel: false\n  redelegate: false\ngrants:\n  requested: []\n  granted: []\nlinks:\n  redelegated_from: null\n  redelegated_to: null\n---\n## Context\n"
+        )
     }
 
     fn tree() -> (tempfile::TempDir, String, String) {
@@ -411,12 +461,34 @@ mod tests {
         let stale = FabricWriteReq { path: path.clone(), text: rec("T3"), expected_updated_at: "T0".into() };
         let e = write(&stale).unwrap_err();
         assert!(matches!(e, FabrError::Conflict { .. }));
-        assert!(e.message().contains("T1") && e.message().contains("T0"));
-        assert!(std::fs::read_to_string(&path).unwrap().contains("updated_at: T1"));
+        assert_eq!(updated_at(&std::fs::read_to_string(&path).unwrap()), "T1");
         write(&FabricWriteReq { path: path.clone(), text: rec("T2"), expected_updated_at: "T1".into() }).unwrap();
-        assert!(std::fs::read_to_string(&path).unwrap().contains("updated_at: T2"));
+        let written = std::fs::read_to_string(&path).unwrap();
+        assert_eq!(updated_at(&written), "T2");
+        assert_eq!(written, taskrec::render(&taskrec::parse(&written).unwrap()));
         let left: Vec<_> = std::fs::read_dir(format!("{root}/.fabric-space/tasks")).unwrap().flatten().collect();
         assert_eq!(left.len(), 2);
+    }
+
+    #[test]
+    fn registry_yaml_stays_raw_text() {
+        let (_d, _root, home) = tree();
+        let path = format!("{home}/.fabric-space/registry/r1.yaml");
+        let text = "task_id: t\n";
+        write(&FabricWriteReq { path: path.clone(), text: text.into(), expected_updated_at: String::new() }).unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), text);
+    }
+
+    #[test]
+    fn gui_cannot_write_state() {
+        let (_d, root, _) = tree();
+        let path = format!("{root}/.fabric-space/tasks/a.md");
+        let mut incoming = taskrec::parse(&rec("T1")).unwrap();
+        incoming.state = taskrec::State::Task;
+        let err =
+            write(&FabricWriteReq { path: path.clone(), text: taskrec::render(&incoming), expected_updated_at: "T1".into() }).unwrap_err();
+        assert!(err.message().contains("state"));
+        assert_eq!(taskrec::parse(&std::fs::read_to_string(&path).unwrap()).unwrap().state, taskrec::State::Reminder);
     }
 
     #[test]
@@ -534,10 +606,17 @@ mod tests {
         let r = read(&FabricReadReq { path: path.clone() }).unwrap();
         let cur = updated_at(&r.text);
         assert_eq!(cur, "2026-10-24T18:59:40Z");
+        assert_eq!(cur, taskrec::parse(&r.text).unwrap().updated_at);
         let text = r.text.replace(&cur, "2026-10-24T19:00:00Z");
-        write(&FabricWriteReq { path: path.clone(), text: text.clone(), expected_updated_at: cur.clone() }).unwrap();
-        assert_eq!(read(&FabricReadReq { path: path.clone() }).unwrap().text, text);
-        assert!(write(&FabricWriteReq { path, text, expected_updated_at: cur }).is_err());
+        write(&FabricWriteReq { path: path.clone(), text, expected_updated_at: cur.clone() }).unwrap();
+        let written = read(&FabricReadReq { path: path.clone() }).unwrap().text;
+        let parsed = taskrec::parse(&written).unwrap();
+        assert_eq!(updated_at(&written), "2026-10-24T19:00:00Z");
+        assert_eq!(parsed.updated_at, "2026-10-24T19:00:00Z");
+        assert_eq!(parsed.state, taskrec::State::InProgress);
+        assert!(parsed.log.contains("2026-10-24T18:59:40Z execute: selected standard shipping"));
+        assert_eq!(written, taskrec::render(&parsed));
+        assert!(write(&FabricWriteReq { path, text: written, expected_updated_at: cur }).is_err());
     }
 
     #[test]
@@ -585,7 +664,7 @@ mod tests {
         };
         let r = create_in(&req, d.path()).unwrap();
         let text = read(&FabricReadReq { path: r.path.clone() }).unwrap().text;
-        assert!(text.starts_with("---\nschema: 1\n"));
+        assert!(text.starts_with("---\nschema: 2\n"));
         assert_eq!(updated_at(&text).len(), 20);
         assert!(text.contains(&format!("id: {}\n", r.id)));
         assert!(text.contains("title: \"order: \\\"filament\\\"\"\ndue: null\nstate: reminder\nstep: null\nwaiting: false\n"));

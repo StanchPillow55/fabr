@@ -1,6 +1,7 @@
 ---
-schema: 1
+schema: 2
 id: 2026-10-24-order-tulip-bulbs
+source: null
 title: "order tulip bulbs for the front bed"
 due: 2026-11-03
 state: in_progress

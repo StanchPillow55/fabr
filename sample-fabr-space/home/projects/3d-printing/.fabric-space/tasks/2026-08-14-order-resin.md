@@ -1,6 +1,7 @@
 ---
-schema: 1
+schema: 2
 id: 2026-08-14-order-resin
+source: null
 title: "order 1 kg of grey resin"
 due: 2026-08-20
 state: succeeded

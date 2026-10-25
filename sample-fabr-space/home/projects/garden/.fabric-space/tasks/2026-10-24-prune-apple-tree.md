@@ -1,6 +1,7 @@
 ---
-schema: 1
+schema: 2
 id: 2026-10-24-prune-apple-tree
+source: null
 title: "prune the apple tree"
 due: 2026-11-01
 state: reminder

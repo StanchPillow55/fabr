@@ -1,6 +1,7 @@
 ---
-schema: 1
+schema: 2
 id: 2026-10-24-renew-car-registration
+source: null
 title: "renew the car registration"
 due: 2026-11-15
 state: task

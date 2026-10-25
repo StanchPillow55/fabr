@@ -24,17 +24,18 @@ describe('applyApproval', () => {
     const r = applyApproval(pending, { status: 'approved', granted: [{ field: 'address.line_1', scope: 'always' }, { field: 'name.first' }] }, 'gui', now);
     const after = parseRecord(serializeRecord(r));
     expect(after.grants.granted).toEqual([{ field: 'address.line_1', scope: 'always' }, { field: 'name.first', scope: 'task' }]);
-    expect(after.approval).toEqual({ status: 'approved', by: 'gui', at: '2026-10-24T19:00:00Z', note: null });
+    expect(after.approval).toEqual({ status: 'approved', by: 'gui', at: '2026-10-24T19:00:00Z', note: null, digest: pending.approval?.digest ?? null });
     const changed = diff(pending, after);
     expect(changed.every((p) => p === 'updated_at' || p.startsWith('approval') || p === 'grants.granted')).toBe(true);
     expect(changed).toContain('updated_at');
-    expect(pending.approval).toEqual({ status: 'pending' });
+    expect(pending.approval?.status).toBe('pending');
+    expect(pending.approval?.digest).toMatch(/^[0-9a-f]{64}$/);
   });
 
   it('refusing with a note touches only approval and updated_at and keeps granted', () => {
     const r = applyApproval(pending, { status: 'refused', note: ' too risky ', granted: [{ field: 'name.first' }] }, 'gui', now);
     const after = parseRecord(serializeRecord(r));
-    expect(after.approval).toEqual({ status: 'refused', by: 'gui', at: '2026-10-24T19:00:00Z', note: 'too risky' });
+    expect(after.approval).toEqual({ status: 'refused', by: 'gui', at: '2026-10-24T19:00:00Z', note: 'too risky', digest: pending.approval?.digest ?? null });
     const changed = diff(pending, after);
     expect(changed.every((p) => p === 'updated_at' || p.startsWith('approval'))).toBe(true);
     expect(after.grants.granted).toEqual([]);

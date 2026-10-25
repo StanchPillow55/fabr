@@ -21,7 +21,7 @@ export function applyApproval(record: TaskRecord, decision: ApprovalDecision, by
   if (record.approval.status !== 'pending') throw new Error('this approval is already decided');
   const at = isoNow(now);
   const note = decision.note?.trim() || null;
-  const approval = { status: decision.status, by, at, note };
+  const approval = { status: decision.status, by, at, note, digest: record.approval.digest ?? null };
   if (decision.status === 'refused') return { ...record, updated_at: at, approval };
   const seen = new Set<string>();
   const granted = (decision.granted ?? []).map((g) => {

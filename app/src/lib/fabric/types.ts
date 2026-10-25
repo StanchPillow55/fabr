@@ -5,7 +5,7 @@ export const STEPS = ['gather', 'define', 'plan', 'approve', 'execute', 'evaluat
 export type Step = (typeof STEPS)[number];
 
 export const FIELDS = [
-  'schema', 'id', 'title', 'due', 'state', 'step', 'waiting', 'created_at', 'updated_at', 'requests',
+  'schema', 'id', 'source', 'title', 'due', 'state', 'step', 'waiting', 'created_at', 'updated_at', 'requests',
   'question', 'answers', 'grants', 'plan_meta', 'assertions', 'approval', 'verdict', 'cost_usd', 'links',
 ] as const;
 
@@ -41,6 +41,7 @@ export interface PlanMeta {
   reversibility: 'reversible' | 'irreversible';
   tools: string[];
   assumptions: { rule_id: string; text: string }[];
+  checks?: { cmd: string; args: string[] }[];
 }
 
 export interface Assertion { id: string; text: string }
@@ -50,6 +51,12 @@ export interface Approval {
   by?: 'gui' | 'telegram' | 'auto' | null;
   at?: string | null;
   note?: string | null;
+  digest?: string | null;
+}
+
+export interface TaskSource {
+  node_path: string;
+  todo_id: string;
 }
 
 export interface VerdictItem { id: string; pass: boolean; evidence: string }
@@ -60,6 +67,7 @@ export interface Links { redelegated_from: string | null; redelegated_to: string
 export interface FrontMatter {
   schema: number;
   id: string;
+  source: TaskSource | null;
   title: string;
   due: string | null;
   state: State;

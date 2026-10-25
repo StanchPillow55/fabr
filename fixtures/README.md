@@ -20,4 +20,8 @@ real path to try it.
 All values are made up. The shop host `shop.example-filament.test` does not exist, and no file
 holds a bank value.
 
+Registry files are named `<task_id>--<path_tag>.yaml`, where `path_tag` is the first 8 lowercase
+hex characters of sha256 of that file's `task_path` string. The GUI lists the directory and
+reads `task_id` from the YAML; the filename stem is not the task id.
+
 Fixtures change in the same commit as the record format (spec, section 10).

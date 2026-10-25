@@ -78,6 +78,10 @@ export function serializeFrontMatter(r: TaskRecord): string[] {
     switch (f) {
       case 'requests': add(`requests: ${flowMap(r.requests)}`); break;
       case 'links': add(`links: ${flowMap(r.links)}`); break;
+      case 'source':
+        if (r.source === null) add('source: null');
+        else add(`source: ${flowMap(r.source)}`);
+        break;
       case 'question':
         if (r.question === null) add('question: null');
         else add('question:', ...questionLines(r.question, 2));
@@ -111,13 +115,20 @@ export function serializeFrontMatter(r: TaskRecord): string[] {
           add('  assumptions:');
           for (const a of p.assumptions) add(`    - rule_id: ${scalar(a.rule_id)}`, `      text: ${scalar(a.text)}`);
         }
+        if (Array.isArray(p.checks)) {
+          if (!p.checks.length) add('  checks: []');
+          else {
+            add('  checks:');
+            for (const c of p.checks) add(`    - cmd: ${scalar(c.cmd)}`, `      args: ${flowList(c.args)}`);
+          }
+        }
         break;
       }
       case 'assertions': add(...itemList('assertions', r.assertions)); break;
       case 'approval': {
         const a = r.approval;
         if (a === null) add('approval: null');
-        else add(`approval: ${flowMap(Object.fromEntries((['status', 'by', 'at', 'note'] as const).filter((k) => k in a).map((k) => [k, a[k]])))}`);
+        else add(`approval: ${flowMap(Object.fromEntries((['status', 'by', 'at', 'note', 'digest'] as const).filter((k) => k in a && a[k] !== undefined).map((k) => [k, a[k]])))}`);
         break;
       }
       case 'verdict': {

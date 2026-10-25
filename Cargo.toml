@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/fabr-core", "crates/fabr", "app/src-tauri"]
+members = ["crates/fabr-core", "crates/fabr", "crates/fabr-agent", "app/src-tauri"]
 default-members = ["crates/fabr-core", "crates/fabr"]
 
 [workspace.package]
@@ -32,6 +32,7 @@ tauri = "=2.12.4"
 tauri-build = "=2.7.3"
 tauri-plugin-opener = "=2.7.2"
 tauri-plugin-dialog = "=2.8.0"
+serde_yaml = "=0.9.33"
 
 [workspace.lints.clippy]
 result_large_err = "allow"

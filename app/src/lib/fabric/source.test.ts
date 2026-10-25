@@ -23,7 +23,9 @@ describe('FixtureSource data path', () => {
     const reg = await new FixtureSource().listRegistry();
     const by = (n: string) => reg.filter((r) => r.path.includes(`/${n}`));
     expect(by('10-registry').map((r) => r.path.split('/').pop())).toEqual([
-      '2026-10-24-file-tax-receipts.yaml', '2026-10-24-order-filament.yaml', '2026-10-24-rename-scans.yaml',
+      '2026-10-24-file-tax-receipts--c34ec935.yaml',
+      '2026-10-24-order-filament--ec664532.yaml',
+      '2026-10-24-rename-scans--4d789216.yaml',
     ]);
     expect(by('05-running')).toHaveLength(1);
     expect(by('06-waiting-mid-run')).toHaveLength(1);

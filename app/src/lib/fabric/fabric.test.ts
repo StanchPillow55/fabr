@@ -15,7 +15,7 @@ describe('fixtures', () => {
     it(`parses ${path.split('fixtures/')[1]}`, () => {
       expect(Object.keys(parseFrontMatter(text).data)).toEqual([...FIELDS]);
       const r = parseRecord(text);
-      expect(r.schema).toBe(1);
+      expect(r.schema).toBe(2);
       expect(typeof r.state).toBe('string');
       expect(r.step === null || typeof r.step === 'string').toBe(true);
       expect(typeof r.waiting).toBe('boolean');

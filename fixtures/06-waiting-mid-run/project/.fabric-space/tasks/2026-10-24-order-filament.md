@@ -1,6 +1,7 @@
 ---
-schema: 1
+schema: 2
 id: 2026-10-24-order-filament
+source: null
 title: "order 2 kg of black PLA"
 due: 2026-10-28
 state: in_progress
@@ -70,7 +71,7 @@ assertions:
     text: "The cart holds 2 kg of black PLA 1.75 mm in total, as one 2 kg spool or two 1 kg spools"
   - id: a3
     text: "The run stops on the payment page and no payment field is filled"
-approval: {status: approved, by: gui, at: 2026-10-24T18:49:40Z, note: null}
+approval: {status: approved, by: gui, at: 2026-10-24T18:49:40Z, note: null, digest: ce151cae7e64682014c0698af4c6d5a78edb6c5f2a82638db95d410486990283}
 verdict: null
 cost_usd: 0.45
 links: {redelegated_from: null, redelegated_to: null}

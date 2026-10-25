@@ -1,6 +1,7 @@
 ---
-schema: 1
+schema: 2
 id: 2026-10-20-finish-essay-collection
+source: null
 title: "finish the essay collection"
 due: null
 state: reminder
