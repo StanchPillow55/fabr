@@ -1,0 +1,27 @@
+task_path: "<SAMPLE>/home/projects/3d-printing/.fabric-space/tasks/2026-10-24-order-filament.md"
+task_id: 2026-10-24-order-filament
+folder: "<SAMPLE>/home/projects/3d-printing"
+state: task
+step: define
+step_at: 2026-10-24T18:05:30Z
+waiting: question
+activity: parked
+started_at: 2026-10-24T18:02:11Z
+heartbeat_at: 2026-10-25T08:59:55Z
+heartbeat_interval_s: 10
+cost_usd: 0.02
+usage:
+  define: {calls: 2, input_tokens: 3920, output_tokens: 610, usd: 0.02}
+log_tail:
+  - "2026-10-24T18:03:40Z define: asked q1"
+  - "2026-10-24T18:05:30Z define: asked q2"
+question:
+  id: q2
+  kind: choice
+  text: "Ship to your home address again?"
+  options: [once, always, "no"]
+  prior: null
+  fields: null
+  asked_at: 2026-10-24T18:05:30Z
+  answer: null
+pid: 41872

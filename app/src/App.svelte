@@ -12,6 +12,7 @@
   import { Store } from './lib/store.svelte';
   import SetupWizard from './lib/setup/SetupWizard.svelte';
   import { shouldShowSetup } from './lib/setup/gate';
+  import AgentsScreen from './lib/fabric/AgentsScreen.svelte';
   import NoticesList from './lib/fabric/NoticesList.svelte';
   import { FabricStore, localRoots } from './lib/fabric/tasks.svelte';
   import { folderOf } from './lib/fabric/folder';
@@ -29,6 +30,7 @@
   let helpOpen = $state(false);
   let fabric = $state<FabricStore | null>(null);
   let noticesOpen = $state(false);
+  let agentsOpen = $state(false);
   let noticeError = $state<string | null>(null);
   let setupOpen = $state(new URLSearchParams(location.search).has('setup'));
   let gateReady = $state(false);
@@ -94,6 +96,7 @@
     }
     noticeError = null;
     noticesOpen = false;
+    agentsOpen = false;
     store!.openPanel(nodeKey(node));
     fabric!.open(held.path);
   }
@@ -116,7 +119,7 @@
   }
 
   function onkeydown(e: KeyboardEvent) {
-    if (!store || store.sheetOpen || store.addNodesFor || helpOpen || noticesOpen || fabric?.openPath) return;
+    if (!store || store.sheetOpen || store.addNodesFor || helpOpen || noticesOpen || agentsOpen || fabric?.openPath) return;
     const t = e.target as HTMLElement;
     const typing = !!t.matches?.('input, select, textarea, [contenteditable]');
     if (typing) {
@@ -149,7 +152,7 @@
   <div class="app" class:app--panel={!!store.panel}>
     <main class="app__main">
       <div class="app__bar" bind:clientHeight={toolbarH}>
-        <Toolbar bind:this={toolbar} {store} onrescan={rescan} onexpand={expandAll} oncollapse={collapseAll} onsearchenter={() => treeView?.nextMatch()} {fabric} onnotices={() => { noticeError = null; noticesOpen = true; }} />
+        <Toolbar bind:this={toolbar} {store} onrescan={rescan} onexpand={expandAll} oncollapse={collapseAll} onsearchenter={() => treeView?.nextMatch()} {fabric} onnotices={() => { noticeError = null; noticesOpen = true; }} onagents={() => { noticeError = null; agentsOpen = true; }} />
       </div>
       <Notice {store} insetTop={toolbarH} />
       {#if needsOnboarding(store.tree)}
@@ -175,6 +178,11 @@
       <NoticesList events={fabric.events} readPosition={fabric.readPosition} titleFor={fabric.titleFor} onopen={openNotice} onmarkallread={() => fabric?.markAllRead()} />
       {#if noticeError}<p class="gate-note" role="alert">{noticeError}</p>{/if}
       {#snippet footer()}<Button variant="tint" onclick={() => (noticesOpen = false)}>Close</Button>{/snippet}
+    </Sheet>
+    <Sheet open={agentsOpen} title="Agents" onclose={() => (agentsOpen = false)}>
+      <AgentsScreen agents={fabric.agentList} now={fabric.now} onopen={openNotice} />
+      {#if noticeError}<p class="gate-note" role="alert">{noticeError}</p>{/if}
+      {#snippet footer()}<Button variant="tint" onclick={() => (agentsOpen = false)}>Close</Button>{/snippet}
     </Sheet>
   {/if}
   <Shortcuts open={helpOpen} onclose={() => (helpOpen = false)} />

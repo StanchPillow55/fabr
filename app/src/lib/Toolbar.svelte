@@ -7,10 +7,11 @@
   import Button from './ui/Button.svelte';
   import Icon from './ui/Icon.svelte';
   import Segmented from './ui/Segmented.svelte';
+  import AgentsBadge from './fabric/AgentsBadge.svelte';
   import NoticesBadge from './fabric/NoticesBadge.svelte';
   import type { FabricStore } from './fabric/tasks.svelte';
 
-  let { store, onrescan, onexpand, oncollapse, onsearchenter, fabric = null, onnotices }: {
+  let { store, onrescan, onexpand, oncollapse, onsearchenter, fabric = null, onnotices, onagents }: {
     store: Store;
     onrescan: () => void;
     onexpand: () => void;
@@ -18,6 +19,7 @@
     onsearchenter: () => void;
     fabric?: FabricStore | null;
     onnotices?: () => void;
+    onagents?: () => void;
   } = $props();
 
   let search = $state<HTMLInputElement>();
@@ -137,6 +139,7 @@
     </label>
     {#if fabric}
       <span class="backend backend--{fabric.backend}" title={fabric.backendLabel} aria-label={fabric.backendLabel} role="status"><span class="backend__dot"></span></span>
+      <AgentsBadge agents={fabric.agentList} onclick={onagents} />
       <NoticesBadge events={fabric.events} readPosition={fabric.readPosition} onclick={onnotices} />
     {/if}
     <Button variant="icon" title="Rescan (r)" aria-label="Rescan" onclick={onrescan}><Icon name="refresh" size={15} /></Button>

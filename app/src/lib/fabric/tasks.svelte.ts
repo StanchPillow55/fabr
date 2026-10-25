@@ -10,7 +10,8 @@ import { createFabricSource } from './live';
 import { parseRecord } from './parse';
 import { submitRequest, type RequestKey } from './requests';
 import type { CreateFields, FabricSource } from './source';
-import { findByTaskPath, loadRegistry } from './view';
+import { buildAgents, mostAdvanced, sortAgents, type AgentView } from './stage';
+import { entryMap, findByTaskPath, loadRegistry } from './view';
 import { submitAnswer } from './write';
 import type { RegistryEntry } from './agents';
 
@@ -67,6 +68,9 @@ export class FabricStore {
     }
     return m;
   });
+  #entries = $derived(entryMap(this.records, this.registry));
+  agents = $derived(buildAgents(this.records, this.registry, this.backend, this.now));
+  agentList = $derived(sortAgents([...this.agents.values()]));
   openRecord = $derived(this.records.find((h) => h.path === this.openPath) ?? null);
 
   async start(treeRoots: string[] = []): Promise<void> {
@@ -148,7 +152,15 @@ export class FabricStore {
   }
 
   entryFor(recordPath: string): RegistryEntry | null {
-    return this.registry.find((e) => findByTaskPath(this.records, e.task_path)?.path === recordPath) ?? null;
+    return this.#entries.get(recordPath) ?? null;
+  }
+
+  agentsFor(folder: string | null): AgentView[] {
+    return folder ? this.agentList.filter((v) => v.folder === folder) : [];
+  }
+
+  leadAgentFor(folder: string | null): AgentView | null {
+    return mostAdvanced(this.agentsFor(folder));
   }
 
   titleFor = (taskPath: string): string | undefined => findByTaskPath(this.records, taskPath)?.record.title;

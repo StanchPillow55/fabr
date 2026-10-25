@@ -7,6 +7,7 @@ pub struct AgentSettings {
     pub model: String,
     pub api_key: Secret,
     pub heartbeat_interval_s: u64,
+    pub check_timeout_s: u64,
     pub completed_steps: Vec<String>,
 }
 
@@ -29,7 +30,8 @@ pub fn load_agent_settings(dir: &Path) -> Result<AgentSettings, FabrError> {
         .unwrap_or_default();
     let key = secrets.get("anthropic_api_key").and_then(|v| v.as_str()).unwrap_or("").to_string();
     let api_key = Secret::new(key);
-    let settings = AgentSettings { default_folder, model, api_key, heartbeat_interval_s, completed_steps };
+    let settings =
+        AgentSettings { default_folder, model, api_key, heartbeat_interval_s, check_timeout_s: read_check_timeout(&doc), completed_steps };
     require_ready(&settings)?;
     Ok(settings)
 }
@@ -47,4 +49,20 @@ pub fn require_ready(s: &AgentSettings) -> Result<(), FabrError> {
         return Err(FabrError::BadRequest("api key is required".into()));
     }
     Ok(())
+}
+
+fn read_check_timeout(doc: &toml_edit::DocumentMut) -> u64 {
+    doc.get("check_timeout_s")
+        .and_then(|v| v.as_integer())
+        .filter(|n| *n > 0)
+        .map(|n| (n as u64).min(3600))
+        .unwrap_or(crate::verify::DEFAULT_CHECK_TIMEOUT_S)
+}
+
+pub fn check_timeout_s(space: &Path) -> u64 {
+    std::fs::read_to_string(space.join("settings.toml"))
+        .ok()
+        .and_then(|t| t.parse::<toml_edit::DocumentMut>().ok())
+        .map(|d| read_check_timeout(&d))
+        .unwrap_or(crate::verify::DEFAULT_CHECK_TIMEOUT_S)
 }

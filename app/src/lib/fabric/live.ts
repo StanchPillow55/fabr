@@ -1,7 +1,7 @@
 import { createApi } from '../api/index';
 import { isTauri } from '../api/env';
 import type { FabricSettingsRead } from '../api/types';
-import { FixtureSource, type FabricSource } from './source';
+import { FixtureSource, type FabricSource, type RawRecord } from './source';
 import { TauriSource } from './tauri-source';
 
 export const FOLDERS_UNKNOWN_USER = 'Task folders are not set up yet. Finish setup to choose your default folder.';
@@ -19,8 +19,21 @@ export function pickLocations(env: { root?: string; home?: string }, homeDir: st
   return { roots: [root], home };
 }
 
+class MockFixtures extends FixtureSource {
+  async listRegistry(): Promise<RawRecord[]> {
+    const at = new Date().toISOString();
+    return (await super.listRegistry()).map((r) => (r.text.includes('rename-scans') ? r : { ...r, text: r.text.replace(/^heartbeat_at:.*$/m, `heartbeat_at: ${at}`) }));
+  }
+  async readBackendHeartbeat(): Promise<string | null> {
+    return new Date().toISOString();
+  }
+  async stamp(): Promise<string> {
+    return `${await super.stamp()}:${Math.floor(Date.now() / 5000)}`;
+  }
+}
+
 export async function createFabricSource(settings?: FabricSettingsRead | null, treeRoots: string[] = []): Promise<FabricSource> {
-  if (!isTauri() && import.meta.env.VITE_MOCK === '1') return new FixtureSource();
+  if (!isTauri() && import.meta.env.VITE_MOCK === '1') return new MockFixtures();
   let homeDir: string | null = null;
   if (isTauri()) homeDir = (await (await import('@tauri-apps/api/path')).homeDir()).replace(/\/+$/, '');
   const api = await createApi();

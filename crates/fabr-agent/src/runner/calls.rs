@@ -1,7 +1,23 @@
 use crate::model::{CallObserver, ModelCall};
 use crate::now_utc;
 use fabr_core::redact::redact;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::{Arc, Mutex, PoisonError};
+
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct StepUsage {
+    pub calls: u64,
+    pub input_tokens: u64,
+    pub output_tokens: u64,
+    pub usd: f64,
+}
+
+#[derive(Default)]
+struct Totals {
+    record_id: String,
+    cost: f64,
+    usage: HashMap<String, BTreeMap<String, StepUsage>>,
+}
 
 #[derive(Clone, Default)]
 pub struct Sink {
@@ -36,20 +52,34 @@ impl Sink {
 pub struct CallLog {
     sink: Sink,
     fingerprint: String,
-    state: Mutex<(String, f64)>,
+    state: Mutex<Totals>,
 }
 
 impl CallLog {
     pub fn new(sink: Sink, fingerprint: String) -> Arc<CallLog> {
-        Arc::new(CallLog { sink, fingerprint, state: Mutex::new((String::new(), 0.0)) })
+        Arc::new(CallLog { sink, fingerprint, state: Mutex::new(Totals::default()) })
     }
 
     pub fn begin(&self, record_id: &str) {
-        *self.state.lock().unwrap_or_else(PoisonError::into_inner) = (record_id.to_string(), 0.0);
+        let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+        state.record_id = record_id.to_string();
+        state.cost = 0.0;
     }
 
     pub fn take_cost(&self) -> f64 {
-        std::mem::take(&mut self.state.lock().unwrap_or_else(PoisonError::into_inner).1)
+        std::mem::take(&mut self.state.lock().unwrap_or_else(PoisonError::into_inner).cost)
+    }
+
+    pub fn pending_cost(&self) -> f64 {
+        self.state.lock().unwrap_or_else(PoisonError::into_inner).cost
+    }
+
+    pub fn usage(&self, record_id: &str) -> BTreeMap<String, StepUsage> {
+        self.state.lock().unwrap_or_else(PoisonError::into_inner).usage.get(record_id).cloned().unwrap_or_default()
+    }
+
+    pub fn forget(&self, record_id: &str) {
+        self.state.lock().unwrap_or_else(PoisonError::into_inner).usage.remove(record_id);
     }
 
     pub fn observer(self: &Arc<Self>) -> CallObserver {
@@ -64,8 +94,14 @@ impl CallLog {
         };
         let id = {
             let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
-            state.1 += cost.unwrap_or(0.0);
-            state.0.clone()
+            state.cost += cost.unwrap_or(0.0);
+            let id = state.record_id.clone();
+            let slot = state.usage.entry(id.clone()).or_default().entry(call.step.to_string()).or_default();
+            slot.calls += 1;
+            slot.input_tokens += call.input_tokens.unwrap_or(0);
+            slot.output_tokens += call.output_tokens.unwrap_or(0);
+            slot.usd += cost.unwrap_or(0.0);
+            id
         };
         let n = |v: Option<u64>| v.map_or("-".to_string(), |v| v.to_string());
         let cost_text = cost.map(|c| format!(" cost_usd={c:.6}")).unwrap_or_default();

@@ -168,9 +168,7 @@ fn active_for(rec: &TaskRecord, todo_id: &str) -> bool {
     rec.source.as_ref().is_some_and(|s| s.todo_id == todo_id) && !is_terminal(rec)
 }
 
-pub(crate) fn is_terminal(rec: &TaskRecord) -> bool {
-    matches!(rec.state, fabr_core::taskrec::State::Succeeded | fabr_core::taskrec::State::Failed)
-}
+pub(crate) use crate::state::is_terminal;
 
 pub(crate) fn create_record(path: &Path, rec: &mut TaskRecord) -> Result<(), FabrError> {
     if let Some(parent) = path.parent() {
@@ -184,17 +182,6 @@ pub(crate) fn create_record(path: &Path, rec: &mut TaskRecord) -> Result<(), Fab
     write_record(path, rec, None)
 }
 
-pub(crate) fn update_record(path: &Path, rec: &mut TaskRecord, expected_updated_at: &str) -> Result<(), FabrError> {
-    stamp_updated(rec, &now_utc());
-    match write_record(path, rec, Some(expected_updated_at)) {
-        Ok(()) => Ok(()),
-        Err(FabrError::Conflict { message, .. }) => {
-            log::warn!("record write conflict on {}: {message}", path.display());
-            let disk = load_record(path)?;
-            let expected = disk.updated_at.clone();
-            stamp_updated(rec, &now_utc());
-            write_record(path, rec, Some(&expected))
-        }
-        Err(e) => Err(e),
-    }
+pub(crate) fn update_record(path: &Path, rec: &mut TaskRecord, base: &mut TaskRecord) -> Result<(), FabrError> {
+    crate::store::update(path, rec, base)
 }

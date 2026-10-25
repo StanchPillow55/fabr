@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest';
 import { render } from 'svelte/server';
 import AgentsScreen from './AgentsScreen.svelte';
 import { parseRegistryEntry } from './agents';
+import { buildAgents, viewOf } from './stage';
 import { parseRecord } from './parse';
 import RecordScreen from './RecordScreen.svelte';
 import { FabricStore } from './tasks.svelte';
@@ -26,8 +27,9 @@ const entries = readdirSync(regDir).filter((f) => f.startsWith('20') && f.endsWi
 function screen(text: string, withEntry: boolean) {
   const record = parseRecord(text);
   const entry = withEntry ? entries.find((e) => record.title && e.task_id === text.match(/^id:\s*(\S+)/m)?.[1]) ?? entries[0] : undefined;
+  const view = entry ? viewOf({ path: entry.task_path, record }, entry, 'connected', NOW) : null;
   const agent = createRawSnippet(() => ({
-    render: () => `<div>${entry ? render(AgentsScreen, { props: { entries: [entry], now: NOW } }).body : ''}</div>`,
+    render: () => `<div>${view ? render(AgentsScreen, { props: { agents: [view], now: NOW, detail: true } }).body : ''}</div>`,
   }));
   const noop = async () => {};
   return render(RecordScreen, { props: { record, name: 'folder', now: NOW, agent, onanswer: noop, onapprove: noop } }).body;
@@ -36,7 +38,19 @@ function screen(text: string, withEntry: boolean) {
 describe('sample records render in RecordScreen', () => {
   it('finds the sample records and registry entries', () => {
     expect(records.length).toBeGreaterThan(5);
-    expect(entries.length).toBeGreaterThan(0);
+    expect(entries.length).toBe(6);
+  });
+  it('registry entries carry the new keys for the gate and retry samples', () => {
+    const by = (id: string) => entries.find((e) => e.task_id.endsWith(id))!;
+    expect(by('order-filament')).toMatchObject({ state: 'task', step: 'define', waiting: 'question', activity: 'parked' });
+    expect(by('renew-car-registration')).toMatchObject({ activity: 'retry', retry_in_s: 30, last_error: 'anthropic 429: rate limited' });
+    expect(by('order-replacement-nozzle')).toMatchObject({ step: 'approve', waiting: 'approval' });
+    expect(Object.keys(by('order-replacement-nozzle').usage!)).toEqual(['define', 'plan']);
+  });
+  it('the whole sample space builds agents for its active records', () => {
+    const held = records.map((r) => ({ path: join(SPACE, 'projects', r.file.replace('/', '/.fabric-space/tasks/')), record: parseRecord(r.text) }));
+    const stages = [...buildAgents(held, entries.map((e) => ({ ...e, task_path: e.task_path.replace('<SAMPLE>', resolve(SPACE, '..')) })), 'connected', NOW).values()].map((v) => `${v.stage}:${v.alive}`).sort();
+    expect(stages).toEqual(['approve:live', 'define:live', 'define:live', 'execute:live', 'execute:live'].sort());
   });
   for (const r of records) {
     for (const withEntry of [false, true]) {

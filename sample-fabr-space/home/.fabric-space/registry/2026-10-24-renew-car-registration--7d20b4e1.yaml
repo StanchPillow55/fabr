@@ -1,0 +1,20 @@
+task_path: "<SAMPLE>/home/projects/home-admin/.fabric-space/tasks/2026-10-24-renew-car-registration.md"
+task_id: 2026-10-24-renew-car-registration
+folder: "<SAMPLE>/home/projects/home-admin"
+state: task
+step: define
+step_at: 2026-10-25T08:58:30Z
+waiting: null
+activity: retry
+retry_in_s: 30
+last_error: "anthropic 429: rate limited"
+started_at: 2026-10-25T08:58:20Z
+heartbeat_at: 2026-10-25T08:59:56Z
+heartbeat_interval_s: 10
+cost_usd: 0.01
+usage:
+  define: {calls: 1, input_tokens: 1840, output_tokens: 402, usd: 0.01}
+log_tail:
+  - "2026-10-25T08:58:30Z define: model call failed, retrying"
+question: null
+pid: 41872

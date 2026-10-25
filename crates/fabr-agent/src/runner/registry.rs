@@ -1,5 +1,4 @@
-use super::heartbeat::{FILE, write_atomic};
-use crate::now_utc;
+use super::heartbeat::FILE;
 use chrono::{DateTime, Utc};
 use std::path::{Path, PathBuf};
 
@@ -45,25 +44,4 @@ pub fn list(space: &Path) -> Vec<Entry> {
     }
     out.sort_by(|a, b| a.path.cmp(&b.path));
     out
-}
-
-pub fn refresh(path: &Path) -> std::io::Result<()> {
-    let text = std::fs::read_to_string(path)?;
-    let mut hit = false;
-    let mut lines: Vec<String> = text
-        .lines()
-        .map(|l| {
-            if l.starts_with("heartbeat_at:") {
-                hit = true;
-                format!("heartbeat_at: \"{}\"", now_utc())
-            } else {
-                l.to_string()
-            }
-        })
-        .collect();
-    if !hit {
-        return Ok(());
-    }
-    lines.push(String::new());
-    write_atomic(path, &lines.join("\n"))
 }

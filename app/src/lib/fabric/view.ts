@@ -26,3 +26,24 @@ export function findByTaskPath<T extends { path: string; record: { id: string; s
   const same = held.filter((h) => h.record.id === id);
   return same.find((h) => h.record.state === 'in_progress') ?? same[0];
 }
+
+export function entryMap<T extends { path: string; record: { id: string; state: string } }>(held: T[], entries: RegistryEntry[]): Map<string, RegistryEntry> {
+  const byPath = new Map<string, T>();
+  const byId = new Map<string, T[]>();
+  for (const h of held) {
+    byPath.set(h.path, h);
+    byId.set(h.record.id, [...(byId.get(h.record.id) ?? []), h]);
+  }
+  const out = new Map<string, RegistryEntry>();
+  for (const e of entries) {
+    let target = byPath.get(e.task_path);
+    if (!target) {
+      const same = byId.get(base(e.task_path)) ?? [];
+      target = same.find((h) => h.record.state === 'in_progress') ?? same[0];
+    }
+    if (!target) continue;
+    const prev = out.get(target.path);
+    if (!prev || Date.parse(e.heartbeat_at) > Date.parse(prev.heartbeat_at)) out.set(target.path, e);
+  }
+  return out;
+}

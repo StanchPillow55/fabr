@@ -4,6 +4,8 @@
   import Row from '../ui/Row.svelte';
   import Sheet from '../ui/Sheet.svelte';
   import AgentsScreen from './AgentsScreen.svelte';
+  import StageBar from './StageBar.svelte';
+  import { finishedView } from './stage';
   import { STATE_LABEL, folderName, folderOf, stepLabel } from './folder';
   import RecordScreen from './RecordScreen.svelte';
   import type { FabricStore } from './tasks.svelte';
@@ -26,7 +28,7 @@
         <Row
           label={r.title}
           sub={[r.due ? `due ${r.due}` : '', step ? `step: ${step}` : ''].filter(Boolean).join(' · ') || undefined}
-          value={[STATE_LABEL[r.state], r.waiting ? 'waiting' : '', fabric.entryFor(h.path) ? 'running' : ''].filter(Boolean).join(' · ')}
+          value={[STATE_LABEL[r.state], r.waiting ? 'waiting' : '', fabric.agents.get(h.path)?.activity && fabric.agents.get(h.path)?.activity !== 'parked' ? 'running' : ''].filter(Boolean).join(' · ')}
           tone={r.waiting ? 'tint' : undefined}
           onclick={() => fabric.open(h.path)}
         />
@@ -51,8 +53,12 @@
       onreload={() => fabric.reload(h.path)}
     >
       {#snippet agent()}
-        {#if fabric.entryFor(h.path)}
-          <AgentsScreen entries={[fabric.entryFor(h.path)!]} now={fabric.now} titleFor={fabric.titleFor} oncancel={(p) => fabric.cancelTask(p)} />
+        {@const view = fabric.agents.get(h.path)}
+        {@const done = finishedView(h)}
+        {#if view}
+          <AgentsScreen agents={[view]} detail now={fabric.now} oncancel={(p) => fabric.cancelTask(p)} />
+        {:else if done}
+          <StageBar view={done} mode="full" now={fabric.now} />
         {/if}
       {/snippet}
     </RecordScreen>

@@ -453,7 +453,49 @@ pub fn stamp_updated(rec: &mut TaskRecord, now: &str) {
     rec.updated_at = now.to_string();
 }
 
-pub fn write_record(path: &std::path::Path, rec: &TaskRecord, expected_updated_at: Option<&str>) -> Result<(), FabrError> {
+pub struct RecordLock {
+    _file: std::fs::File,
+}
+
+pub fn lock_path(record: &std::path::Path) -> std::path::PathBuf {
+    let tasks = record.parent().unwrap_or(std::path::Path::new("."));
+    let in_space = tasks.file_name().is_some_and(|n| n == "tasks")
+        && tasks.parent().and_then(std::path::Path::file_name).is_some_and(|n| n == ".fabric-space");
+    match tasks.parent() {
+        Some(space) if in_space => space.join("tasks.lock"),
+        _ => tasks.join("tasks.lock"),
+    }
+}
+
+pub fn lock_folder(record: &std::path::Path) -> Result<RecordLock, FabrError> {
+    let lock = lock_path(record);
+    if let Some(parent) = lock.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| FabrError::Io(format!("{}: {e}", parent.display())))?;
+    }
+    let file = std::fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .open(&lock)
+        .map_err(|e| FabrError::Io(format!("{}: {e}", lock.display())))?;
+    file.lock().map_err(|e| FabrError::Io(format!("{}: {e}", lock.display())))?;
+    Ok(RecordLock { _file: file })
+}
+
+static TMP_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+fn unique_tmp(path: &std::path::Path) -> std::path::PathBuf {
+    let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    let seq = TMP_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    path.with_file_name(format!(".{name}.{}.{seq}.tmp", std::process::id()))
+}
+
+pub fn write_record_locked(
+    path: &std::path::Path,
+    rec: &TaskRecord,
+    expected_updated_at: Option<&str>,
+    _held: &RecordLock,
+) -> Result<(), FabrError> {
     if let Some(expected) = expected_updated_at
         && path.exists()
     {
@@ -463,9 +505,27 @@ pub fn write_record(path: &std::path::Path, rec: &TaskRecord, expected_updated_a
         }
     }
     let text = render(rec);
-    let tmp = path.with_extension("md.tmp");
+    let tmp = unique_tmp(path);
     std::fs::write(&tmp, &text).map_err(|e| FabrError::Io(format!("{}: {e}", tmp.display())))?;
-    std::fs::rename(&tmp, path).map_err(|e| FabrError::Io(format!("{}: {e}", path.display())))
+    std::fs::rename(&tmp, path).map_err(|e| {
+        let _ = std::fs::remove_file(&tmp);
+        FabrError::Io(format!("{}: {e}", path.display()))
+    })
+}
+
+pub fn write_record(path: &std::path::Path, rec: &TaskRecord, expected_updated_at: Option<&str>) -> Result<(), FabrError> {
+    let held = lock_folder(path)?;
+    write_record_locked(path, rec, expected_updated_at, &held)
+}
+
+pub fn modify_record<T>(path: &std::path::Path, now: &str, f: impl FnOnce(&mut TaskRecord) -> T) -> Result<(TaskRecord, T), FabrError> {
+    let held = lock_folder(path)?;
+    let text = std::fs::read_to_string(path).map_err(|e| FabrError::Io(format!("{}: {e}", path.display())))?;
+    let mut rec = parse(&text)?;
+    let out = f(&mut rec);
+    stamp_updated(&mut rec, now);
+    write_record_locked(path, &rec, None, &held)?;
+    Ok((rec, out))
 }
 
 pub fn apply_gui(rec: &mut TaskRecord, patch: &GuiPatch) {
@@ -570,5 +630,64 @@ mod tests {
         let b = registry_filename("t", "/home/me/cnc/.fabric-space/tasks/t.md");
         assert_ne!(a, b);
         assert!(a.starts_with("t--") && a.ends_with(".yaml"));
+    }
+}
+
+#[cfg(test)]
+mod lock_tests {
+    use super::*;
+
+    fn sample(dir: &std::path::Path) -> (std::path::PathBuf, TaskRecord) {
+        let text = std::fs::read_to_string(
+            std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("../../fixtures/01-reminder/project/.fabric-space/tasks/2026-10-24-check-printer-firmware.md"),
+        )
+        .unwrap();
+        let rec = parse(&text).unwrap();
+        let path = dir.join(".fabric-space/tasks").join(format!("{}.md", rec.id));
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        write_record(&path, &rec, None).unwrap();
+        (path, rec)
+    }
+
+    #[test]
+    fn the_lock_file_sits_next_to_the_tasks_folder() {
+        let dir = tempfile::tempdir().unwrap();
+        let (path, _) = sample(dir.path());
+        assert_eq!(lock_path(&path), dir.path().join(".fabric-space/tasks.lock"));
+        assert!(lock_path(&path).exists());
+    }
+
+    #[test]
+    fn concurrent_read_modify_write_loses_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        let (path, _) = sample(dir.path());
+        let handles: Vec<_> = (0..8)
+            .map(|_| {
+                let path = path.clone();
+                std::thread::spawn(move || {
+                    for _ in 0..20 {
+                        modify_record(&path, "2026-10-25T00:00:00Z", |r| r.cost_usd += 1.0).unwrap();
+                    }
+                })
+            })
+            .collect();
+        for h in handles {
+            h.join().unwrap();
+        }
+        let rec = parse(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(rec.cost_usd, 160.0);
+        let leftovers: Vec<_> = std::fs::read_dir(path.parent().unwrap())
+            .unwrap()
+            .flatten()
+            .filter(|e| e.path().extension().is_some_and(|x| x == "tmp"))
+            .collect();
+        assert!(leftovers.is_empty());
+    }
+
+    #[test]
+    fn temp_names_are_unique_per_write() {
+        let p = std::path::Path::new("/x/.fabric-space/tasks/a.md");
+        assert_ne!(unique_tmp(p), unique_tmp(p));
     }
 }

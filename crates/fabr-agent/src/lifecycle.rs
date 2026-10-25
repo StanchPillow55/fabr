@@ -1,6 +1,9 @@
-use crate::link::{is_terminal, list_records, load_record, update_record};
+use crate::board::{Activity, Board, Extras};
+use crate::link::{list_records, load_record, update_record};
 use crate::model::Model;
 use crate::now_utc;
+use crate::state::{append_log, clean_message, is_terminal, pending_tail, question_open, stage_label, state_name};
+use crate::store::mutate;
 use crate::tools;
 use crate::verify::{self, CheckOutcome};
 use fabr_core::taskrec::{
@@ -8,10 +11,37 @@ use fabr_core::taskrec::{
 };
 use fabr_core::todo::Status;
 use fabr_core::{FabrError, NodeRef, SaveTodoReq, Workspace};
-use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::time::Duration;
+
+pub const MAX_STAGE_ERRORS: u32 = 3;
+pub const SUPPORTED_TOOLS: [&str; 3] = ["read_file", "write_file", "list_dir"];
+const TOOL_LINE_PREFIXES: [&str; 3] = ["read_file ", "write_file ", "list_dir "];
+
+pub struct Ctl {
+    pub board: Arc<Board>,
+    pub check_timeout_s: u64,
+}
+
+impl Ctl {
+    pub fn new(space: &Path, heartbeat_interval_s: u64) -> Ctl {
+        Ctl { board: Board::new(space, heartbeat_interval_s, None), check_timeout_s: verify::DEFAULT_CHECK_TIMEOUT_S }
+    }
+
+    pub fn with_board(board: Arc<Board>, check_timeout_s: u64) -> Ctl {
+        Ctl { board, check_timeout_s }
+    }
+}
 
 pub fn approval_allows_execute(rec: &TaskRecord) -> Result<(), FabrError> {
+    match check_approval(rec)? {
+        None => Ok(()),
+        Some(reason) => Err(FabrError::BadRequest(reason.into())),
+    }
+}
+
+fn check_approval(rec: &TaskRecord) -> Result<Option<&'static str>, FabrError> {
     let Some(approval) = &rec.approval else {
         return Err(FabrError::BadRequest("approval is missing".into()));
     };
@@ -19,29 +49,28 @@ pub fn approval_allows_execute(rec: &TaskRecord) -> Result<(), FabrError> {
         return Err(FabrError::BadRequest(format!("approval is {}", approval.status)));
     }
     if approval.by.as_deref() == Some("auto") && rec.plan_meta.as_ref().and_then(|m| m.reversibility.as_deref()) == Some("irreversible") {
-        return Err(FabrError::BadRequest("auto approval is not allowed for an irreversible plan".into()));
+        return Ok(Some("auto approval is not allowed for an irreversible plan"));
     }
-    unsupported_tools(rec)?;
-    let digest = approval_digest(rec);
-    if approval.digest.as_deref() != Some(digest.as_str()) {
-        return Err(FabrError::BadRequest("approval digest does not match the plan".into()));
+    if let Some(meta) = &rec.plan_meta {
+        validate_plan(meta)?;
     }
-    Ok(())
+    if approval.digest.as_deref() != Some(approval_digest(rec).as_str()) {
+        return Ok(Some("approval digest mismatch"));
+    }
+    Ok(None)
 }
 
-fn unsupported_tools(rec: &TaskRecord) -> Result<(), FabrError> {
-    let Some(meta) = &rec.plan_meta else {
-        return Ok(());
-    };
+pub fn validate_plan(meta: &PlanMeta) -> Result<(), FabrError> {
     for tool in &meta.tools {
-        if !matches!(tool.as_str(), "read_file" | "write_file" | "list_dir") {
+        if !SUPPORTED_TOOLS.contains(&tool.as_str()) {
             return Err(FabrError::BadRequest(format!("unsupported tool {tool}")));
         }
     }
+    if meta.checks.is_empty() {
+        return Err(FabrError::BadRequest("plan has no checks".into()));
+    }
     for check in &meta.checks {
-        if matches!(check.cmd.as_str(), "sh" | "bash" | "zsh" | "shell") {
-            return Err(FabrError::BadRequest(format!("unsupported tool {}", check.cmd)));
-        }
+        verify::validate_check(check)?;
     }
     Ok(())
 }
@@ -64,6 +93,90 @@ pub fn remove_registry(fabric_space: &Path, task_id: &str, task_path: &str) {
     }
 }
 
+pub fn write_registry(
+    fabric_space: &Path,
+    node_dir: &Path,
+    record_path: &Path,
+    rec: &TaskRecord,
+    heartbeat_interval_s: u64,
+) -> Result<(), FabrError> {
+    Board::new(fabric_space, heartbeat_interval_s, None).publish(node_dir, record_path, rec, Extras::default())
+}
+
+fn mark(ctl: &Ctl, node_dir: &Path, record_path: &Path, rec: &TaskRecord, activity: Activity) {
+    if let Err(e) = ctl.board.publish(node_dir, record_path, rec, Extras::doing(activity)) {
+        log::warn!("registry write failed for {}: {}", rec.id, e.message());
+    }
+}
+
+fn forget(ctl: &Ctl, rec: &TaskRecord, record_path: &Path) {
+    ctl.board.remove(&rec.id, &task_path_key(record_path));
+}
+
+pub struct ErrorLine {
+    pub at: String,
+    pub label: String,
+    pub count: u32,
+    pub message: String,
+}
+
+pub fn parse_error_line(line: &str) -> Option<ErrorLine> {
+    let line = line.strip_prefix("- ").unwrap_or(line);
+    let (at, rest) = line.split_once(' ')?;
+    let (label, tail) = rest.split_once(": ")?;
+    let tail = tail.strip_prefix("error ")?;
+    let (count, message) = tail.split_once(": ")?;
+    Some(ErrorLine { at: at.to_string(), label: label.to_string(), count: count.parse().ok()?, message: message.to_string() })
+}
+
+pub fn trailing_error(log: &str, label: &str) -> Option<ErrorLine> {
+    for line in log.lines().rev().filter(|l| !l.trim().is_empty()) {
+        if let Some(err) = parse_error_line(line) {
+            return (err.label == label).then_some(err);
+        }
+        let body = line.strip_prefix("- ").unwrap_or(line);
+        let is_tool_line = body
+            .split_once(' ')
+            .and_then(|(_, rest)| rest.strip_prefix(label))
+            .and_then(|rest| rest.strip_prefix(": "))
+            .is_some_and(|msg| TOOL_LINE_PREFIXES.iter().any(|p| msg.starts_with(p)));
+        if !is_tool_line {
+            return None;
+        }
+    }
+    None
+}
+
+fn stage_error(record_path: &Path, ctl: &Ctl, err: FabrError) -> Result<(), FabrError> {
+    let message = clean_message(&err.message(), 300);
+    let outcome = mutate(record_path, |r| {
+        let label = stage_label(r);
+        let count = trailing_error(&r.log, label).map_or(0, |e| e.count) + 1;
+        append_log(&mut r.log, label, &format!("error {count}: {message}"));
+        if count < MAX_STAGE_ERRORS {
+            return None;
+        }
+        r.state = State::Failed;
+        r.step = None;
+        r.waiting = false;
+        r.verdict = None;
+        r.requests.delegate = false;
+        append_log(&mut r.log, label, &format!("failed after {count} errors: {message}"));
+        Some(())
+    });
+    match outcome {
+        Ok((rec, Some(()))) => {
+            forget(ctl, &rec, record_path);
+            Ok(())
+        }
+        Ok((_, None)) => Err(err),
+        Err(write_err) => {
+            log::warn!("could not log the stage error on {}: {}", record_path.display(), write_err.message());
+            Err(err)
+        }
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 pub fn advance(
     ws: &Workspace,
@@ -75,24 +188,54 @@ pub fn advance(
     heartbeat_interval_s: u64,
     model: &impl Model,
 ) -> Result<(), FabrError> {
-    let mut rec = load_record(record_path)?;
-    let expected = rec.updated_at.clone();
-    if is_terminal(&rec) && !matches!(rec.step, Some(Step::Learn | Step::Notify)) {
-        remove_registry(fabric_space, &rec.id, &task_path_key(record_path));
+    let ctl = Ctl::new(fabric_space, heartbeat_interval_s);
+    advance_with(ws, source, node_path, node_dir, record_path, &ctl, model)
+}
+
+pub fn advance_with(
+    ws: &Workspace,
+    source: &str,
+    node_path: &str,
+    node_dir: &Path,
+    record_path: &Path,
+    ctl: &Ctl,
+    model: &impl Model,
+) -> Result<(), FabrError> {
+    let rec = load_record(record_path)?;
+    match step_once(ws, source, node_path, node_dir, record_path, ctl, model, rec) {
+        Ok(()) => Ok(()),
+        Err(err) => stage_error(record_path, ctl, err),
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn step_once(
+    ws: &Workspace,
+    source: &str,
+    node_path: &str,
+    node_dir: &Path,
+    record_path: &Path,
+    ctl: &Ctl,
+    model: &impl Model,
+    mut rec: TaskRecord,
+) -> Result<(), FabrError> {
+    let mut base = rec.clone();
+    if is_terminal(&rec) && !pending_tail(&rec) {
+        forget(ctl, &rec, record_path);
         return Ok(());
     }
     if rec.requests.redelegate {
         let state = state_name(rec.state);
         append_log(&mut rec.log, "notify", &format!("ignored request redelegate in state {state}"));
         rec.requests.redelegate = false;
-        let expected = persist(record_path, &mut rec, &expected)?;
-        let _ = expected;
-        return Ok(());
+        return persist(record_path, &mut rec, &mut base);
     }
     match rec.state {
         State::Reminder => {
             if rec.requests.cancel {
-                ignore_request(record_path, &mut rec, &expected, "cancel")?;
+                return ignore_request(record_path, &mut rec, &mut base, "cancel");
+            }
+            if !rec.requests.delegate {
                 return Ok(());
             }
             rec.requests.delegate = false;
@@ -100,19 +243,17 @@ pub fn advance(
             rec.step = Some(Step::Gather);
             rec.waiting = false;
             append_log(&mut rec.log, "task", "delegated");
-            persist(record_path, &mut rec, &expected)?;
-            project(ws, source, node_path, &rec, Status::Wip)?;
-            Ok(())
+            persist(record_path, &mut rec, &mut base)?;
+            project(ws, source, node_path, &rec, Status::Wip)
         }
         State::Task => match rec.step {
-            Some(Step::Define) => define_stage(record_path, &mut rec, &expected, model),
-            Some(Step::Plan) => plan_stage(ws, source, node_path, record_path, &mut rec, &expected, model, false),
-            _ => gather_stage(node_dir, record_path, &mut rec, &expected),
+            Some(Step::Define) => define_stage(node_dir, record_path, ctl, &mut rec, &mut base, model),
+            Some(Step::Plan) => plan_stage(ws, source, node_path, node_dir, record_path, ctl, &mut rec, &mut base, model, false),
+            _ => gather_stage(node_dir, record_path, ctl, &mut rec, &mut base),
         },
         State::Defined => {
             if rec.requests.cancel {
-                ignore_request(record_path, &mut rec, &expected, "cancel")?;
-                return Ok(());
+                return ignore_request(record_path, &mut rec, &mut base, "cancel");
             }
             let status = rec.approval.as_ref().map(|a| a.status.as_str()).unwrap_or("");
             if status == "refused" {
@@ -121,13 +262,22 @@ pub fn advance(
                     Some(n) => append_log(&mut rec.log, "approve", &format!("refused: {n}")),
                     None => append_log(&mut rec.log, "approve", "refused"),
                 }
-                return plan_stage(ws, source, node_path, record_path, &mut rec, &expected, model, true);
+                return plan_stage(ws, source, node_path, node_dir, record_path, ctl, &mut rec, &mut base, model, true);
             }
             if status != "approved" {
                 return Ok(());
             }
-            approval_allows_execute(&rec)?;
+            if let Some(reason) = check_approval(&rec)? {
+                let digest = approval_digest(&rec);
+                rec.approval = Some(Approval { status: "pending".into(), by: None, at: None, note: None, digest: Some(digest) });
+                rec.waiting = true;
+                append_log(&mut rec.log, "approve", &format!("{reason}, reset to pending"));
+                return persist(record_path, &mut rec, &mut base);
+            }
             if other_running(node_dir, record_path)? {
+                if let Err(e) = ctl.board.publish(node_dir, record_path, &rec, Extras::doing(Activity::Queued)) {
+                    log::warn!("registry write failed for {}: {}", rec.id, e.message());
+                }
                 log::info!("node already has an in_progress task");
                 return Ok(());
             }
@@ -135,57 +285,51 @@ pub fn advance(
             rec.step = Some(Step::Execute);
             rec.waiting = false;
             append_log(&mut rec.log, "execute", "started");
-            persist(record_path, &mut rec, &expected)?;
-            write_registry(fabric_space, node_dir, record_path, &rec, heartbeat_interval_s)?;
+            persist(record_path, &mut rec, &mut base)?;
+            mark(ctl, node_dir, record_path, &rec, Activity::Tool);
             project(ws, source, node_path, &rec, Status::Wip)
         }
         State::InProgress => match rec.step {
-            Some(Step::Evaluate) => finish_checks(ws, source, node_path, node_dir, record_path, &mut rec, &expected),
-            Some(Step::Learn) => {
-                rec.step = Some(Step::Notify);
-                append_log(&mut rec.log, "learn", "deferred");
-                persist(record_path, &mut rec, &expected)?;
-                Ok(())
-            }
-            Some(Step::Notify) => {
-                let result = state_name(rec.state);
-                append_log(&mut rec.log, "notify", &format!("result {result}"));
-                rec.step = None;
-                persist(record_path, &mut rec, &expected)?;
-                remove_registry(fabric_space, &rec.id, &task_path_key(record_path));
-                Ok(())
-            }
-            _ => execute_stage(node_dir, record_path, fabric_space, &mut rec, &expected, heartbeat_interval_s, model),
+            Some(Step::Evaluate) => finish_checks(ws, source, node_path, node_dir, record_path, ctl, &mut rec, &mut base),
+            Some(Step::Learn | Step::Notify) => tail_step(node_dir, record_path, ctl, &mut rec, &mut base),
+            _ => execute_stage(node_dir, record_path, ctl, &mut rec, &mut base, model),
         },
         State::Succeeded | State::Failed => match rec.step {
-            Some(Step::Learn) => {
-                rec.step = Some(Step::Notify);
-                append_log(&mut rec.log, "learn", "deferred");
-                persist(record_path, &mut rec, &expected)?;
-                Ok(())
-            }
-            Some(Step::Notify) => {
-                let result = state_name(rec.state);
-                append_log(&mut rec.log, "notify", &format!("result {result}"));
-                rec.step = None;
-                persist(record_path, &mut rec, &expected)?;
-                remove_registry(fabric_space, &rec.id, &task_path_key(record_path));
-                Ok(())
-            }
+            Some(Step::Learn | Step::Notify) => tail_step(node_dir, record_path, ctl, &mut rec, &mut base),
             _ => {
-                remove_registry(fabric_space, &rec.id, &task_path_key(record_path));
+                forget(ctl, &rec, record_path);
                 Ok(())
             }
         },
     }
 }
 
-fn gather_stage(node_dir: &Path, record_path: &Path, rec: &mut TaskRecord, expected: &str) -> Result<(), FabrError> {
+fn tail_step(node_dir: &Path, record_path: &Path, ctl: &Ctl, rec: &mut TaskRecord, base: &mut TaskRecord) -> Result<(), FabrError> {
+    if rec.step == Some(Step::Learn) {
+        rec.step = Some(Step::Notify);
+        append_log(&mut rec.log, "learn", "deferred");
+        persist(record_path, rec, base)?;
+        mark(ctl, node_dir, record_path, rec, Activity::Tool);
+        return Ok(());
+    }
+    let result = state_name(rec.state);
+    append_log(&mut rec.log, "notify", &format!("result {result}"));
+    rec.step = None;
+    persist(record_path, rec, base)?;
+    forget(ctl, rec, record_path);
+    Ok(())
+}
+
+fn gather_stage(node_dir: &Path, record_path: &Path, ctl: &Ctl, rec: &mut TaskRecord, base: &mut TaskRecord) -> Result<(), FabrError> {
+    let mut view = rec.clone();
+    view.step = Some(Step::Gather);
+    mark(ctl, node_dir, record_path, &view, Activity::Tool);
     append_gathered(&mut rec.context, &gather_bundle(node_dir));
     rec.step = Some(Step::Define);
     rec.waiting = false;
     append_log(&mut rec.log, "gather", "context bundle written");
-    persist(record_path, rec, expected)?;
+    persist(record_path, rec, base)?;
+    mark(ctl, node_dir, record_path, rec, Activity::Tool);
     Ok(())
 }
 
@@ -223,14 +367,76 @@ fn append_gathered(context: &mut String, bundle: &str) {
     context.push_str(bundle);
 }
 
-fn define_stage(record_path: &Path, rec: &mut TaskRecord, expected: &str, model: &impl Model) -> Result<(), FabrError> {
-    if rec.waiting && rec.question.as_ref().is_some_and(|q| q.answer.is_none()) {
+pub fn answers_text(rec: &TaskRecord) -> String {
+    let mut out = String::new();
+    let answered = rec.answers.iter().chain(rec.question.iter()).filter(|q| q.answer.is_some());
+    for q in answered {
+        out.push_str(&format!("\n\nAlready asked: {}\nUser answered: {}", q.text, reply_text(q)));
+    }
+    out
+}
+
+fn reply_text(q: &Question) -> String {
+    let Some(a) = q.answer.as_ref() else { return String::new() };
+    let mut parts = Vec::new();
+    if let Some(value) = a.value.as_deref().filter(|v| !v.is_empty()) {
+        parts.push(value.to_string());
+    }
+    if let Some(replacement) = a.replacement.as_deref().filter(|v| !v.is_empty()) {
+        parts.push(format!("use instead: {replacement}"));
+    }
+    if let Some(granted) = a.granted.as_ref().filter(|g| !g.is_empty()) {
+        let fields: Vec<String> = granted.iter().map(|g| format!("{} ({})", g.field, g.scope)).collect();
+        parts.push(format!("granted {}", fields.join(", ")));
+    }
+    let mut reply = parts.join("; ");
+    if q.kind == "choice"
+        && let Some(prior) = &q.prior
+    {
+        reply.push_str(&format!(" (earlier choice: {})", prior.text));
+    }
+    reply
+}
+
+pub fn context_with_answers(rec: &TaskRecord) -> String {
+    let mut out = rec.context.clone();
+    out.push_str(&answers_text(rec));
+    out
+}
+
+fn next_question_id(rec: &TaskRecord) -> String {
+    let highest = rec
+        .answers
+        .iter()
+        .chain(rec.question.iter())
+        .filter_map(|q| q.id.strip_prefix('q').and_then(|n| n.parse::<u32>().ok()))
+        .max()
+        .unwrap_or(0);
+    format!("q{}", highest + 1)
+}
+
+fn define_stage(
+    node_dir: &Path,
+    record_path: &Path,
+    ctl: &Ctl,
+    rec: &mut TaskRecord,
+    base: &mut TaskRecord,
+    model: &impl Model,
+) -> Result<(), FabrError> {
+    if rec.waiting && question_open(rec) {
         return Ok(());
     }
-    let draft = model.define(&rec.title, &rec.context)?;
+    if rec.question.as_ref().is_some_and(|q| q.answer.is_some())
+        && let Some(q) = rec.question.take()
+    {
+        rec.answers.push(q);
+    }
+    mark(ctl, node_dir, record_path, rec, Activity::Model);
+    let draft = model.define(&rec.title, &context_with_answers(rec))?;
     if let Some(text) = draft.question.filter(|q| !q.trim().is_empty()) {
+        let id = next_question_id(rec);
         rec.question = Some(Question {
-            id: "q1".into(),
+            id: id.clone(),
             kind: "open".into(),
             text,
             options: None,
@@ -241,8 +447,9 @@ fn define_stage(record_path: &Path, rec: &mut TaskRecord, expected: &str, model:
         });
         rec.waiting = true;
         rec.step = Some(Step::Define);
-        append_log(&mut rec.log, "define", "asked q1");
-        persist(record_path, rec, expected)?;
+        append_log(&mut rec.log, "define", &format!("asked {id}"));
+        persist(record_path, rec, base)?;
+        mark(ctl, node_dir, record_path, rec, Activity::Model);
         return Ok(());
     }
     if draft.spec.trim().is_empty() || draft.success.trim().is_empty() || draft.assertions.is_empty() {
@@ -251,11 +458,19 @@ fn define_stage(record_path: &Path, rec: &mut TaskRecord, expected: &str, model:
     rec.spec = draft.spec;
     rec.success = draft.success;
     rec.assertions = draft.assertions.into_iter().map(|a| Assertion { id: a.id, text: a.text }).collect();
+    let mut requested: Vec<String> = Vec::new();
+    for field in draft.grants {
+        if !requested.contains(&field) {
+            requested.push(field);
+        }
+    }
+    rec.grants.requested = requested;
     rec.question = None;
     rec.waiting = false;
     rec.step = Some(Step::Plan);
     append_log(&mut rec.log, "define", "spec written");
-    persist(record_path, rec, expected)?;
+    persist(record_path, rec, base)?;
+    mark(ctl, node_dir, record_path, rec, Activity::Model);
     Ok(())
 }
 
@@ -264,17 +479,29 @@ fn plan_stage(
     ws: &Workspace,
     source: &str,
     node_path: &str,
+    node_dir: &Path,
     record_path: &Path,
+    ctl: &Ctl,
     rec: &mut TaskRecord,
-    expected: &str,
+    base: &mut TaskRecord,
     model: &impl Model,
     refused: bool,
 ) -> Result<(), FabrError> {
     let note = if refused { rec.approval.as_ref().and_then(|a| a.note.clone()) } else { None };
-    let draft = model.plan(&rec.title, &rec.spec, &rec.success, note.as_deref())?;
+    let mut view = rec.clone();
+    view.step = Some(Step::Plan);
+    mark(ctl, node_dir, record_path, &view, Activity::Model);
+    let draft = model.plan(&rec.title, &rec.spec, &rec.success, note.as_deref(), &answers_text(rec))?;
     if draft.plan.trim().is_empty() || draft.checks.is_empty() {
         return Err(FabrError::BadRequest("plan is incomplete".into()));
     }
+    let meta = PlanMeta {
+        reversibility: Some(draft.reversibility),
+        tools: draft.tools,
+        assumptions: Vec::new(),
+        checks: draft.checks.into_iter().map(|c| Check { cmd: c.cmd, args: c.args }).collect(),
+    };
+    validate_plan(&meta)?;
     if !draft.spec.trim().is_empty() {
         rec.spec = draft.spec;
     }
@@ -285,29 +512,24 @@ fn plan_stage(
         rec.assertions = draft.assertions.into_iter().map(|a| Assertion { id: a.id, text: a.text }).collect();
     }
     rec.plan = draft.plan;
-    rec.plan_meta = Some(PlanMeta {
-        reversibility: Some(draft.reversibility),
-        tools: draft.tools,
-        assumptions: Vec::new(),
-        checks: draft.checks.into_iter().map(|c| Check { cmd: c.cmd, args: c.args }).collect(),
-    });
+    rec.plan_meta = Some(meta);
     let digest = approval_digest(rec);
     rec.approval = Some(Approval { status: "pending".into(), by: None, at: None, note: None, digest: Some(digest) });
     rec.state = State::Defined;
     rec.step = Some(Step::Approve);
     rec.waiting = true;
     append_log(&mut rec.log, "plan", if refused { "redrafted" } else { "plan written" });
-    persist(record_path, rec, expected)?;
+    persist(record_path, rec, base)?;
+    mark(ctl, node_dir, record_path, rec, Activity::Model);
     project(ws, source, node_path, rec, Status::Wip)
 }
 
 fn execute_stage(
     node_dir: &Path,
     record_path: &Path,
-    fabric_space: &Path,
+    ctl: &Ctl,
     rec: &mut TaskRecord,
-    expected: &str,
-    heartbeat_interval_s: u64,
+    base: &mut TaskRecord,
     model: &impl Model,
 ) -> Result<(), FabrError> {
     if rec.requests.cancel {
@@ -317,39 +539,47 @@ fn execute_stage(
         rec.waiting = false;
         rec.verdict = None;
         append_log(&mut rec.log, "execute", "cancelled by user");
-        persist(record_path, rec, expected)?;
-        remove_registry(fabric_space, &rec.id, &task_path_key(record_path));
+        persist(record_path, rec, base)?;
+        forget(ctl, rec, record_path);
         return Ok(());
     }
+    mark(ctl, node_dir, record_path, rec, Activity::Model);
     let calls = model.execute(&rec.title, &rec.spec, &rec.plan)?;
-    let mut expected = expected.to_string();
     for call in calls {
         if call.name == "write_file" && log_has_write(&rec.log, &call.path) {
             continue;
         }
+        mark(ctl, node_dir, record_path, rec, Activity::Tool);
         let message = apply_tool(node_dir, &call)?;
         append_log(&mut rec.log, "execute", &message);
-        expected = persist(record_path, rec, &expected)?;
-        write_registry(fabric_space, node_dir, record_path, rec, heartbeat_interval_s)?;
+        persist(record_path, rec, base)?;
+        mark(ctl, node_dir, record_path, rec, Activity::Tool);
+        if rec.requests.cancel {
+            return Ok(());
+        }
     }
     rec.step = Some(Step::Evaluate);
     rec.verdict = None;
     append_log(&mut rec.log, "execute", "tools finished");
-    persist(record_path, rec, &expected)?;
+    persist(record_path, rec, base)?;
+    mark(ctl, node_dir, record_path, rec, Activity::Check);
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn finish_checks(
     ws: &Workspace,
     source: &str,
     node_path: &str,
     node_dir: &Path,
     record_path: &Path,
+    ctl: &Ctl,
     rec: &mut TaskRecord,
-    expected: &str,
+    base: &mut TaskRecord,
 ) -> Result<(), FabrError> {
     let checks = rec.plan_meta.as_ref().map(|m| m.checks.clone()).unwrap_or_default();
-    let outcomes = verify::run_checks(node_dir, &checks)?;
+    mark(ctl, node_dir, record_path, rec, Activity::Check);
+    let outcomes = verify::run_checks(node_dir, &checks, Duration::from_secs(ctl.check_timeout_s))?;
     let items = verdict_items(node_dir, rec, &outcomes);
     let checks_pass = !outcomes.is_empty() && outcomes.iter().all(|o| o.pass);
     let pass = checks_pass && items.iter().all(|item| item.pass);
@@ -358,7 +588,8 @@ fn finish_checks(
     rec.step = Some(Step::Learn);
     rec.waiting = false;
     append_log(&mut rec.log, "evaluate", if pass { "verdict pass" } else { "verdict fail" });
-    persist(record_path, rec, expected)?;
+    persist(record_path, rec, base)?;
+    mark(ctl, node_dir, record_path, rec, Activity::Tool);
     project(ws, source, node_path, rec, if pass { Status::Done } else { Status::Wip })
 }
 
@@ -426,7 +657,7 @@ fn other_running(node_dir: &Path, current: &Path) -> Result<bool, FabrError> {
     Ok(list_records(node_dir)?.into_iter().any(|(path, rec)| rec.state == State::InProgress && task_path_key(&path) != current))
 }
 
-fn ignore_request(path: &Path, rec: &mut TaskRecord, expected: &str, key: &str) -> Result<String, FabrError> {
+fn ignore_request(path: &Path, rec: &mut TaskRecord, base: &mut TaskRecord, key: &str) -> Result<(), FabrError> {
     let state = state_name(rec.state);
     append_log(&mut rec.log, "notify", &format!("ignored request {key} in state {state}"));
     match key {
@@ -435,12 +666,11 @@ fn ignore_request(path: &Path, rec: &mut TaskRecord, expected: &str, key: &str) 
         "redelegate" => rec.requests.redelegate = false,
         _ => {}
     }
-    persist(path, rec, expected)
+    persist(path, rec, base)
 }
 
-fn persist(path: &Path, rec: &mut TaskRecord, expected: &str) -> Result<String, FabrError> {
-    update_record(path, rec, expected)?;
-    Ok(rec.updated_at.clone())
+fn persist(path: &Path, rec: &mut TaskRecord, base: &mut TaskRecord) -> Result<(), FabrError> {
+    update_record(path, rec, base)
 }
 
 fn project(ws: &Workspace, source: &str, node_path: &str, rec: &TaskRecord, status: Status) -> Result<(), FabrError> {
@@ -471,119 +701,62 @@ fn project(ws: &Workspace, source: &str, node_path: &str, rec: &TaskRecord, stat
     Err(FabrError::Conflict { message: "todo changed while projecting status".into(), node: None })
 }
 
-pub(crate) fn append_log(log: &mut String, step: &str, message: &str) {
-    if !log.is_empty() && !log.ends_with('\n') {
-        log.push('\n');
-    }
-    let _ = writeln!(log, "- {} {step}: {message}", now_utc());
-}
+#[cfg(test)]
+mod answers_in_context {
+    use super::*;
+    use fabr_core::taskrec::{Answer, Grant, Prior};
 
-fn state_name(state: State) -> &'static str {
-    match state {
-        State::Reminder => "reminder",
-        State::Task => "task",
-        State::Defined => "defined",
-        State::InProgress => "in_progress",
-        State::Succeeded => "succeeded",
-        State::Failed => "failed",
-    }
-}
-
-pub fn write_registry(
-    fabric_space: &Path,
-    node_dir: &Path,
-    record_path: &Path,
-    rec: &TaskRecord,
-    heartbeat_interval_s: u64,
-) -> Result<(), FabrError> {
-    let task_path = task_path_key(record_path);
-    let path = registry_path(fabric_space, &rec.id, &task_path);
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    let now = now_utc();
-    let started = read_started(&path).unwrap_or_else(|| now.clone());
-    let folder = node_dir.canonicalize().unwrap_or_else(|_| node_dir.to_path_buf());
-    let step = rec.step.map(step_name);
-    let mut body = String::new();
-    let _ = writeln!(body, "task_path: {}", yaml_quote(&task_path));
-    let _ = writeln!(body, "task_id: {}", yaml_quote(&rec.id));
-    let _ = writeln!(body, "folder: {}", yaml_quote(&folder.to_string_lossy()));
-    match step {
-        Some(step) => {
-            let _ = writeln!(body, "step: {step}");
-        }
-        None => body.push_str("step: null\n"),
-    }
-    let _ = writeln!(body, "started_at: {}", yaml_quote(&started));
-    let _ = writeln!(body, "heartbeat_at: {}", yaml_quote(&now));
-    let _ = writeln!(body, "heartbeat_interval_s: {heartbeat_interval_s}");
-    let _ = writeln!(body, "cost_usd: {}", format_cost(rec.cost_usd));
-    let tail = log_tail(&rec.log);
-    if tail.is_empty() {
-        body.push_str("log_tail: []\n");
-    } else {
-        body.push_str("log_tail:\n");
-        for line in tail {
-            let _ = writeln!(body, "  - {}", yaml_quote(&line));
+    fn answered(id: &str, kind: &str, text: &str, answer: Answer) -> Question {
+        Question {
+            id: id.into(),
+            kind: kind.into(),
+            text: text.into(),
+            options: None,
+            prior: None,
+            fields: None,
+            asked_at: None,
+            answer: Some(answer),
         }
     }
-    let _ = writeln!(body, "question: {}", question_yaml(rec));
-    let _ = writeln!(body, "pid: {}", std::process::id());
-    std::fs::write(&path, body).map_err(|e| FabrError::Io(format!("{}: {e}", path.display())))
-}
 
-fn question_yaml(rec: &TaskRecord) -> String {
-    match &rec.question {
-        None => "null".into(),
-        Some(q) => serde_json::to_string(q).unwrap_or_else(|_| "null".into()),
+    fn answer(value: Option<&str>) -> Answer {
+        Answer { value: value.map(Into::into), replacement: None, granted: None, by: Some("gui".into()), at: None }
     }
-}
 
-fn log_tail(log: &str) -> Vec<String> {
-    let lines: Vec<String> = log.lines().filter(|l| !l.trim().is_empty()).map(|l| l.strip_prefix("- ").unwrap_or(l).to_string()).collect();
-    let start = lines.len().saturating_sub(20);
-    lines[start..].to_vec()
-}
-
-fn read_started(path: &Path) -> Option<String> {
-    let text = std::fs::read_to_string(path).ok()?;
-    for line in text.lines() {
-        let rest = line.strip_prefix("started_at:")?.trim().trim_matches('"');
-        if !rest.is_empty() {
-            return Some(rest.to_string());
-        }
+    #[test]
+    fn choice_answers_carry_the_prior_and_grant_answers_carry_the_fields() {
+        let mut rec = crate::link::new_reminder(
+            "t",
+            "",
+            "",
+            &fabr_core::todo::Item { id: None, status: Status::Todo, due: None, title: "order".into(), pri: None },
+        );
+        rec.context = "base context".into();
+        let mut choice = answered("q1", "choice", "Reuse the shop?", answer(Some("always")));
+        choice.prior = Some(Prior { text: "shop.example.test".into(), source_task: None, last_confirmed: None });
+        let mut no = answered("q2", "choice", "Reuse the size?", answer(Some("no")));
+        no.answer.as_mut().unwrap().replacement = Some("2 kg".into());
+        let mut grant = answered("q3", "grant", "May I fill the address?", answer(None));
+        grant.answer.as_mut().unwrap().granted = Some(vec![Grant { field: "address.zip".into(), scope: "task".into() }]);
+        rec.answers = vec![choice, no];
+        rec.question = Some(grant);
+        let ctx = context_with_answers(&rec);
+        assert!(ctx.starts_with("base context"));
+        assert!(ctx.contains("Already asked: Reuse the shop?\nUser answered: always (earlier choice: shop.example.test)"), "{ctx}");
+        assert!(ctx.contains("User answered: no; use instead: 2 kg"), "{ctx}");
+        assert!(ctx.contains("User answered: granted address.zip (task)"), "{ctx}");
     }
-    None
-}
 
-fn step_name(step: Step) -> &'static str {
-    match step {
-        Step::Gather => "gather",
-        Step::Define => "define",
-        Step::Plan => "plan",
-        Step::Approve => "approve",
-        Step::Execute => "execute",
-        Step::Evaluate => "evaluate",
-        Step::Learn => "learn",
-        Step::Notify => "notify",
+    #[test]
+    fn question_ids_do_not_repeat() {
+        let mut rec = crate::link::new_reminder(
+            "t",
+            "",
+            "",
+            &fabr_core::todo::Item { id: None, status: Status::Todo, due: None, title: "order".into(), pri: None },
+        );
+        assert_eq!(next_question_id(&rec), "q1");
+        rec.answers = vec![answered("q1", "open", "a?", answer(Some("x"))), answered("q2", "open", "b?", answer(Some("y")))];
+        assert_eq!(next_question_id(&rec), "q3");
     }
-}
-
-fn format_cost(n: f64) -> String {
-    if n.fract() == 0.0 && n.is_finite() && n.abs() < 1e15 { format!("{}", n as i64) } else { format!("{n}") }
-}
-
-fn yaml_quote(s: &str) -> String {
-    let mut out = String::from("\"");
-    for c in s.chars() {
-        match c {
-            '\\' => out.push_str("\\\\"),
-            '"' => out.push_str("\\\""),
-            '\n' => out.push_str("\\n"),
-            c => out.push(c),
-        }
-    }
-    out.push('"');
-    out
 }

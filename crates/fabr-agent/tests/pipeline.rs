@@ -66,6 +66,23 @@ fn load(path: &Path) -> taskrec::TaskRecord {
     taskrec::parse(&std::fs::read_to_string(path).unwrap()).unwrap()
 }
 
+fn edit(path: &Path, f: impl FnOnce(&mut TaskRecord)) {
+    let mut rec = load(path);
+    let expected = rec.updated_at.clone();
+    f(&mut rec);
+    taskrec::write_record(path, &rec, Some(&expected)).unwrap();
+}
+
+fn save_one(ws: &Workspace, title: &str) {
+    ws.save_todo(SaveTodoReq {
+        source: "local".into(),
+        path: String::new(),
+        version: ws.get_node(NodeRef { source: "local".into(), path: String::new() }).unwrap().version.unwrap(),
+        items: vec![item(title)],
+    })
+    .unwrap();
+}
+
 fn approve(path: &Path) {
     let mut rec = load(path);
     let approval = rec.approval.as_mut().unwrap();
@@ -86,6 +103,8 @@ fn fixture_gather_persists_through_the_record_writer() {
     let rec = taskrec::parse(&text).unwrap();
     let path = root.join(".fabric-space").join("tasks").join(format!("{}.md", rec.id));
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    let mut rec = rec;
+    rec.requests.delegate = true;
     taskrec::write_record(&path, &rec, None).unwrap();
     let model = ScriptedModel::new(greet_plan(), vec![write_call()]);
     advance(&ws, "local", "", &root, &path, &root, 10, &model).unwrap();
@@ -181,24 +200,31 @@ fn define_question_pauses_without_a_new_state() {
 }
 
 #[test]
-fn unsupported_tool_does_not_execute() {
+fn unsupported_tool_is_rejected_when_the_plan_is_written() {
     let (_tmp, fabric, ws) = setup();
     let root = ws.local_path(&NodeRef { source: "local".into(), path: String::new() }).unwrap();
     let model = ScriptedModel::new(draft("1. Open the shop", &["browser"], ("test", &["-f", "greet.txt"])), vec![write_call()]);
-    ws.save_todo(SaveTodoReq {
-        source: "local".into(),
-        path: String::new(),
-        version: ws.get_node(NodeRef { source: "local".into(), path: String::new() }).unwrap().version.unwrap(),
-        items: vec![item("browse")],
-    })
-    .unwrap();
-    run_once(&ws, "local", "", &fabric, &model).unwrap();
-    let path = record_path(&root);
-    approve(&path);
+    save_one(&ws, "browse");
     let err = run_once(&ws, "local", "", &fabric, &model).unwrap_err();
     assert!(err.message().contains("unsupported tool browser"));
+    let path = record_path(&root);
+    let rec = load(&path);
+    assert_eq!((rec.state, rec.step), (State::Task, Some(Step::Plan)));
+    assert!(rec.approval.is_none());
+    assert!(rec.log.contains("plan: error 1: unsupported tool browser"), "{}", rec.log);
     assert_eq!(model.execute_count(), 0);
-    assert_eq!(load(&path).state, State::Defined);
+}
+
+#[test]
+fn a_shell_or_interpreter_check_is_rejected_when_the_plan_is_written() {
+    for (cmd, args) in [("sh", vec!["-c", "id"]), ("env", vec!["sh"]), ("python3", vec!["-c", "1"]), ("cat", vec!["/etc/passwd"])] {
+        let (_tmp, fabric, ws) = setup();
+        let root = ws.local_path(&NodeRef { source: "local".into(), path: String::new() }).unwrap();
+        let model = ScriptedModel::new(draft("1. check", &["write_file"], (cmd, &args)), vec![write_call()]);
+        save_one(&ws, "check");
+        assert!(run_once(&ws, "local", "", &fabric, &model).is_err(), "{cmd}");
+        assert!(load(&record_path(&root)).approval.is_none(), "{cmd}");
+    }
 }
 
 #[test]
@@ -239,9 +265,15 @@ fn approval_refuses_pending_refused_and_stale_digest() {
     stale.plan.push_str("\nextra");
     let expected = stale.updated_at.clone();
     taskrec::write_record(&path, &stale, Some(&expected)).unwrap();
-    let err = advance(&ws, "local", "", &root, &path, &fabric, 10, &model).unwrap_err();
-    assert!(err.message().contains("digest"));
-    assert_eq!(load(&path).state, State::Defined);
+    advance(&ws, "local", "", &root, &path, &fabric, 10, &model).unwrap();
+    let reset = load(&path);
+    assert_eq!(reset.state, State::Defined);
+    assert_eq!(reset.approval.as_ref().unwrap().status, "pending");
+    assert_eq!(reset.approval.as_ref().unwrap().digest.as_deref(), Some(taskrec::approval_digest(&reset).as_str()));
+    assert!(reset.waiting);
+    assert!(reset.log.contains("approval digest mismatch, reset to pending"), "{}", reset.log);
+    advance(&ws, "local", "", &root, &path, &fabric, 10, &model).unwrap();
+    assert_eq!(load(&path).log.matches("approval digest mismatch").count(), 1);
     assert_eq!(model.execute_count(), 0);
 }
 
@@ -347,6 +379,7 @@ fn reminder_without_a_todo_still_runs() {
     let root = ws.local_path(&NodeRef { source: "local".into(), path: String::new() }).unwrap();
     let path = open_reminder(&root, "standalone").unwrap();
     assert!(load(&path).source.is_none());
+    edit(&path, |r| r.requests.delegate = true);
     let model = ScriptedModel::new(greet_plan(), vec![write_call()]);
     run_once(&ws, "local", "", &fabric, &model).unwrap();
     let rec = load(&path);
@@ -435,7 +468,13 @@ fn ten_fixtures_one_stage_matches_fabric_updated_at() {
         let dest = root.join(".fabric-space").join("tasks").join(format!("{}.md", original.id));
         std::fs::create_dir_all(dest.parent().unwrap()).unwrap();
         taskrec::write_record(&dest, &original, None).unwrap();
-        let before = load(&dest);
+        let mut before = load(&dest);
+        if before.state == State::Reminder {
+            before.requests.delegate = true;
+            let expected = before.updated_at.clone();
+            taskrec::write_record(&dest, &before, Some(&expected)).unwrap();
+            before = load(&dest);
+        }
         let model = ScriptedModel::new(greet_plan(), Vec::new());
         if !waiting_on_question(&before) && !waiting_on_approval(&before) {
             advance(&ws, "local", "", &root, &dest, &fabric_space, 10, &model).unwrap();
@@ -489,16 +528,6 @@ fn ten_fixtures_one_stage_matches_fabric_updated_at() {
             }
         }
     }
-}
-
-fn save_one(ws: &Workspace, title: &str) {
-    ws.save_todo(SaveTodoReq {
-        source: "local".into(),
-        path: String::new(),
-        version: ws.get_node(NodeRef { source: "local".into(), path: String::new() }).unwrap().version.unwrap(),
-        items: vec![item(title)],
-    })
-    .unwrap();
 }
 
 fn gui_write(path: &Path, rec: &TaskRecord, expected: &str) {
@@ -595,4 +624,291 @@ fn gui_refusal_redrafts_without_executing() {
     assert!(redrafted.plan.contains("differently"));
     assert_eq!(model.execute_count(), 0);
     assert!(!root.join("greet.txt").exists());
+}
+
+struct Broken;
+
+impl fabr_agent::Model for Broken {
+    fn define(&self, _: &str, _: &str) -> Result<fabr_agent::DefineDraft, fabr_core::FabrError> {
+        Err(fabr_core::FabrError::Remote("model said no, key sk-ant-api03-FAKEFAKEFAKEFAKEFAKE-x9Qa".into()))
+    }
+
+    fn plan(&self, _: &str, _: &str, _: &str, _: Option<&str>, _: &str) -> Result<fabr_agent::PlanDraft, fabr_core::FabrError> {
+        Err(fabr_core::FabrError::Remote("no plan".into()))
+    }
+
+    fn execute(&self, _: &str, _: &str, _: &str) -> Result<Vec<ToolCall>, fabr_core::FabrError> {
+        Err(fabr_core::FabrError::Remote("no execute".into()))
+    }
+}
+
+fn delegated(ws: &Workspace, root: &Path) -> PathBuf {
+    let path = open_reminder(root, "job").unwrap();
+    let _ = ws;
+    edit(&path, |r| r.requests.delegate = true);
+    path
+}
+
+#[test]
+fn a_reminder_without_a_delegate_request_is_not_touched() {
+    let (_tmp, fabric, ws) = setup();
+    let root = ws.local_path(&NodeRef { source: "local".into(), path: String::new() }).unwrap();
+    let path = open_reminder(&root, "idle").unwrap();
+    let before = std::fs::read_to_string(&path).unwrap();
+    let model = ScriptedModel::new(greet_plan(), vec![write_call()]);
+    advance(&ws, "local", "", &root, &path, &fabric, 10, &model).unwrap();
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), before);
+    run_once(&ws, "local", "", &fabric, &model).unwrap();
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), before);
+}
+
+#[test]
+fn three_errors_on_one_step_fail_the_task_with_the_reason_in_the_log() {
+    let (_tmp, fabric, ws) = setup();
+    let root = ws.local_path(&NodeRef { source: "local".into(), path: String::new() }).unwrap();
+    let path = delegated(&ws, &root);
+    advance(&ws, "local", "", &root, &path, &fabric, 10, &Broken).unwrap();
+    advance(&ws, "local", "", &root, &path, &fabric, 10, &Broken).unwrap();
+    for n in 1..=3 {
+        let err = advance(&ws, "local", "", &root, &path, &fabric, 10, &Broken);
+        let rec = load(&path);
+        if n < 3 {
+            assert!(err.is_err());
+            assert_eq!((rec.state, rec.step), (State::Task, Some(Step::Define)));
+            assert!(rec.log.contains(&format!("define: error {n}:")), "{}", rec.log);
+        } else {
+            assert!(err.is_ok());
+            assert_eq!((rec.state, rec.step), (State::Failed, None));
+            assert!(rec.verdict.is_none());
+            assert!(!rec.waiting);
+            assert!(rec.log.contains("define: failed after 3 errors: model said no"), "{}", rec.log);
+        }
+        assert!(!rec.log.contains("FAKEFAKE"), "{}", rec.log);
+    }
+    let again = load(&path);
+    advance(&ws, "local", "", &root, &path, &fabric, 10, &Broken).unwrap();
+    assert_eq!(load(&path).log, again.log);
+}
+
+#[test]
+fn a_gui_write_between_read_and_write_is_folded_in() {
+    let (_tmp, fabric, ws) = setup();
+    let root = ws.local_path(&NodeRef { source: "local".into(), path: String::new() }).unwrap();
+    let path = delegated(&ws, &root);
+    let model = ScriptedModel::with_question(greet_plan(), "Which filename?");
+    for _ in 0..3 {
+        advance(&ws, "local", "", &root, &path, &fabric, 10, &model).unwrap();
+    }
+    let mut mine = load(&path);
+    let mut base = mine.clone();
+    assert!(mine.question.is_some());
+
+    let answer = taskrec::Answer {
+        value: Some("greet.txt".into()),
+        replacement: None,
+        granted: None,
+        by: Some("gui".into()),
+        at: Some("2026-10-24T18:05:02Z".into()),
+    };
+    edit(&path, |r| {
+        r.requests.cancel = true;
+        r.question.as_mut().unwrap().answer = Some(answer.clone());
+        r.grants.granted = vec![taskrec::Grant { field: "address.zip".into(), scope: "task".into() }];
+        r.approval =
+            Some(taskrec::Approval { status: "approved".into(), by: Some("gui".into()), at: None, note: None, digest: Some("x".into()) });
+    });
+
+    fabr_agent::state::append_log(&mut mine.log, "define", "stale stage wrote this");
+    mine.spec = "new spec".into();
+    fabr_agent::store::update(&path, &mut mine, &mut base).unwrap();
+
+    let disk = load(&path);
+    assert!(disk.requests.cancel);
+    assert_eq!(disk.question.as_ref().unwrap().answer.as_ref(), Some(&answer));
+    assert_eq!(disk.grants.granted.len(), 1);
+    assert_eq!(disk.approval.as_ref().unwrap().status, "approved");
+    assert_eq!(disk.spec, "new spec");
+    assert!(disk.log.contains("stale stage wrote this"));
+    assert_eq!(mine, disk);
+}
+
+struct CancelsMidRun {
+    path: PathBuf,
+}
+
+impl fabr_agent::Model for CancelsMidRun {
+    fn define(&self, _: &str, _: &str) -> Result<fabr_agent::DefineDraft, fabr_core::FabrError> {
+        unreachable!()
+    }
+
+    fn plan(&self, _: &str, _: &str, _: &str, _: Option<&str>, _: &str) -> Result<fabr_agent::PlanDraft, fabr_core::FabrError> {
+        unreachable!()
+    }
+
+    fn execute(&self, _: &str, _: &str, _: &str) -> Result<Vec<ToolCall>, fabr_core::FabrError> {
+        edit(&self.path, |r| r.requests.cancel = true);
+        let call = |name: &str| ToolCall { name: "write_file".into(), path: name.into(), content: Some("x".into()) };
+        Ok(vec![call("first.txt"), call("second.txt")])
+    }
+}
+
+#[test]
+fn a_cancel_that_lands_during_execute_survives_the_per_call_persist() {
+    let (_tmp, fabric, ws) = setup();
+    let root = ws.local_path(&NodeRef { source: "local".into(), path: String::new() }).unwrap();
+    let path = delegated(&ws, &root);
+    edit(&path, |r| {
+        r.state = State::InProgress;
+        r.step = Some(Step::Execute);
+        r.plan = "1. write".into();
+    });
+    let model = CancelsMidRun { path: path.clone() };
+    advance(&ws, "local", "", &root, &path, &fabric, 10, &model).unwrap();
+    let rec = load(&path);
+    assert!(rec.requests.cancel, "cancel was erased");
+    assert_eq!(rec.state, State::InProgress);
+    assert!(root.join("first.txt").exists());
+    assert!(!root.join("second.txt").exists());
+    advance(&ws, "local", "", &root, &path, &fabric, 10, &model).unwrap();
+    let rec = load(&path);
+    assert_eq!(rec.state, State::Failed);
+    assert!(!rec.requests.cancel);
+    assert!(rec.log.contains("cancelled by user"));
+    assert!(rec.verdict.is_none());
+}
+
+#[test]
+fn a_hung_check_is_killed_and_counted_as_a_stage_error() {
+    let (_tmp, fabric, ws) = setup();
+    let root = ws.local_path(&NodeRef { source: "local".into(), path: String::new() }).unwrap();
+    std::fs::write(root.join("greet.txt"), "hi").unwrap();
+    let path = delegated(&ws, &root);
+    edit(&path, |r| {
+        r.state = State::InProgress;
+        r.step = Some(Step::Evaluate);
+        r.plan_meta = Some(taskrec::PlanMeta {
+            reversibility: Some("reversible".into()),
+            tools: vec![],
+            assumptions: vec![],
+            checks: vec![taskrec::Check { cmd: "tail".into(), args: vec!["-f".into(), "greet.txt".into()] }],
+        });
+    });
+    let model = ScriptedModel::new(greet_plan(), vec![]);
+    let mut ctl = fabr_agent::Ctl::new(&fabric, 10);
+    ctl.check_timeout_s = 1;
+    let started = std::time::Instant::now();
+    let err = fabr_agent::advance_with(&ws, "local", "", &root, &path, &ctl, &model).unwrap_err();
+    assert!(started.elapsed() < std::time::Duration::from_secs(10));
+    assert!(err.message().contains("timed out"), "{}", err.message());
+    let rec = load(&path);
+    assert_eq!((rec.state, rec.step), (State::InProgress, Some(Step::Evaluate)));
+    assert!(rec.log.contains("evaluate: error 1: check timed out"), "{}", rec.log);
+}
+
+#[derive(Default)]
+struct Recording {
+    inner: Option<ScriptedModel>,
+    define_contexts: std::sync::Mutex<Vec<String>>,
+    plan_answers: std::sync::Mutex<Vec<String>>,
+}
+
+impl fabr_agent::Model for Recording {
+    fn define(&self, title: &str, context: &str) -> Result<fabr_agent::DefineDraft, fabr_core::FabrError> {
+        self.define_contexts.lock().unwrap().push(context.to_string());
+        self.inner.as_ref().unwrap().define(title, context)
+    }
+
+    fn plan(&self, t: &str, s: &str, c: &str, n: Option<&str>, a: &str) -> Result<fabr_agent::PlanDraft, fabr_core::FabrError> {
+        self.plan_answers.lock().unwrap().push(a.to_string());
+        self.inner.as_ref().unwrap().plan(t, s, c, n, a)
+    }
+
+    fn execute(&self, t: &str, s: &str, p: &str) -> Result<Vec<ToolCall>, fabr_core::FabrError> {
+        self.inner.as_ref().unwrap().execute(t, s, p)
+    }
+}
+
+#[test]
+fn the_users_answer_reaches_define_and_plan() {
+    let (_tmp, fabric, ws) = setup();
+    let root = ws.local_path(&NodeRef { source: "local".into(), path: String::new() }).unwrap();
+    let path = delegated(&ws, &root);
+    let model = Recording { inner: Some(ScriptedModel::with_question(greet_plan(), "Which filename?")), ..Recording::default() };
+    for _ in 0..3 {
+        advance(&ws, "local", "", &root, &path, &fabric, 10, &model).unwrap();
+    }
+    let asked = load(&path);
+    assert_eq!(asked.question.as_ref().unwrap().id, "q1");
+    edit(&path, |r| {
+        r.question.as_mut().unwrap().answer = Some(taskrec::Answer {
+            value: Some("call it hello-42.txt".into()),
+            replacement: None,
+            granted: None,
+            by: Some("gui".into()),
+            at: None,
+        });
+    });
+    advance(&ws, "local", "", &root, &path, &fabric, 10, &model).unwrap();
+    advance(&ws, "local", "", &root, &path, &fabric, 10, &model).unwrap();
+    let contexts = model.define_contexts.lock().unwrap().clone();
+    assert_eq!(contexts.len(), 2);
+    assert!(!contexts[0].contains("User answered"));
+    assert!(contexts[1].contains("Already asked: Which filename?\nUser answered: call it hello-42.txt"), "{}", contexts[1]);
+    let plans = model.plan_answers.lock().unwrap().clone();
+    assert_eq!(plans.len(), 1);
+    assert!(plans[0].contains("User answered: call it hello-42.txt"), "{}", plans[0]);
+    let done = load(&path);
+    assert_eq!(done.answers.len(), 1);
+    assert_eq!(done.state, State::Defined);
+}
+
+fn registry_step(fabric: &Path) -> Option<(String, String)> {
+    let entry = std::fs::read_dir(fabric.join("registry"))
+        .ok()?
+        .flatten()
+        .map(|e| e.path())
+        .find(|p| p.extension().is_some_and(|e| e == "yaml"))?;
+    let doc: serde_yaml::Value = serde_yaml::from_str(&std::fs::read_to_string(entry).unwrap()).unwrap();
+    Some((doc["state"].as_str().unwrap().to_string(), doc["step"].as_str().unwrap().to_string()))
+}
+
+#[test]
+fn the_registry_step_is_never_stale_through_evaluate_learn_and_notify() {
+    let (_tmp, fabric, ws) = setup();
+    let root = ws.local_path(&NodeRef { source: "local".into(), path: String::new() }).unwrap();
+    let model = ScriptedModel::new(greet_plan(), vec![write_call()]);
+    save_one(&ws, "track steps");
+    run_once(&ws, "local", "", &fabric, &model).unwrap();
+    let path = record_path(&root);
+    assert_eq!(registry_step(&fabric), Some(("defined".into(), "approve".into())));
+    approve(&path);
+    let mut seen = Vec::new();
+    for _ in 0..6 {
+        advance(&ws, "local", "", &root, &path, &fabric, 10, &model).unwrap();
+        seen.push(registry_step(&fabric));
+    }
+    let step = |s: &str, t: &str| Some((s.to_string(), t.to_string()));
+    assert_eq!(
+        seen,
+        vec![
+            step("in_progress", "execute"),
+            step("in_progress", "evaluate"),
+            step("succeeded", "learn"),
+            step("succeeded", "notify"),
+            None,
+            None
+        ]
+    );
+}
+
+#[test]
+fn define_sets_the_requested_grants() {
+    let (_tmp, fabric, ws) = setup();
+    let root = ws.local_path(&NodeRef { source: "local".into(), path: String::new() }).unwrap();
+    let model = ScriptedModel::new(greet_plan(), vec![write_call()]).with_grants(&["address.zip", "address.zip", "name.first"]);
+    save_one(&ws, "needs data");
+    run_once(&ws, "local", "", &fabric, &model).unwrap();
+    let rec = load(&record_path(&root));
+    assert_eq!(rec.grants.requested, vec!["address.zip".to_string(), "name.first".to_string()]);
+    assert!(rec.grants.granted.is_empty());
 }

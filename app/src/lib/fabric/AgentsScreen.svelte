@@ -1,95 +1,126 @@
 <script lang="ts">
   import Button from '../ui/Button.svelte';
-  import { ageSeconds, elapsedSeconds, formatDuration, isDead, sortEntries, type RegistryEntry } from './agents';
+  import { formatDuration } from './agents';
+  import StageBar from './StageBar.svelte';
+  import { GROUPS, GROUP_LABEL, STAGES, groupOf, sinceSeconds, sortAgents, statusOf, type AgentView } from './stage';
+  import { folderName } from './folder';
 
-  let { entries, now, titleFor, oncancel, onopen }: {
-    entries: RegistryEntry[];
+  let { agents, now, detail = false, oncancel, onopen }: {
+    agents: AgentView[];
     now: Date | string;
-    titleFor?: (taskPath: string) => string | undefined;
+    detail?: boolean;
     oncancel?: (taskPath: string) => void;
-    onopen?: (taskPath: string) => void;
+    onopen?: (recordPath: string) => void;
   } = $props();
 
   let requested = $state<string[]>([]);
   let expanded = $state<string[]>([]);
 
-  const sorted = $derived(sortEntries(entries));
-  const present = $derived(new Set(entries.map((e) => e.task_path)));
+  const sorted = $derived(sortAgents(agents));
+  const present = $derived(new Set(agents.map((v) => v.path)));
   const isRequested = (p: string) => requested.includes(p) && present.has(p);
+  const canCancel = (v: AgentView) => v.stage === 'execute' || v.stage === 'evaluate';
 
   $effect(() => {
     const gone = requested.filter((p) => !present.has(p));
     if (gone.length) requested = requested.filter((p) => present.has(p));
   });
 
-  function cancel(p: string) {
-    requested = [...requested, p];
-    oncancel?.(p);
+  function cancel(v: AgentView) {
+    requested = [...requested, v.path];
+    oncancel?.(v.path);
   }
   function toggle(p: string) {
     expanded = expanded.includes(p) ? expanded.filter((x) => x !== p) : [...expanded, p];
   }
-  const questionText = (e: RegistryEntry) => (e.question && typeof e.question.text === 'string' ? e.question.text : null);
+  const questionText = (v: AgentView) => (v.entry?.question && typeof v.entry.question.text === 'string' ? v.entry.question.text : null);
+  const usageRows = (v: AgentView) => STAGES.filter((s) => v.stageUsage?.[s]).map((s) => ({ stage: s, ...v.stageUsage![s] }));
 </script>
 
 <section class="agents" aria-label="Agents">
   {#if sorted.length === 0}
     <p class="agents__empty">No agents running</p>
-  {:else}
+  {:else if detail}
     <ul class="agents__rows">
-      {#each sorted as e (e.task_path)}
-        {@const dead = isDead(e, now)}
-        {@const open = expanded.includes(e.task_path)}
-        {@const lines = open ? e.log_tail : e.log_tail.slice(-3)}
-        <li class="arow" class:arow--dead={dead} data-testid="agent-row">
-          <header class="arow__head">
-            <button type="button" class="arow__title" onclick={() => onopen?.(e.task_path)}>{titleFor?.(e.task_path) || e.task_id}</button>
-            {#if dead}<span class="arow__dead">Dead {formatDuration(ageSeconds(e, now))}</span>{/if}
-          </header>
-          <dl class="arow__meta">
-            <div><dt>Folder</dt><dd>{e.folder}</dd></div>
-            <div><dt>Step</dt><dd>{e.step}</dd></div>
-            <div><dt>Elapsed</dt><dd>{formatDuration(elapsedSeconds(e, now))}</dd></div>
-            <div><dt>Cost</dt><dd>${e.cost_usd.toFixed(2)}</dd></div>
-            <div><dt>Heartbeat</dt><dd>{formatDuration(ageSeconds(e, now))} ago</dd></div>
-          </dl>
-          {#if questionText(e)}<p class="arow__question">{questionText(e)}</p>{/if}
+      {#each sorted as v (v.path)}
+        {@const log = v.entry?.log_tail ?? []}
+        {@const open = expanded.includes(v.path)}
+        {@const lines = open ? log : log.slice(-3)}
+        {@const rows = usageRows(v)}
+        <li class="agent" class:agent--dead={v.alive === 'dead'} data-testid="agent-row">
+          <StageBar view={v} mode="full" {now} />
+          {#if rows.length}
+            <table class="agent__usage">
+              <thead><tr><th>Stage</th><th>Calls</th><th>In</th><th>Out</th><th>Cost</th></tr></thead>
+              <tbody>
+                {#each rows as u (u.stage)}
+                  <tr><td>{u.stage}</td><td>{u.calls}</td><td>{u.input_tokens}</td><td>{u.output_tokens}</td><td>${u.usd.toFixed(4)}</td></tr>
+                {/each}
+              </tbody>
+            </table>
+          {/if}
+          {#if v.lastError}<p class="agent__error">{v.lastError}</p>{/if}
+          {#if questionText(v)}<p class="agent__question">{questionText(v)}</p>{/if}
           {#if lines.length}
-            <pre class="arow__log">{lines.join('\n')}</pre>
-            {#if e.log_tail.length > 3}
-              <button type="button" class="arow__more" onclick={() => toggle(e.task_path)}>{open ? 'show less' : `show all ${e.log_tail.length} lines`}</button>
+            <pre class="agent__log">{lines.join('\n')}</pre>
+            {#if log.length > 3}
+              <button type="button" class="agent__more" onclick={() => toggle(v.path)}>{open ? 'show less' : `show all ${log.length} lines`}</button>
             {/if}
           {/if}
-          <footer class="arow__foot">
-            {#if dead}
-              <span class="arow__note">The backend removes stale entries on start.</span>
-            {:else if isRequested(e.task_path)}
-              <span class="arow__note">cancel requested</span>
-            {:else}
-              <Button variant="danger" onclick={() => cancel(e.task_path)}>Cancel</Button>
+          <footer class="agent__foot">
+            {#if v.alive === 'dead'}
+              <span class="agent__note">The backend removes stale entries on start.</span>
+            {:else if isRequested(v.path)}
+              <span class="agent__note">cancel requested</span>
+            {:else if canCancel(v)}
+              <Button variant="danger" onclick={() => cancel(v)}>Cancel</Button>
             {/if}
           </footer>
         </li>
       {/each}
     </ul>
+  {:else}
+    {#each GROUPS as g (g)}
+      {@const list = sorted.filter((v) => groupOf(v) === g)}
+      {#if list.length}
+        <h3 class="agents__group agents__group--{g}">{GROUP_LABEL[g]} <span class="agents__n">{list.length}</span></h3>
+        <ul class="agents__rows">
+          {#each list as v (v.path)}
+            <li>
+              <button type="button" class="agent agent--row" class:agent--dead={v.alive === 'dead'} data-testid="agent-row" onclick={() => onopen?.(v.path)}>
+                <span class="agent__title">{v.title}</span>
+                <span class="agent__bar"><StageBar view={v} {now} /></span>
+                <span class="agent__meta">{folderName(v.folder)} · {v.stage} · {statusOf(v, now)} · {formatDuration(sinceSeconds(v, now))}</span>
+              </button>
+            </li>
+          {/each}
+        </ul>
+      {/if}
+    {/each}
   {/if}
 </section>
 
 <style>
   .agents__empty { color: var(--label-3); font-size: var(--fs-12); }
+  .agents__group { margin: 12px 0 6px; font-size: var(--fs-12); font-weight: 600; color: var(--label-2); text-transform: uppercase; letter-spacing: 0.04em; }
+  .agents__group--needs-you { color: var(--orange); }
+  .agents__group--dead { color: var(--red); }
+  .agents__n { color: var(--label-3); font-weight: 400; }
   .agents__rows { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
-  .arow { padding: 10px; border-radius: 8px; background: var(--fill); font-size: var(--fs-12); color: var(--label-2); }
-  .arow--dead { border-left: 3px solid var(--red); }
-  .arow__head { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
-  .arow__title { border: 0; background: none; padding: 0; color: inherit; font-weight: 600; cursor: pointer; text-align: left; }
-  .arow__dead { color: var(--red); font-weight: 600; }
-  .arow__meta { display: flex; flex-wrap: wrap; gap: 4px 16px; margin: 6px 0; }
-  .arow__meta div { display: flex; gap: 4px; }
-  .arow__meta dt { color: var(--label-3); }
-  .arow__meta dd { margin: 0; }
-  .arow__question { margin: 6px 0; color: var(--orange); }
-  .arow__log { margin: 6px 0; font-size: var(--fs-12); white-space: pre-wrap; overflow-wrap: anywhere; color: var(--label-2); }
-  .arow__more { border: 0; background: none; padding: 0; color: var(--tint); cursor: pointer; font-size: var(--fs-12); }
-  .arow__foot { margin-top: 6px; }
-  .arow__note { color: var(--label-3); }
+  .agent { display: block; width: 100%; padding: 10px; border: 0; border-radius: 8px; background: var(--fill); font-size: var(--fs-12); color: var(--label-2); text-align: left; }
+  .agent--row { display: grid; gap: 6px; cursor: pointer; font: inherit; font-size: var(--fs-12); }
+  .agent--dead { border-left: 3px solid var(--red); }
+  .agent__title { color: var(--label); font-weight: 600; font-size: var(--fs-13); }
+  .agent__bar { display: block; }
+  .agent__meta { color: var(--label-3); }
+  .agent__usage { width: 100%; margin-top: 8px; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+  .agent__usage th { font-weight: 400; color: var(--label-3); text-align: right; }
+  .agent__usage td { text-align: right; }
+  .agent__usage th:first-child, .agent__usage td:first-child { text-align: left; }
+  .agent__error { margin: 6px 0; color: var(--error-text); overflow-wrap: anywhere; }
+  .agent__question { margin: 6px 0; color: var(--orange); }
+  .agent__log { margin: 6px 0; font-size: var(--fs-12); white-space: pre-wrap; overflow-wrap: anywhere; color: var(--label-2); }
+  .agent__more { border: 0; background: none; padding: 0; color: var(--tint); cursor: pointer; font-size: var(--fs-12); }
+  .agent__foot { margin-top: 6px; }
+  .agent__note { color: var(--label-3); }
 </style>

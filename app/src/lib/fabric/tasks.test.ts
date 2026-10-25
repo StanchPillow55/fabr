@@ -4,6 +4,7 @@ import { render } from 'svelte/server';
 import { FixtureSource, type FabricSource } from './source';
 import { nodeFolder } from './folder';
 import TaskSection from './TaskSection.svelte';
+import AgentsBadge from './AgentsBadge.svelte';
 import TaskStrip from './TaskStrip.svelte';
 import { FabricStore, localRoots } from './tasks.svelte';
 
@@ -80,6 +81,37 @@ describe('FabricStore over the fixtures', () => {
   });
 });
 
+describe('agents in the store', () => {
+  it('derives one view per active record and lists them', async () => {
+    const f = await fixtureStore();
+    const run = f.tasksFor('05-running')[0];
+    expect(f.agents.get(run.path)).toMatchObject({ stage: 'execute', folder: '05-running' });
+    expect(f.agentsFor('05-running')).toHaveLength(1);
+    expect(f.agentsFor('nowhere')).toEqual([]);
+    expect(f.agentsFor(null)).toEqual([]);
+    expect(f.leadAgentFor('05-running')?.stage).toBe('execute');
+    expect(f.agentList.length).toBe(f.agents.size);
+    for (const v of f.agentList) expect(f.records.some((h) => h.path === v.path)).toBe(true);
+  });
+  it('sorts waiting agents first', async () => {
+    const f = await fixtureStore();
+    f.now = new Date('2026-10-24T19:00:00Z');
+    const first = f.agentList[0];
+    expect(first.waiting).not.toBeNull();
+  });
+});
+
+describe('agents badge', () => {
+  it('renders the count and the tone, and nothing when empty', async () => {
+    const f = await fixtureStore();
+    f.now = new Date('2026-10-24T19:00:00Z');
+    const body = render(AgentsBadge, { props: { agents: f.agentList } }).body;
+    expect(body).toContain(`>${f.agentList.length}<`);
+    expect(body).toContain('abadge--needs');
+    expect(render(AgentsBadge, { props: { agents: [] } }).body).not.toContain('abadge');
+  });
+});
+
 describe('nodeFolder and roots', () => {
   it('joins a local source root and node path', () => {
     expect(nodeFolder({ host: null, root: '/home/me/' }, 'a/b')).toBe('/home/me/a/b');
@@ -110,9 +142,16 @@ describe('task strip', () => {
     const f = await realPathStore();
     expect(render(TaskStrip, { props: { fabric: f, folder: '/home/me/other' } }).body).not.toContain('task-strip');
   });
-  it('shows the running mark when the registry has an entry', async () => {
+  it('shows a compact stage bar when an agent is active', async () => {
     const f = await fixtureStore();
-    expect(render(TaskStrip, { props: { fabric: f, folder: '05-running' } }).body).toContain('running');
+    const body = render(TaskStrip, { props: { fabric: f, folder: '05-running' } }).body;
+    expect(body).toContain('role="progressbar"');
+    expect(body).toContain('tstrip__bar');
+    expect(body).not.toContain('tstrip__more');
+  });
+  it('shows no bar for an agent parked on the human', async () => {
+    const f = await realPathStore();
+    expect(render(TaskStrip, { props: { fabric: f, folder: '/home/me/proj' } }).body).not.toContain('progressbar');
   });
 });
 
@@ -133,12 +172,22 @@ describe('task section', () => {
     expect(body).toContain(h.record.question!.text);
     expect(body).toContain('Close');
   });
-  it('shows agent details above the record for a running task', async () => {
+  it('shows a full stage bar and Cancel above the record for a running task', async () => {
     const f = await fixtureStore();
+    f.now = new Date('2026-10-24T19:00:00Z');
     f.open(f.tasksFor('05-running')[0].path);
     const body = render(TaskSection, { props: { fabric: f, folder: '05-running' } }).body;
     expect(body).toContain('data-testid="agent-row"');
-    expect(body).toContain('Cancel');
+    expect(body).toContain('sbar--full');
+    expect(body).toContain('>Cancel<');
+  });
+  it('shows a read-only finished bar for a terminal task', async () => {
+    const f = await fixtureStore();
+    const h = f.records.find((r) => r.record.state === 'succeeded' || r.record.state === 'failed')!;
+    f.open(h.path);
+    const body = render(TaskSection, { props: { fabric: f, folder: h.path.includes('/fixtures/') ? h.path.split('/fixtures/')[1].split('/')[0] : '' } }).body;
+    expect(body).toContain('sbar--full');
+    expect(body).not.toContain('data-testid="agent-row"');
   });
 });
 
@@ -154,5 +203,7 @@ describe('Tasks view is gone', () => {
     expect(read('../panel/Panel.svelte')).toContain('TaskSection');
     expect(read('../tree/NodeCard.svelte')).toContain('TaskStrip');
     expect(toolbar).toContain('NoticesBadge');
+    expect(toolbar).toContain('AgentsBadge');
+    expect(app).toContain('AgentsScreen');
   });
 });

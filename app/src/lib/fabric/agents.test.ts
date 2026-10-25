@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { render } from 'svelte/server';
 import AgentsScreen from './AgentsScreen.svelte';
+import { newRecord } from './source';
+import { viewOf } from './stage';
 import { ageSeconds, elapsedSeconds, isDead, parseRegistryEntry, sortEntries, type RegistryEntry } from './agents';
 
 const NOW = '2026-10-24T19:00:00Z';
@@ -63,28 +65,54 @@ describe('sortEntries', () => {
 describe('AgentsScreen', () => {
   const rows = (html: string) => html.split('data-testid="agent-row"').length - 1;
   const count = (html: string, s: string) => html.split(s).length - 1;
-  it('renders three rows, one Dead mark, two Cancel buttons', () => {
-    const { body } = render(AgentsScreen, { props: { entries: entriesOf('10'), now: NOW } });
+  const tasks = (fx: string, entries: RegistryEntry[]) => entries.map((e, i) => {
+    const record = { ...newRecord(e.task_id, { title: `Task ${i}` }), state: 'in_progress' as const, step: 'execute' as const, updated_at: e.started_at };
+    return viewOf({ path: e.task_path, record }, e, 'connected', NOW)!;
+  });
+  it('detail mode renders three rows, one Dead mark, two Cancel buttons', () => {
+    const { body } = render(AgentsScreen, { props: { agents: tasks('10', entriesOf('10')), now: NOW, detail: true } });
     expect(rows(body)).toBe(3);
-    expect(count(body, 'arow__dead')).toBe(1);
+    expect(count(body, 'agent--dead')).toBe(1);
+    expect(body).toContain('Dead 2m 30s');
     expect(count(body, '>Cancel<')).toBe(2);
     expect(body).toContain('The backend removes stale entries on start.');
   });
-  it('shows titles with fallback and the pending question', () => {
+  it('detail mode hides Cancel before execute and shows the pending question', () => {
     const [e] = entriesOf('06');
-    const { body } = render(AgentsScreen, { props: { entries: [e], now: NOW, titleFor: () => 'Order filament' } });
-    expect(body).toContain('Order filament');
-    expect(body).toContain('May I fill it for this task?');
-    expect(render(AgentsScreen, { props: { entries: [e], now: NOW } }).body).toContain(e.task_id);
+    const [v] = tasks('06', [e]);
+    expect(render(AgentsScreen, { props: { agents: [v], now: NOW, detail: true } }).body).toContain('May I fill it for this task?');
+    const early = { ...v, stage: 'plan' as const };
+    expect(render(AgentsScreen, { props: { agents: [early], now: NOW, detail: true } }).body).not.toContain('>Cancel<');
   });
-  it('collapses the log to the last three lines', () => {
-    const [e] = entriesOf('05');
-    const { body } = render(AgentsScreen, { props: { entries: [e], now: NOW } });
+  it('detail mode collapses the log to the last three lines', () => {
+    const [v] = tasks('05', entriesOf('05'));
+    const { body } = render(AgentsScreen, { props: { agents: [v], now: NOW, detail: true } });
     expect(body).not.toContain('reached the checkout form');
     expect(body).toContain('selected standard shipping');
   });
+  it('detail mode shows last error and per-stage usage', () => {
+    const [e] = entriesOf('05');
+    const rich = { ...e, last_error: 'rate limited', usage: { plan: { calls: 2, input_tokens: 10, output_tokens: 5, usd: 0.1 } } };
+    const [v] = tasks('05', [rich]);
+    const { body } = render(AgentsScreen, { props: { agents: [v], now: NOW, detail: true } });
+    expect(body).toContain('rate limited');
+    expect(body).toContain('>plan</td>');
+    expect(body).toContain('$0.1000');
+  });
+  it('list mode groups needs-you, dead and running with a compact bar each', () => {
+    const [live, waiting, dead] = tasks('10', entriesOf('10'));
+    const w = { ...waiting, waiting: 'question' as const };
+    const d = { ...dead, alive: 'dead' as const };
+    const { body } = render(AgentsScreen, { props: { agents: [live, d, w], now: NOW } });
+    expect(rows(body)).toBe(3);
+    expect(count(body, 'role="progressbar"')).toBe(3);
+    expect(body.indexOf('Needs you')).toBeLessThan(body.indexOf('Dead'));
+    expect(body.indexOf('Dead')).toBeLessThan(body.indexOf('Running'));
+    expect(body).not.toContain('Queued');
+    expect(body).not.toContain('>Cancel<');
+  });
   it('shows the empty state', () => {
-    const { body } = render(AgentsScreen, { props: { entries: [] as RegistryEntry[], now: NOW } });
+    const { body } = render(AgentsScreen, { props: { agents: [], now: NOW } });
     expect(rows(body)).toBe(0);
     expect(body).toContain('No agents running');
   });
