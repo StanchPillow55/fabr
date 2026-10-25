@@ -135,6 +135,7 @@ fn new_record(e: &Env, title: &str) -> PathBuf {
         folder: e.proj.to_string_lossy().into_owned(),
         title: title.into(),
         due: Some("2026-11-01".into()),
+        pri: None,
         context: Some("some context".into()),
         spec: None,
         success: None,

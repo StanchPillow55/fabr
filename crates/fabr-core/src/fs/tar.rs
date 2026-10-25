@@ -110,4 +110,12 @@ impl Fs for TarSnapshot {
     fn read(&self, rel: &str) -> Option<Vec<u8>> {
         self.files.get(rel).cloned()
     }
+    fn files(&self, rel: &str) -> Vec<String> {
+        let prefix = if rel.is_empty() { String::new() } else { format!("{rel}/") };
+        self.files
+            .range(prefix.clone()..)
+            .take_while(|(p, _)| p.starts_with(&prefix))
+            .filter_map(|(p, _)| Some(&p[prefix.len()..]).filter(|r| !r.contains('/')).map(String::from))
+            .collect()
+    }
 }

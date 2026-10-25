@@ -13,6 +13,7 @@ pub fn merge(disk: &mut TaskRecord, base: &TaskRecord, mine: &TaskRecord) {
     take(&mut disk.source, &base.source, &mine.source);
     take(&mut disk.title, &base.title, &mine.title);
     take(&mut disk.due, &base.due, &mine.due);
+    take(&mut disk.pri, &base.pri, &mine.pri);
     take(&mut disk.state, &base.state, &mine.state);
     take(&mut disk.step, &base.step, &mine.step);
     take(&mut disk.waiting, &base.waiting, &mine.waiting);

@@ -1,9 +1,9 @@
 use crate::dto::{
     Empty, GetTreeReq, HostReq, InitChildrenReq, InstallKeyReq, ListDirsReq, NodeRef, OpenUrlReq, RemoveNodeReq, RevealPathReq,
-    SaveMetaReq, SaveSourcesReq, SaveTodoReq, SourceIdReq, SourcePasswordReq, Stamp,
+    SaveMetaReq, SaveSourcesReq, SourceIdReq, SourcePasswordReq, Stamp,
 };
 use crate::error::FabrError;
-use crate::fabric::{self, FabricCreateReq, FabricListReq, FabricReadReq, FabricStampReq, FabricWriteReq};
+use crate::fabric::{self, FabricCreateReq, FabricListReq, FabricReadReq, FabricStampReq, FabricWriteReq, ImportTodosReq};
 use crate::settings::Settings;
 use crate::setup::{self, CheckReq, Ctx, LinkReq, SecretsWriteReq, SettingsWriteReq};
 use crate::sources::Source;
@@ -63,7 +63,6 @@ ops! {
     get_stamp Get true (Empty) |ws, _| json(ws.get_stamp());
     list_sources Get true (Empty) |ws, _| json(ws.list_sources());
     get_settings Get true (Empty) |ws, _| json(ws.get_settings());
-    save_todo Post true (SaveTodoReq) |ws, r| json(ws.save_todo(r)?);
     save_meta Post true (SaveMetaReq) |ws, r| json(ws.save_meta(r)?);
     init_node Post true (NodeRef) |ws, r| json(ws.init_node(r)?);
     remove_node Post true (RemoveNodeReq) |ws, r| json(ws.remove_node(r)?);
@@ -81,6 +80,7 @@ ops! {
     fabric_read Post true (FabricReadReq) |_, r| json(fabric::read(&r)?);
     fabric_write Post true (FabricWriteReq) |_, r| json(fabric::write(&r)?);
     fabric_create Post true (FabricCreateReq) |_, r| json(fabric::create(&r)?);
+    import_todos Post true (ImportTodosReq) |_, r| json(fabric::import_todos(&r)?);
     fabric_stamp Post true (FabricStampReq) |_, r| json(Stamp { stamp: fabric::stamp(&r)? });
     fabric_settings_read Post true (Empty) |_, _| json(setup::settings_read(&Ctx::from_env())?);
     fabric_settings_write Post true (SettingsWriteReq) |_, r| json(setup::settings_write(&Ctx::from_env(), r)?);

@@ -5,17 +5,17 @@
   import ErrorText from '../ui/ErrorText.svelte';
   import Icon from '../ui/Icon.svelte';
   import BannerView from './Banner.svelte';
-  import ItemEditor from './ItemEditor.svelte';
   import MetaEditor from './MetaEditor.svelte';
   import AddTask from '../fabric/AddTask.svelte';
+  import RemoteItems from '../fabric/RemoteItems.svelte';
   import TaskSection from '../fabric/TaskSection.svelte';
   import type { FabricStore } from '../fabric/tasks.svelte';
 
   let { store, fabric = null }: { store: Store; fabric?: FabricStore | null } = $props();
 
-  let editor = $state<ItemEditor>();
   let busy = $state(false);
   let confirmRemove = $state(false);
+  const REMOTE_NOTE = 'Remote nodes list their tasks read-only. Add and Done work on local nodes.';
 
   const p = $derived(store.panel);
   const src = $derived(p ? store.sourceOf(p.source) : undefined);
@@ -28,7 +28,8 @@
   const lines = $derived(shownRoot && store.tree ? sourceLines(tallyRoot!, store.tree.sources, store.tree.errors, store.today, undefined, store.tree.pending ?? []) : []);
   const taskFolder = $derived(fabric && p && !virtual ? fabric.folderFor(src, p.path) : null);
   const hidden = $derived(p ? p.meta.some(([k, v]) => k === 'hidden' && (v === true || v === 'true')) : false);
-  const open = $derived(p ? p.items.filter((i) => i.status !== 'done').length : 0);
+  const items = $derived(p ? (store.byKey.get(p.key)?.items ?? []) : []);
+  const remote = $derived(!!src?.host && !virtual);
 
   const metaProps = $derived({
     entries: p?.meta ?? [],
@@ -39,7 +40,7 @@
     onerror: (m: string | null) => { if (store.panel) store.panel.banner = m ? { kind: 'error' as const, text: m } : null; },
   });
 
-  const summary = $derived(removeSummary({ items: p?.items ?? [] }));
+  const summary = $derived(removeSummary({ items }));
   const isSourceRoot = $derived(!!p && p.path === '');
   $effect(() => {
     void p?.key;
@@ -83,15 +84,21 @@
       {#if fabric && taskFolder}
         <TaskSection {fabric} folder={taskFolder} />
         <section class="panel__section"><AddTask {fabric} folder={taskFolder} /></section>
+      {:else if fabric && remote && p.managed}
+        <section class="panel__section" data-testid="remote-tasks">
+          <h3 class="section-title">Tasks <span class="section-title__count">{items.length}</span></h3>
+          <RemoteItems {items} />
+          <AddTask {fabric} folder={null} disabled note={REMOTE_NOTE} />
+        </section>
       {/if}
 
       {#if virtual}
         <section class="panel__section">
-          <h3 class="section-title">Todos</h3>
+          <h3 class="section-title">Tasks</h3>
           {#if counts}
             <p class="rootcounts">
-              <span><b>{counts.open}</b> open</span><span class="dotsep">·</span>
-              <span class:card__wip={counts.wip > 0}><b>{counts.wip}</b> wip</span><span class="dotsep">·</span>
+              <span><b>{counts.todo}</b> todo</span><span class="dotsep">·</span>
+              <span class:card__wip={counts.active > 0}><b>{counts.active}</b> active</span><span class="dotsep">·</span>
               <span class:card__overdue={counts.overdue > 0}><b>{counts.overdue}</b> overdue</span>
             </p>
           {/if}
@@ -114,7 +121,7 @@
         <div class="empty-node">
           <Icon name="folder" size={28} />
           <p class="empty-node__title">Plain directory</p>
-          <p class="hint">It has no <code>.fabr/</code> folder yet. Make it a node to give it todos and metadata.</p>
+          <p class="hint">It has no <code>.fabr/</code> folder yet. Make it a node to give it tasks and metadata.</p>
           <Button variant="tint" onclick={() => store.openAddNodes(p.key)}>Add nodes…</Button>
         </div>
         <section class="panel__section">
@@ -128,16 +135,6 @@
         <section class="panel__section">
           <h3 class="section-title">Identity</h3>
           <MetaEditor section="identity" {...metaProps} />
-        </section>
-
-        <section class="panel__section">
-          <h3 class="section-title">Todos <span class="section-title__count">{open} open · {p.items.length}</span></h3>
-          <ItemEditor bind:this={editor} items={p.items} {fabric} folder={taskFolder} oncommit={(m) => store.commitItems(p.key, m)} onfocus={(on) => store.setItemFocus(on)} />
-          <div class="actions">
-            <Button variant="tint" onclick={() => editor?.add()}><Icon name="plus" size={14} /> Add item</Button>
-            <span class="actions__spacer"></span>
-            {#if p.itemsNote}<span class="mrow__note" class:mrow__note--error={p.itemsNote.kind === 'error'} role="status">{p.itemsNote.text}</span>{/if}
-          </div>
         </section>
 
         <section class="panel__section">

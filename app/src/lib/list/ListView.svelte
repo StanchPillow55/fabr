@@ -38,7 +38,7 @@
   {#if !rows.length}
     <div class="empty-state">
       <p class="empty-state__title">No items</p>
-      <p class="empty-state__text">{store.query ? 'Nothing matches your search.' : store.filter !== 'all' || store.hideDone ? 'Nothing passes the current filter.' : 'This part of the tree has no todos yet.'}</p>
+      <p class="empty-state__text">{store.query ? 'Nothing matches your search.' : store.filter !== 'all' || store.hideDone ? 'Nothing passes the current filter.' : 'This part of the tree has no tasks yet.'}</p>
     </div>
   {:else}
     <div class="listview__card">
@@ -80,7 +80,6 @@
                 sourceName={store.sourceOf(r.source)?.name}
                 selected={store.selected === r.nodeKey}
                 color={store.colors.get(r.nodeKey) ?? null}
-                oncycle={() => store.cycleStatus(r.nodeKey, r.index)}
                 onopen={() => store.openPanel(r.nodeKey)}
               />
             {/each}

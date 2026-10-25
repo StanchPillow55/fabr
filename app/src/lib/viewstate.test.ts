@@ -10,7 +10,7 @@ describe('showLabel', () => {
   it('names each non-default setting', () => {
     expect(showLabel({ ...base, view: 'list' })).toBe('View · List');
     expect(showLabel({ ...base, filter: 'open' })).toBe('View · Open');
-    expect(showLabel({ ...base, filter: 'wip' })).toBe('View · WIP');
+    expect(showLabel({ ...base, filter: 'wip' })).toBe('View · Active');
     expect(showLabel({ ...base, filter: 'overdue' })).toBe('View · Overdue');
     expect(showLabel({ ...base, viewMode: 'nodes' })).toBe('View · Nodes');
     expect(showLabel({ ...base, viewMode: 'all' })).toBe('View · All');
@@ -21,17 +21,17 @@ describe('showLabel', () => {
   });
   it('combines them with a dot', () => {
     expect(showLabel({ view: 'list', filter: 'open', viewMode: 'nodes', showHidden: true, hideDone: true })).toBe('View · List · Open · Nodes · hidden · no done');
-    expect(showLabel({ ...base, filter: 'wip', hideDone: true, hideEmpty: true })).toBe('View · WIP · no done · no empty');
+    expect(showLabel({ ...base, filter: 'wip', hideDone: true, hideEmpty: true })).toBe('View · Active · no done · no empty');
     expect(showLabel({ ...base, view: 'list', filter: 'open' })).toBe('View · List · Open');
   });
 });
 
 describe('countsLabel / countParts', () => {
-  it('counts open as todo + wip', () => {
-    expect(countsLabel({ todo: 28, wip: 6, overdue: 2 })).toBe('34 open · 6 wip · 2 overdue');
+  it('counts todo and active apart', () => {
+    expect(countsLabel({ todo: 28, wip: 6, overdue: 2 })).toBe('28 todo · 6 active · 2 overdue');
   });
   it('keeps zeros, marked quiet', () => {
-    expect(countsLabel({ todo: 0, wip: 0, overdue: 0 })).toBe('0 open · 0 wip · 0 overdue');
+    expect(countsLabel({ todo: 0, wip: 0, overdue: 0 })).toBe('0 todo · 0 active · 0 overdue');
     expect(countParts({ todo: 0, wip: 0, overdue: 0 }).map((p) => p.tone)).toEqual(['zero', 'zero', 'zero']);
   });
   it('tints wip and overdue only above zero', () => {
@@ -41,7 +41,7 @@ describe('countsLabel / countParts', () => {
 });
 
 describe('shownCounts', () => {
-  const it_ = (status: 'todo' | 'wip' | 'done', due: string | null = null) => ({ status, due, title: 'x', pri: null }) as never;
+  const it_ = (status: 'todo' | 'wip' | 'done', due: string | null = null) => ({ status, due, title: 'x', pri: 0 }) as never;
   const node = (items: never[], children: unknown[] = []) => ({ source: 's', path: '', name: 'n', items, children, managed: true, meta: {} }) as never;
   const tree = node([it_('todo'), it_('wip', '2026-01-01'), it_('done', '2026-01-01')], [node([it_('todo', '2026-01-01'), it_('wip')])]);
   const f = (filter: 'all' | 'open' | 'wip' | 'overdue', hideDone = false) => ({ today: '2026-06-01', filter, hideDone });
@@ -49,7 +49,7 @@ describe('shownCounts', () => {
   it('follows the See filter', () => {
     expect(shownCounts(tree, f('wip'))).toEqual({ todo: 0, wip: 2, overdue: 1 });
     expect(shownCounts(tree, f('overdue'))).toEqual({ todo: 1, wip: 1, overdue: 2 });
-    expect(countsLabel(shownCounts(tree, f('wip')))).toBe('2 open · 2 wip · 1 overdue');
+    expect(countsLabel(shownCounts(tree, f('wip')))).toBe('0 todo · 2 active · 1 overdue');
   });
 });
 

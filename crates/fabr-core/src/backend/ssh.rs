@@ -1,7 +1,7 @@
 use super::{ALREADY_NODE, Backend, CONFLICT_MSG, DirEntry, EXTRA_FILES_MSG, NOT_A_NODE, NodeFiles, dir_entries};
 use crate::error::FabrError;
 use crate::fs::{Fs, TarSnapshot};
-use crate::node::{META_FILE, TODO_FILE};
+use crate::node::META_FILE;
 use crate::remote::askpass::AskpassServer;
 use crate::remote::script::{
     EXIT_EXTRA_FILES, EXIT_IO, EXIT_MISMATCH, EXIT_NOT_NODE, init_script, list_script, node_script, parse_list, remove_script,
@@ -204,12 +204,8 @@ impl Backend for SshBackend {
     }
 
     fn write_node(&self, path: &str, expected_version: &str, files: NodeFiles) -> Result<(), FabrError> {
-        let mut expected = expected_version.to_string();
         if let Some(b) = &files.meta {
-            expected = self.write_one(path, &expected, META_FILE, b)?;
-        }
-        if let Some(b) = &files.todo {
-            self.write_one(path, &expected, TODO_FILE, b)?;
+            self.write_one(path, expected_version, META_FILE, b)?;
         }
         Ok(())
     }
@@ -245,6 +241,6 @@ impl Backend for SshBackend {
         } else {
             leaf(path)
         };
-        self.write_node(path, &crate::node::version_of(b"", b""), NodeFiles::initial(name, show_depth))
+        self.write_node(path, &crate::node::version_of(b""), NodeFiles::initial(name, show_depth))
     }
 }

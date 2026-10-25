@@ -1,4 +1,4 @@
-import { FIELDS, SECTION_HEADINGS, STATES, STEPS, type FrontMatter, type LogEntry, type Sections, type TaskRecord } from './types';
+import { FIELDS, OPTIONAL_FIELDS, SECTION_HEADINGS, STATES, STEPS, type FrontMatter, type LogEntry, type Sections, type TaskRecord } from './types';
 import { parseYaml } from './yaml';
 
 export function parseFrontMatter(text: string): { data: Record<string, unknown>; body: string } {
@@ -41,7 +41,8 @@ export function splitContext(context: string): { own: string; gathered: string }
 
 export function parseRecord(text: string): TaskRecord {
   const { data, body } = parseFrontMatter(text);
-  for (const f of FIELDS) if (!(f in data)) throw new Error(`missing front matter field "${f}"`);
+  if (data.schema !== 2 && data.schema !== 3) throw new Error(`unsupported schema ${String(data.schema)}`);
+  for (const f of FIELDS) if (!(f in data) && !OPTIONAL_FIELDS.includes(f)) throw new Error(`missing front matter field "${f}"`);
   if (!(STATES as readonly string[]).includes(data.state as string)) throw new Error(`invalid state "${String(data.state)}"`);
   if (data.step !== null && !(STEPS as readonly string[]).includes(data.step as string)) throw new Error(`invalid step "${String(data.step)}"`);
   for (const f of ['requests', 'grants', 'links'] as const) {
@@ -50,5 +51,7 @@ export function parseRecord(text: string): TaskRecord {
   for (const f of ['answers', 'assertions'] as const) {
     if (!Array.isArray(data[f])) throw new Error(`front matter field "${f}" must be a list`);
   }
-  return { ...(data as unknown as FrontMatter), sections: parseSections(body) };
+  const pri = data.pri ?? 0;
+  if (typeof pri !== 'number' || !Number.isInteger(pri) || pri < 0 || pri > 3) throw new Error(`invalid pri "${String(pri)}"`);
+  return { ...(data as unknown as FrontMatter), pri, sections: parseSections(body) };
 }

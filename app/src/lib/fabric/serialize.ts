@@ -1,4 +1,4 @@
-import { FIELDS, SECTION_HEADINGS, type Answer, type Question, type TaskRecord } from './types';
+import { FIELDS, SCHEMA, SECTION_HEADINGS, type Answer, type Question, type TaskRecord } from './types';
 
 const RESERVED = new Set(['null', '~', 'true', 'false', 'yes', 'no', 'on', 'off']);
 const BARE = /^[A-Za-z0-9_./][\w./:+-]*$/;
@@ -76,6 +76,7 @@ export function serializeFrontMatter(r: TaskRecord): string[] {
   const add = (...l: string[]) => out.push(...l);
   for (const f of FIELDS) {
     switch (f) {
+      case 'schema': add(`schema: ${SCHEMA}`); break;
       case 'requests': add(`requests: ${flowMap(r.requests)}`); break;
       case 'links': add(`links: ${flowMap(r.links)}`); break;
       case 'source':

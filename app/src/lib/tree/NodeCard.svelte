@@ -1,6 +1,5 @@
 <script lang="ts">
-  import { tick } from 'svelte';
-  import type { Node, Source, SourceError } from '../api/types';
+  import type { Item, Node, Source, SourceError } from '../api/types';
   import { MAX_ROWS } from '../constants';
   import { cardAside, cardTitle, dueLabel, isHidden, isVirtualRoot, rollup, rootCounts, sourceLines, type BoxModel, type Key } from '../model';
   import ErrorText from '../ui/ErrorText.svelte';
@@ -8,8 +7,10 @@
   import Icon from '../ui/Icon.svelte';
   import Pill from '../ui/Pill.svelte';
   import Priority from '../ui/Priority.svelte';
+  import AddTask from '../fabric/AddTask.svelte';
+  import { canMarkDone } from '../fabric/done';
   import TaskStrip from '../fabric/TaskStrip.svelte';
-  import type { FabricStore } from '../fabric/tasks.svelte';
+  import type { FabricStore, Held } from '../fabric/tasks.svelte';
 
   interface Props {
     node: Node;
@@ -19,8 +20,6 @@
     match: boolean;
     dim: boolean;
     ontoggle: () => void;
-    oncycle: (index: number) => void;
-    onadd?: (title: string) => Promise<boolean>;
     onmore: () => void;
     onopen: () => void;
     onfocus: () => void;
@@ -34,10 +33,11 @@
     onurl?: (url: string) => void;
     fabric?: FabricStore | null;
     folder?: string | null;
+    remote?: boolean;
   }
   let {
-    node, tally, model, selected, match, dim, ontoggle, oncycle, onadd, onmore, onopen, onfocus, today = '', source = null, accent = null,
-    sources = [], errors = [], pending = [], onsource, onurl, fabric = null, folder = null,
+    node, tally, model, selected, match, dim, ontoggle, onmore, onopen, onfocus, today = '', source = null, accent = null,
+    sources = [], errors = [], pending = [], onsource, onurl, fabric = null, folder = null, remote = false,
   }: Props = $props();
 
   const hidden = $derived(isHidden(node));
@@ -48,34 +48,21 @@
   const lines = $derived(virtual && !model.collapsed ? sourceLines(tally ?? node, sources, errors, today, undefined, pending) : []);
   const canToggle = $derived(node.children.length > 0 || node.items.length > 0);
   const roll = $derived(model.collapsed ? rollup(tally ?? node, today) : null);
+  const REMOTE_NOTE = 'Remote node: read-only';
   const expandedMore = $derived(model.shown.length > MAX_ROWS);
 
-  let adding = $state(false);
-  let draft = $state('');
-  let saving = $state(false);
-  let addEl = $state<HTMLInputElement>();
-  async function startAdd() {
-    adding = true;
-    await tick();
-    addEl?.focus();
+  const held = (item: Item) => (fabric && folder ? fabric.tasksFor(folder).find((h) => h.record.id === item.id) : undefined);
+  function openItem(item: Item) {
+    const h = held(item);
+    onopen();
+    if (h && fabric) fabric.open(h.path);
   }
-  async function commitAdd(keepOpen: boolean) {
-    const text = draft.trim();
-    if (saving) return;
-    if (!text || !onadd) { draft = ''; adding = false; return; }
-    saving = true;
-    const ok = await onadd(text);
-    saving = false;
-    if (ok) draft = '';
-    else if (!keepOpen) return;
-    if (ok && !keepOpen) adding = false;
-    await tick();
-    if (adding && keepOpen) addEl?.focus();
-  }
-  function addKey(e: KeyboardEvent) {
-    e.stopPropagation();
-    if (e.key === 'Enter') { e.preventDefault(); void commitAdd(true); }
-    else if (e.key === 'Escape') { e.preventDefault(); draft = ''; adding = false; }
+  async function markDone(h: Held) {
+    try {
+      await fabric?.markDone(h.path);
+    } catch (e) {
+      if (fabric) fabric.actionError = (e as Error).message;
+    }
   }
 
   function onkeydown(e: KeyboardEvent) {
@@ -130,8 +117,8 @@
   {#if counts}
     <ul class="card__items">
       <li class="row row--counts">
-        <span><b>{counts.open}</b> open</span><span class="dotsep">·</span>
-        <span class:card__wip={counts.wip > 0}><b>{counts.wip}</b> wip</span><span class="dotsep">·</span>
+        <span><b>{counts.todo}</b> todo</span><span class="dotsep">·</span>
+        <span class:card__wip={counts.active > 0}><b>{counts.active}</b> active</span><span class="dotsep">·</span>
         <span class:card__overdue={counts.overdue > 0}><b>{counts.overdue}</b> overdue</span>
       </li>
       {#each lines as l (l.key)}
@@ -146,31 +133,28 @@
     </ul>
   {:else if node.managed && !model.collapsed}
     <ul class="card__items">
-      <li class="row row--add" class:row--adding={adding}>
-        {#if adding}
-          <span class="row__plus" aria-hidden="true">+</span>
-          <input
-            class="row__input" type="text" placeholder="Add a todo" aria-label="Add a todo" autocomplete="off" spellcheck="false"
-            bind:this={addEl} bind:value={draft} disabled={saving}
-            onkeydown={addKey} onblur={() => { if (!saving) void commitAdd(false); }}
-            onclick={(e) => e.stopPropagation()} ondblclick={(e) => e.stopPropagation()}
-          />
-        {:else}
-          <button type="button" class="row__addbtn" onclick={stop(startAdd)} ondblclick={(e) => e.stopPropagation()}>
-            <span class="row__plus" aria-hidden="true">+</span><span>Add a todo</span>
-          </button>
-        {/if}
-      </li>
+      {#if fabric}
+        <li class="row row--add">
+          <AddTask {fabric} {folder} variant="card" disabled={remote} note={remote ? REMOTE_NOTE : ''} />
+        </li>
+      {/if}
       {#each model.shown as item}
+        {@const h = held(item)}
         <li class="row row--{item.status}">
-          <Pill status={item.status} onclick={() => oncycle(node.items.indexOf(item))} />
-          <span class="row__title" title={item.title}>{item.title}</span>
+          <Pill status={item.status} />
+          <button type="button" class="row__title row__link" title={item.title} onclick={stop(() => openItem(item))} ondblclick={(e) => e.stopPropagation()}>{item.title}</button>
           <Priority pri={item.pri} />
           <DueBadge {item} {today} />
+          {#if h && canMarkDone(h.record)}
+            <button type="button" class="row__tick" title="Mark done" aria-label="Mark {item.title} done" onclick={stop(() => markDone(h))} ondblclick={(e) => e.stopPropagation()}><Icon name="check" size={12} /></button>
+          {/if}
         </li>
       {:else}
         {@const filtered = node.items.length - model.visible.length}
-        <li class="row row--empty">{filtered ? `${filtered} hidden by filter` : node.has_todo ? 'No todos' : 'No .todo file'}</li>
+        <li class="row row--empty">{filtered ? `${filtered} hidden by filter` : 'No tasks'}</li>
+      {/each}
+      {#each node.warnings as w, i (i)}
+        <li class="row row--warn" title={w}><Icon name="warning" size={12} /> <span class="row__title">{w}</span></li>
       {/each}
     </ul>
     {#if model.more > 0}
@@ -183,10 +167,10 @@
   {#if roll}
     <div class="card__rollup" title="This node and {roll.nodes} below; {roll.done} done">
       <span><b>{roll.todo}</b> todo</span>
-      <span><b>{roll.wip}</b> wip</span>
+      <span><b>{roll.wip}</b> active</span>
       <span><b>{roll.done}</b> done</span>
       {#if roll.overdue}<span class="card__overdue">{roll.overdue} overdue</span>{/if}
-      {#if roll.next}<span class="card__next">next {dueLabel({ id: null, due: roll.next, status: 'todo', title: '', pri: null }, today)}</span>{/if}
+      {#if roll.next}<span class="card__next">next {dueLabel({ id: '', due: roll.next, status: 'todo', title: '', pri: 0 }, today)}</span>{/if}
     </div>
   {/if}
 </div>

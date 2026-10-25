@@ -234,8 +234,6 @@
             match={matches(d.node, store.query)}
             dim={d.node.managed && store.filter !== 'all' && !m.visible.length}
             ontoggle={() => store.toggleCollapse(k)}
-            oncycle={(i) => store.cycleStatus(k, i)}
-            onadd={(t) => store.quickAdd(k, t)}
             onmore={() => store.toggleMore(k)}
             onopen={() => store.openPanel(k)}
             onfocus={() => store.setFocus(k)}
@@ -245,6 +243,7 @@
             onsource={(sk) => store.openPanel(sk)}
             onurl={(u) => store.openUrl(u)}
             {fabric}
+            remote={!!store.sourceOf(d.node.source)?.host}
             folder={fabric ? fabric.folderFor(store.sourceOf(d.node.source), d.node.path) : null}
           />
         </div>

@@ -1,21 +1,21 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { Api } from './api/index';
-import { ApiError, type Item, type Node, type SaveTodoReq, type Tree } from './api/types';
+import { ApiError, type Item, type Node, type Tree } from './api/types';
 import { cardTitle, flattenItems, rollup } from './model';
 import { createMockApi } from '../mock/api';
 import { Store, metaPayload, removeSummary } from './store.svelte';
 
 const TODAY = '2026-10-19';
-const item = (o: Partial<Item> = {}): Item => ({ id: 'a1', status: 'todo', due: null, title: 'Write tests', pri: null, ...o });
+const item = (o: Partial<Item> = {}): Item => ({ id: 'a1', status: 'todo', due: null, title: 'Write tests', pri: 0, ...o });
 const node = (path: string, o: Partial<Node> = {}): Node => ({
   source: 'local', path, name: path.split('/').pop() || 'root', managed: true, meta: {}, items: [],
-  warnings: [], version: `v-${path}`, via: null, has_todo: true, children: [], ...o,
+  warnings: [], version: `v-${path}`, via: null, children: [], ...o,
 });
 const vroot = (children: Node[]): Node => ({
-  source: '', path: '', name: '/', managed: false, meta: {}, items: [], warnings: [], version: null, via: null, has_todo: false, children,
+  source: '', path: '', name: '/', managed: false, meta: {}, items: [], warnings: [], version: null, via: null, children,
 });
 const makeTree = (version = 'v-work', items: Item[] = [item(), item({ id: 'b2', status: 'wip', title: 'Ship' })]): Tree => ({
-  root: vroot([node('', { meta: { name: 'fabr' }, children: [node('work', { version, items }), node('plain', { managed: false, version: null, has_todo: false })] })]),
+  root: vroot([node('', { meta: { name: 'fabr' }, children: [node('work', { version, items }), node('plain', { managed: false, version: null })] })]),
   sources: [{ id: 'local', name: 'Home', host: null, root: '/tmp/x', prune: null }],
   today: TODAY,
   truncated: false,
@@ -26,10 +26,9 @@ function mockApi(over: Partial<Api> = {}): Api & { [K in keyof Api]: ReturnType<
   const api = {
     getTree: vi.fn(async () => makeTree()),
     getStamp: vi.fn(async () => ({ stamp: 's1' })),
-    saveTodo: vi.fn(async (req: SaveTodoReq) => node(req.path, { version: 'v2', items: req.items })),
     saveMeta: vi.fn(async (req) => node(req.path, { version: 'v3', meta: req.meta })),
     initNode: vi.fn(async (req) => node(req.path)),
-    removeNode: vi.fn(async (req) => node(req.path, { managed: false, version: null, has_todo: false })),
+    removeNode: vi.fn(async (req) => node(req.path, { managed: false, version: null })),
     listSources: vi.fn(async () => []),
     saveSources: vi.fn(async (s) => s),
     testSource: vi.fn(async () => ({ ok: true, message: 'ok', latency_ms: 1, node_count: 1 })),
@@ -62,77 +61,37 @@ describe('Store', () => {
     expect(s2.notice).toMatch(/boom/);
   });
 
-  it('cycleStatus saves the next status with the held version', async () => {
-    const api = mockApi();
-    const s = new Store(api);
-    await s.load();
-    await s.cycleStatus('local:work', 0);
-    expect(api.saveTodo).toHaveBeenCalledTimes(1);
-    const req = api.saveTodo.mock.calls[0][0] as SaveTodoReq;
-    expect(req).toMatchObject({ source: 'local', path: 'work', version: 'v-work' });
-    expect(req.items.map((i) => i.status)).toEqual(['wip', 'wip']);
-    expect(s.byKey.get('local:work')?.version).toBe('v2');
-    expect(s.byKey.get('local:work')?.items[0].status).toBe('wip');
-    await s.cycleStatus('local:work', 1);
-    expect((api.saveTodo.mock.calls[1][0] as SaveTodoReq).items[1].status).toBe('done');
+  it('has no item mutation path left: every task change is a record operation', () => {
+    const s = new Store(mockApi()) as unknown as Record<string, unknown>;
+    for (const gone of ['cycleStatus', 'quickAdd', 'commitItems', 'setItemFocus', 'itemFocus']) expect(gone in s).toBe(false);
   });
 
-  it('quickAdd appends a todo with the held version and swaps the node in', async () => {
-    const api = mockApi();
-    const s = new Store(api);
-    await s.load();
-    expect(await s.quickAdd('local:work', '  Buy milk ')).toBe(true);
-    const req = api.saveTodo.mock.calls[0][0] as SaveTodoReq;
-    expect(req.version).toBe('v-work');
-    expect(req.items.length).toBe(3);
-    expect(req.items[2]).toEqual({ id: null, status: 'todo', due: null, title: 'Buy milk', pri: null });
-    expect(s.byKey.get('local:work')?.version).toBe('v2');
-    expect(await s.quickAdd('local:work', '   ')).toBe(false);
-    expect(await s.quickAdd('local:plain', 'x')).toBe(false);
-    expect(api.saveTodo).toHaveBeenCalledTimes(1);
-  });
-
-  it('quickAdd on 409 replaces the node, tells the user and reports failure', async () => {
-    const fresh = node('work', { version: 'v-disk', items: [item({ title: 'Elsewhere' })] });
-    const api = mockApi({ saveTodo: vi.fn(async () => { throw new ApiError(409, 'conflict', fresh); }) });
-    const s = new Store(api);
-    await s.load();
-    expect(await s.quickAdd('local:work', 'x')).toBe(false);
-    expect(s.byKey.get('local:work')?.version).toBe('v-disk');
-    expect(s.notice).toMatch(/changed on disk/);
-    s.openPanel('local:work');
-    expect(await s.quickAdd('local:work', 'x')).toBe(false);
-    expect(s.panel!.banner?.text).toMatch(/changed on disk/);
-  });
-
-  it('409 from a panel commit: banner, node replaced, panel keeps its text and takes the new version', async () => {
-    const fresh = node('work', { version: 'v-disk', items: [item({ title: 'Changed elsewhere' })] });
-    const api = mockApi({ saveTodo: vi.fn(async () => { throw new ApiError(409, 'conflict', fresh); }) });
+  it('the panel reads items from the node, so a reload with new items shows them without a version change', async () => {
+    let items = [item()];
+    const api = mockApi({ getTree: vi.fn(async () => makeTree('v-work', items)) });
     const s = new Store(api);
     await s.load();
     s.openPanel('local:work');
-    expect(await s.commitItems('local:work', (items) => items.map((i) => ({ ...i, title: 'my edit' })))).toBe(false);
-    expect(s.panel!.banner).toEqual({ kind: '', text: 'This node changed on disk; reloaded' });
-    expect(s.panel!.version).toBe('v-disk');
-    expect(s.panel!.items[0].title).toBe('Write tests');
-    expect(s.byKey.get('local:work')?.version).toBe('v-disk');
+    expect(s.panel).not.toHaveProperty('items');
+    expect(s.byKey.get('local:work')!.items.map((i) => i.title)).toEqual(['Write tests']);
+    items = [item(), item({ id: 'z9', title: 'From a record', pri: 2 })];
+    await s.load();
+    expect(s.byKey.get('local:work')!.items.map((i) => [i.title, i.pri])).toEqual([['Write tests', 0], ['From a record', 2]]);
+    expect(s.panel!.version).toBe('v-work');
+    expect(api.getTree).toHaveBeenCalledTimes(2);
   });
 
-  it('409 from a pill click without the panel open: notice', async () => {
-    const fresh = node('work', { version: 'v-disk' });
-    const s = new Store(mockApi({ saveTodo: vi.fn(async () => { throw new ApiError(409, 'conflict', fresh); }) }));
+  it('a tree poll whose stamp changed reloads the items', async () => {
+    let stamp = 's1';
+    let items = [item()];
+    const api = mockApi({ getStamp: vi.fn(async () => ({ stamp })), getTree: vi.fn(async () => makeTree('v-work', items)) });
+    const s = new Store(api);
     await s.load();
-    await s.cycleStatus('local:work', 0);
-    expect(s.notice).toMatch(/changed on disk/);
-    expect(s.byKey.get('local:work')?.version).toBe('v-disk');
-  });
-
-  it('other save errors show in the panel footer note', async () => {
-    const s = new Store(mockApi({ saveTodo: vi.fn(async () => { throw new ApiError(400, 'bad date'); }) }));
-    await s.load();
-    s.openPanel('local:work');
-    expect(await s.commitItems('local:work', (items) => items.slice(1))).toBe(false);
-    expect(s.panel!.itemsNote).toEqual({ kind: 'error', text: 'bad date' });
+    await s.poll();
+    stamp = 's2';
+    items = [];
+    await s.poll();
+    expect(s.byKey.get('local:work')!.items).toEqual([]);
   });
 
   it('the panel follows on-disk changes (no stale state)', async () => {
@@ -220,7 +179,7 @@ describe('Store: empty nodes and collapse all at /', () => {
         meta: { name: 'fabr' },
         children: [
           node('work', { items: [item({ status: 'wip' })], children: [node('work/a', { items: [item({ status: 'done' })], children: [node('work/a/b')] })] }),
-          node('plain', { managed: false, version: null, has_todo: false, children: [node('plain/x', { items: [item()] })] }),
+          node('plain', { managed: false, version: null, children: [node('plain/x', { items: [item()] })] }),
           node('idle', { items: [item({ status: 'done' })] }),
         ],
       }),
@@ -657,11 +616,11 @@ describe('accent colour', () => {
 });
 
 describe('remove node', () => {
-  it('removeSummary counts todos and open todos', () => {
-    expect(removeSummary({ items: [] })).toEqual({ todos: 0, open: 0, text: 'no todos will be deleted' });
-    expect(removeSummary({ items: [item({ status: 'done' })] }).text).toBe('1 todo (0 open) will be deleted');
+  it('removeSummary counts tasks and open tasks and says they stay', () => {
+    expect(removeSummary({ items: [] })).toEqual({ tasks: 0, open: 0, text: 'there are no tasks' });
+    expect(removeSummary({ items: [item({ status: 'done' })] }).text).toBe('its tasks stay in .fabric-space (1, 0 open)');
     const r = removeSummary({ items: [item(), item({ id: 'b', status: 'wip' }), item({ id: 'c', status: 'done' })] });
-    expect([r.todos, r.open, r.text]).toEqual([3, 2, '3 todos (2 open) will be deleted']);
+    expect([r.tasks, r.open, r.text]).toEqual([3, 2, 'its tasks stay in .fabric-space (3, 2 open)']);
   });
 
   it('success closes the panel and reloads', async () => {

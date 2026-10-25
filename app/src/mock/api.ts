@@ -1,6 +1,6 @@
 import type { Api } from '../lib/api/index';
 import {
-  ApiError, type Item, type Meta, type Node, type NodeRef, type Settings, type Source, type TestResult, type Tree, type DirEntry, type FabricSettings, type FabricSecretsStatus,
+  ApiError, type Meta, type Node, type NodeRef, type Settings, type Source, type TestResult, type Tree, type DirEntry, type FabricSettings, type FabricSecretsStatus,
 } from '../lib/api/types';
 import { FixtureSource } from '../lib/fabric/source';
 import { buildSample, isoDay, LAB, SAMPLE } from './sample';
@@ -60,7 +60,7 @@ export function createMockApi(opts: MockOpts = {}): Api {
       const k = key(n.source, n.path);
       const e = edits.get(k);
       if (e) Object.assign(n, { ...e, children: n.children });
-      else if (created.has(k)) Object.assign(n, { managed: true, has_todo: true, version: ver(), meta: { name: n.name } });
+      else if (created.has(k)) Object.assign(n, { managed: true, version: ver(), meta: { name: n.name } });
       n.children.forEach(walk);
     })(root);
     return root;
@@ -71,7 +71,7 @@ export function createMockApi(opts: MockOpts = {}): Api {
     const roots = sources.map((s) => sourceRoot(s, showAll));
     const root: Node = {
       source: '', path: '', name: '/', managed: false, meta: {}, items: [], warnings: [],
-      version: null, via: null, has_todo: false, children: roots,
+      version: null, via: null, children: roots,
     };
     last = { root, sources: clone(sources), today, truncated: false, errors: [], pending: [] };
     return last;
@@ -106,15 +106,6 @@ export function createMockApi(opts: MockOpts = {}): Api {
   const api: Api = {
     async getTree(showAll) { await wait(); return clone(tree(showAll)); },
     async getStamp() { await wait(); return { stamp: String(rev) }; },
-    async saveTodo(req) {
-      await wait();
-      for (const i of req.items) {
-        if (!i.title.trim()) throw new ApiError(400, 'item title must not be empty');
-        if (i.due && !/^\d{4}-\d{2}-\d{2}(T([01]\d|2[0-3]):[0-5]\d)?$/.test(i.due)) throw new ApiError(400, `bad date: ${i.due}`);
-      }
-      const items: Item[] = req.items.map((i) => ({ ...i, id: i.id ?? Math.random().toString(16).slice(2, 6) }));
-      return write(req, req.version, { items, has_todo: true });
-    },
     async saveMeta(req) {
       await wait();
       const meta: Meta = { ...req.meta };
@@ -127,7 +118,7 @@ export function createMockApi(opts: MockOpts = {}): Api {
       created.add(key(req.source, req.path));
       removed.delete(key(req.source, req.path));
       rev++;
-      return { ...clone(n), managed: true, has_todo: true, version: ver(), meta: { name: n.name } };
+      return { ...clone(n), managed: true, version: ver(), meta: { name: n.name } };
     },
     async removeNode(req) {
       await wait();
@@ -140,7 +131,7 @@ export function createMockApi(opts: MockOpts = {}): Api {
       created.delete(k);
       removed.add(k);
       rev++;
-      return { ...clone(n), managed: false, meta: {}, items: [], warnings: [], version: null, via: null, has_todo: false, children: [] };
+      return { ...clone(n), managed: false, meta: {}, items: [], warnings: [], version: null, via: null, children: [] };
     },
     async listDirs(req): Promise<DirEntry[]> {
       await wait();
@@ -214,12 +205,16 @@ export function createMockApi(opts: MockOpts = {}): Api {
       return { text: reg ? reg.text : await fabric.readRecord(path), mtime: 0 };
     },
     async fabricWrite(req) {
-      try { await fabric.writeRecord(req.path, req.text, req.expected_updated_at); } catch (e) { throw new ApiError(409, (e as Error).message); }
+      try { await fabric.writeRecord(req.path, req.text, req.expected_updated_at); } catch (e) {
+        const m = (e as Error).message;
+        throw new ApiError(m.startsWith('state may not change') ? 403 : 409, m);
+      }
       return { mtime: 0 };
     },
     async fabricCreate(req) {
       try { return await fabric.createRecord(req.folder, req); } catch (e) { throw new ApiError(400, (e as Error).message); }
     },
+    async importTodos() { throw new ApiError(501, 'import_todos is not available in the browser'); },
     async fabricStamp() { return { stamp: await fabric.stamp() }; },
     async fabricSettingsRead() { await wait(); return { exists: fabSettingsExist, settings: clone(fabSettings) }; },
     async fabricSettingsWrite(s) { await wait(); fabSettings = clone(s); fabSettingsExist = true; return { exists: true, settings: clone(fabSettings) }; },

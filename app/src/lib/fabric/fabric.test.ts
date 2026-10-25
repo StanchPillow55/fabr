@@ -13,9 +13,10 @@ describe('fixtures', () => {
 
   for (const { path, text } of records) {
     it(`parses ${path.split('fixtures/')[1]}`, () => {
-      expect(Object.keys(parseFrontMatter(text).data)).toEqual([...FIELDS]);
+      expect(Object.keys(parseFrontMatter(text).data)).toEqual(FIELDS.filter((f) => f !== 'pri'));
       const r = parseRecord(text);
       expect(r.schema).toBe(2);
+      expect(r.pri).toBe(0);
       expect(typeof r.state).toBe('string');
       expect(r.step === null || typeof r.step === 'string').toBe(true);
       expect(typeof r.waiting).toBe('boolean');

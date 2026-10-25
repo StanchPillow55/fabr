@@ -8,10 +8,10 @@ import {
 import { HEAD, LIST_PAD, MAX_ROWS, ROLLUP, ROW } from './constants';
 
 const TODAY = '2026-10-19';
-const it_ = (o: Partial<Item> = {}): Item => ({ id: null, status: 'todo', due: null, title: 't', pri: null, ...o });
+const it_ = (o: Partial<Item> = {}): Item => ({ id: 'r', status: 'todo', due: null, title: 't', pri: 0, ...o });
 const node = (path: string, o: Partial<Node> = {}): Node => ({
   source: 'local', path, name: path.split('/').pop() || 'root', managed: true, meta: {}, items: [],
-  warnings: [], version: 'v', via: null, has_todo: true, children: [], ...o,
+  warnings: [], version: 'v', via: null, children: [], ...o,
 });
 const none = new Set<string>();
 const ctx = (o = {}) => ({ today: TODAY, filter: 'all' as const, hideDone: false, collapsed: none, moreOpen: none, forceOpen: none, ...o });
@@ -363,10 +363,10 @@ describe('the / root', () => {
     expect(isVirtualRoot(tree().children[0])).toBe(false);
     expect(nodeKey(tree())).toBe(ROOT_KEY);
   });
-  it('rootCounts: open = todo + wip, overdue over the whole tree (the rollup of collapsed cards)', () => {
-    expect(rootCounts(tree(), TODAY)).toEqual({ open: 3, wip: 1, overdue: 2 });
+  it('rootCounts: todo and active apart, overdue over the whole tree (the rollup of collapsed cards)', () => {
+    expect(rootCounts(tree(), TODAY)).toEqual({ todo: 2, active: 1, overdue: 2 });
     const r = rollup(tree(), TODAY);
-    expect(rootCounts(tree(), TODAY).open).toBe(r.todo + r.wip);
+    expect(rootCounts(tree(), TODAY)).toEqual({ todo: r.todo, active: r.wip, overdue: r.overdue });
   });
   it('sourceLines: name, host or local, open count and the source error', () => {
     const sources = [
@@ -496,5 +496,12 @@ describe('errorParts', () => {
     const [line] = sourceLines(root, [{ id: 'b', name: 'Beta', host: 'box', root: '~', prune: null }], [{ source: 'b', message: msg }], TODAY, undefined, ['b']);
     expect(line.error).toBe(msg);
     expect(errorParts(line.error!).filter((p) => p.url).map((p) => p.url)).toEqual(['https://login.tailscale.com/a/abc']);
+  });
+});
+
+describe('priority 0 means none', () => {
+  it('sorts after 1..3 in compareItems and in the pri column', () => {
+    const items = [it_({ id: 'a', title: 'a', pri: 0 }), it_({ id: 'b', title: 'b', pri: 3 }), it_({ id: 'c', title: 'c', pri: 1 })];
+    expect([...items].sort(compareItems).map((i) => i.id)).toEqual(['c', 'b', 'a']);
   });
 });

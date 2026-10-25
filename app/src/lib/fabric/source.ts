@@ -1,10 +1,11 @@
 import { isoNow } from './answer';
+import { parseRecord } from './parse';
 import { serializeRecord } from './serialize';
-import type { TaskRecord } from './types';
+import { SCHEMA, type TaskRecord } from './types';
 
 export interface RawRecord { path: string; text: string }
 
-export interface CreateFields { title: string; due?: string | null; context?: string; spec?: string; success?: string }
+export interface CreateFields { title: string; due?: string | null; pri?: number; context?: string; spec?: string; success?: string }
 
 export interface FabricSource {
   listRecords(): Promise<RawRecord[]>;
@@ -28,6 +29,17 @@ export function updatedAtOf(text: string): string {
   return '';
 }
 
+export function guardState(before: string, after: string, now: Date = new Date()): string {
+  const a = parseRecord(before);
+  const b = parseRecord(after);
+  if (a.state === b.state) return after;
+  if (a.state !== 'reminder' || b.state !== 'succeeded') throw new Error(`state may not change from ${a.state} to ${b.state}`);
+  const log = [b.sections.log, `- ${isoNow(now)} done: marked done by hand`].filter(Boolean).join('\n');
+  return serializeRecord({ ...b, sections: { ...b.sections, log } });
+}
+
+const DUE = /^\d{4}-\d{2}-\d{2}(T([01]\d|2[0-3]):[0-5]\d)?$/;
+
 export function taskSlug(title: string): string {
   const slug = title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+/, '').slice(0, 40).replace(/-+$/, '');
   return slug || 'task';
@@ -36,7 +48,7 @@ export function taskSlug(title: string): string {
 export function newRecord(id: string, f: CreateFields, now: Date = new Date()): TaskRecord {
   const at = isoNow(now);
   return {
-    schema: 2, id, source: null, title: f.title.trim(), due: f.due || null, state: 'reminder', step: null, waiting: false,
+    schema: SCHEMA, id, source: null, title: f.title.trim(), due: f.due || null, pri: f.pri ?? 0, state: 'reminder', step: null, waiting: false,
     created_at: at, updated_at: at, requests: { delegate: false, cancel: false, redelegate: false },
     question: null, answers: [], grants: { requested: [], granted: [] }, plan_meta: null, assertions: [],
     approval: null, verdict: null, cost_usd: 0, links: { redelegated_from: null, redelegated_to: null },
@@ -64,11 +76,13 @@ export class FixtureSource implements FabricSource {
     if (current !== expectedUpdatedAt) {
       throw new Error(`${path} changed: updated_at is "${current}", expected "${expectedUpdatedAt}"`);
     }
-    this.copy[path] = text;
+    this.copy[path] = guardState(this.copy[path], text);
     this.writes += 1;
   }
   async createRecord(folder: string, fields: CreateFields): Promise<{ path: string; id: string }> {
     if (!fields.title.trim()) throw new Error('a task needs a title');
+    if (fields.due && !DUE.test(fields.due)) throw new Error(`bad date: ${fields.due}`);
+    if (fields.pri !== undefined && !(Number.isInteger(fields.pri) && fields.pri >= 0 && fields.pri <= 3)) throw new Error(`bad priority: ${fields.pri}`);
     const dir = folder.includes('/') ? `${folder.replace(/\/+$/, '')}/.fabric-space/tasks` : `/fixtures/${folder}/project/.fabric-space/tasks`;
     const base = `${isoNow().slice(0, 10)}-${taskSlug(fields.title)}`;
     let id = base;

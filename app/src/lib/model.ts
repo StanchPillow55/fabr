@@ -194,6 +194,7 @@ export function boxModel(n: Node, ctx: BoxCtx): BoxModel {
   } else if (n.managed && !collapsed) {
     h += LIST_PAD + ROW + Math.max(shown.length, 1) * ROW;
     if (more > 0 || (open && visible.length > MAX_ROWS)) h += ROW;
+    h += n.warnings.length * ROW;
   }
   if (collapsed) h += ROLLUP;
   return { collapsed, visible, shown, more, h: h + 2 };
@@ -224,9 +225,9 @@ export interface SourceLine {
   pending: boolean;
 }
 
-export function rootCounts(root: Node, today: string, now?: string): { open: number; wip: number; overdue: number } {
+export function rootCounts(root: Node, today: string, now?: string): { todo: number; active: number; overdue: number } {
   const r = rollup(root, today, now);
-  return { open: r.todo + r.wip, wip: r.wip, overdue: r.overdue };
+  return { todo: r.todo, active: r.wip, overdue: r.overdue };
 }
 
 export interface ErrorPart {
@@ -268,8 +269,8 @@ export function compareItems(a: Item, b: Item): number {
   const da = a.status === 'done' ? 1 : 0;
   const db = b.status === 'done' ? 1 : 0;
   if (da !== db) return da - db;
-  const pa = a.pri ?? 99;
-  const pb = b.pri ?? 99;
+  const pa = a.pri || 99;
+  const pb = b.pri || 99;
   if (pa !== pb) return pa - pb;
   const dc = compareDue(a.due, b.due);
   if (dc) return dc;
@@ -329,7 +330,7 @@ export function sortRows(rows: ListRow[], by: SortBy, dir: SortDir, today: strin
     switch (by) {
       case 'source': return a.source.localeCompare(b.source);
       case 'node': return a.path.localeCompare(b.path);
-      case 'pri': return (a.item.pri ?? 99) - (b.item.pri ?? 99);
+      case 'pri': return (a.item.pri || 99) - (b.item.pri || 99);
       case 'status': return STATUS_ORDER[a.item.status] - STATUS_ORDER[b.item.status];
       case 'title': return a.item.title.localeCompare(b.item.title);
       case 'due':

@@ -603,3 +603,20 @@ input.mrow__key { text-transform: none; color: var(--label); }
 .settings-swatches .swatch { width: 26px; height: 26px; }
 .settings-kbd { margin-left: auto; padding: 1px 7px; border-radius: var(--radius-pill); background: var(--fill-3); font: inherit; font-size: var(--fs-13); font-variant-numeric: tabular-nums; color: var(--label); }
 .settings-sheet .log-path { flex: 1; text-align: right; }
+
+.trow { position: relative; display: flex; align-items: center; }
+.trow + .trow::before { content: ""; position: absolute; top: 0; left: 16px; right: 0; border-top: 0.5px solid var(--sep); }
+.trow > .row-item { flex: 1; min-width: 0; width: auto; }
+.trow .row-item::before { display: none; }
+.trow__tick.btn--icon { flex: none; width: 28px; height: 28px; margin-right: 10px; color: var(--green); }
+.taskdone { margin-top: 10px; }
+.taskdone__summary { cursor: pointer; padding: 4px 2px; color: var(--label-2); font-size: var(--fs-12); }
+.portal { display: contents; }
+.addtask--card { display: flex; align-items: center; gap: 8px; height: 100%; padding: 0 10px; }
+.addtask__note { margin: 6px 2px 0; }
+.card__remote { padding: 4px 10px 6px; color: var(--label-3); font-size: var(--fs-11); }
+.row__link { all: unset; box-sizing: border-box; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
+.row__link:hover { text-decoration: underline; }
+.row__tick { all: unset; box-sizing: border-box; flex: none; display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; border-radius: 50%; color: var(--green); cursor: pointer; }
+.row__tick:hover { background: var(--fill-3); }
+.row--warn { color: var(--orange); font-size: var(--fs-12); gap: 4px; }

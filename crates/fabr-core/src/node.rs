@@ -1,11 +1,11 @@
 use crate::fs::Fs;
+use crate::item::{Item, items_in};
 use crate::meta::{Meta, parse_meta};
-use crate::todo::{Item, Line, parse_todo};
 use serde::{Deserialize, Serialize};
 
 pub const NODE_DIR: &str = ".fabr";
 pub const META_FILE: &str = "meta.toml";
-pub const TODO_FILE: &str = ".todo";
+pub const LEGACY_TODO_FILE: &str = ".todo";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Node {
@@ -18,7 +18,6 @@ pub struct Node {
     pub warnings: Vec<String>,
     pub version: Option<String>,
     pub via: Option<String>,
-    pub has_todo: bool,
     pub children: Vec<Node>,
 }
 
@@ -34,7 +33,6 @@ impl Node {
             warnings: Vec::new(),
             version: None,
             via: None,
-            has_todo: false,
             children: Vec::new(),
         }
     }
@@ -52,12 +50,8 @@ pub fn join(a: &str, b: &str) -> String {
     if a.is_empty() { b.to_string() } else { format!("{a}/{b}") }
 }
 
-pub fn version_of(meta: &[u8], todo: &[u8]) -> String {
-    let mut h = sha1_smol::Sha1::new();
-    h.update(meta);
-    h.update(b"\0");
-    h.update(todo);
-    h.digest().to_string()
+pub fn version_of(meta: &[u8]) -> String {
+    sha1_smol::Sha1::from(meta).digest().to_string()
 }
 
 pub fn load_node(fs: &dyn Fs, source: &str, path: &str) -> Node {
@@ -67,12 +61,9 @@ pub fn load_node(fs: &dyn Fs, source: &str, path: &str) -> Node {
         return node;
     }
     let meta_p = join(&xs, META_FILE);
-    let todo_p = join(&xs, TODO_FILE);
     let meta_b = fs.read(&meta_p).unwrap_or_default();
-    let todo_b = fs.read(&todo_p).unwrap_or_default();
     node.managed = true;
-    node.version = Some(version_of(&meta_b, &todo_b));
-    node.has_todo = fs.exists(&todo_p);
+    node.version = Some(version_of(&meta_b));
     match std::str::from_utf8(&meta_b) {
         Ok(text) => match parse_meta(text) {
             Ok(m) => {
@@ -83,13 +74,10 @@ pub fn load_node(fs: &dyn Fs, source: &str, path: &str) -> Node {
         },
         Err(e) => node.warnings.push(format!("meta.toml does not parse: {e}")),
     }
-    for line in parse_todo(&String::from_utf8_lossy(&todo_b)) {
-        match line {
-            Line::Item(i) => node.items.push(i),
-            Line::Raw { text, bad: true, line } => node.warnings.push(format!(".todo line {line} not understood: {text:?}")),
-            Line::Raw { .. } => {}
-        }
+    if fs.exists(&join(&xs, LEGACY_TODO_FILE)) {
+        node.warnings.push(".fabr/.todo is no longer read; run `fabr import` to turn its lines into reminders".into());
     }
+    node.items = items_in(fs, path);
     node
 }
 

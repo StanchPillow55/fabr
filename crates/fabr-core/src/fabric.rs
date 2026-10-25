@@ -1,5 +1,5 @@
 use crate::error::FabrError;
-use crate::taskrec::{self, TaskRecord};
+use crate::taskrec::{self, State, TaskRecord};
 use serde::{Deserialize, Serialize};
 use std::io::Write;
 use std::path::{Component, Path, PathBuf};
@@ -214,8 +214,9 @@ fn task_markdown(p: &Path) -> bool {
 /// Keep fields the GUI does not own, then let the schema writer check
 /// `updated_at` and render the bytes.
 fn gui_record(disk: &TaskRecord, incoming: &TaskRecord) -> Result<TaskRecord, FabrError> {
-    if incoming.state != disk.state {
-        return Err(FabrError::BadRequest("the gui does not write state".into()));
+    let by_hand = disk.state == State::Reminder && incoming.state == State::Succeeded;
+    if incoming.state != disk.state && !by_hand {
+        return Err(FabrError::BadRequest("the gui writes state only to mark a reminder done".into()));
     }
     if incoming.step != disk.step {
         return Err(FabrError::BadRequest("the gui does not write step".into()));
@@ -230,13 +231,19 @@ fn gui_record(disk: &TaskRecord, incoming: &TaskRecord) -> Result<TaskRecord, Fa
     rec.grants.requested = disk.grants.requested.clone();
     rec.plan_meta = disk.plan_meta.clone();
     rec.assertions = disk.assertions.clone();
-    rec.verdict = disk.verdict.clone();
+    rec.verdict = if by_hand { None } else { disk.verdict.clone() };
     rec.cost_usd = disk.cost_usd;
     rec.links = disk.links.clone();
     rec.spec = disk.spec.clone();
     rec.success = disk.success.clone();
     rec.plan = disk.plan.clone();
     rec.log = disk.log.clone();
+    if by_hand {
+        if !rec.log.is_empty() && !rec.log.ends_with('\n') {
+            rec.log.push('\n');
+        }
+        rec.log.push_str(&format!("- {} done: marked done by hand\n", chrono::Utc::now().format("%Y-%m-%dT%H:%M:%SZ")));
+    }
     if let Some(kept) = &disk.approval {
         match rec.approval.as_mut() {
             Some(approval) => approval.digest = kept.digest.clone(),
@@ -289,6 +296,8 @@ pub struct FabricCreateReq {
     pub title: String,
     #[serde(default)]
     pub due: Option<String>,
+    #[serde(default)]
+    pub pri: Option<u8>,
     #[serde(default)]
     pub context: Option<String>,
     #[serde(default)]
@@ -357,9 +366,13 @@ pub fn create_in(req: &FabricCreateReq, user_home: &Path) -> Result<FabricCreate
     }
     let due = req.due.as_deref().map(str::trim).filter(|d| !d.is_empty());
     if let Some(d) = due
-        && chrono::NaiveDate::parse_from_str(d, "%Y-%m-%d").is_err()
+        && !taskrec::valid_due(d)
     {
-        return Err(FabrError::BadRequest(format!("due must be YYYY-MM-DD: {d}")));
+        return Err(FabrError::BadRequest(format!("due must be YYYY-MM-DD or YYYY-MM-DDTHH:MM: {d}")));
+    }
+    let pri = req.pri.unwrap_or(0);
+    if pri > 3 {
+        return Err(FabrError::BadRequest(format!("pri must be 0-3: {pri}")));
     }
     let folder = crate::paths::expand_home(req.folder.trim(), user_home);
     if !folder.is_absolute() || !folder.is_dir() {
@@ -380,7 +393,7 @@ pub fn create_in(req: &FabricCreateReq, user_home: &Path) -> Result<FabricCreate
             continue;
         }
         let text = format!(
-            "---\nschema: 2\nid: {id}\nsource: null\ntitle: {}\ndue: {}\nstate: reminder\nstep: null\nwaiting: false\ncreated_at: {stamp}\nupdated_at: {stamp}\nrequests: {{delegate: false, cancel: false, redelegate: false}}\nquestion: null\nanswers: []\ngrants: {{requested: [], granted: []}}\nplan_meta: null\nassertions: []\napproval: null\nverdict: null\ncost_usd: 0\nlinks: {{redelegated_from: null, redelegated_to: null}}\n---\n## Context\n{}## Spec\n{}## Success\n{}## Plan\n## Log\n",
+            "---\nschema: 3\nid: {id}\nsource: null\ntitle: {}\ndue: {}\npri: {pri}\nstate: reminder\nstep: null\nwaiting: false\ncreated_at: {stamp}\nupdated_at: {stamp}\nrequests: {{delegate: false, cancel: false, redelegate: false}}\nquestion: null\nanswers: []\ngrants: {{requested: [], granted: []}}\nplan_meta: null\nassertions: []\napproval: null\nverdict: null\ncost_usd: 0\nlinks: {{redelegated_from: null, redelegated_to: null}}\n---\n## Context\n{}## Spec\n{}## Success\n{}## Plan\n## Log\n",
             yaml_title(title),
             due.unwrap_or("null"),
             section_text(&req.context),
@@ -397,6 +410,60 @@ pub fn create_in(req: &FabricCreateReq, user_home: &Path) -> Result<FabricCreate
             Err(e) => return Err(io(e.error)),
         }
     }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ImportTodosReq {
+    pub path: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ImportTodosRes {
+    pub created: usize,
+}
+
+pub fn front_matter_items(folder: &Path) -> Vec<crate::item::Item> {
+    crate::item::items_in(&crate::fs::LocalFs::new(folder.to_path_buf()), "")
+}
+
+pub fn import_todos(req: &ImportTodosReq) -> Result<ImportTodosRes, FabrError> {
+    import_todos_in(req, &crate::setup::Ctx::from_env().home)
+}
+
+pub fn import_todos_in(req: &ImportTodosReq, user_home: &Path) -> Result<ImportTodosRes, FabrError> {
+    let folder = crate::paths::expand_home(req.path.trim(), user_home);
+    if !folder.is_absolute() || !folder.is_dir() {
+        return Err(FabrError::NotFound(format!("not a folder: {}", req.path)));
+    }
+    let xs = folder.join(crate::node::NODE_DIR);
+    let todo = xs.join(crate::node::LEGACY_TODO_FILE);
+    let text = match std::fs::read(&todo) {
+        Ok(b) => String::from_utf8_lossy(&b).into_owned(),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(ImportTodosRes { created: 0 }),
+        Err(e) => return Err(FabrError::Io(format!("{}: {e}", todo.display()))),
+    };
+    let mut created = 0;
+    for line in crate::todo::parse_legacy(&text).into_iter().filter(|l| !l.done) {
+        let item = FabricCreateReq {
+            folder: folder.to_string_lossy().into_owned(),
+            title: line.title,
+            due: line.due,
+            pri: Some(line.pri),
+            context: Some("Imported from .fabr/.todo".into()),
+            spec: None,
+            success: None,
+        };
+        create_in(&item, user_home)?;
+        created += 1;
+    }
+    let mut target = xs.join(".todo.imported");
+    let mut n = 1;
+    while target.exists() {
+        n += 1;
+        target = xs.join(format!(".todo.imported.{n}"));
+    }
+    std::fs::rename(&todo, &target).map_err(|e| FabrError::Io(format!("{}: {e}", todo.display())))?;
+    Ok(ImportTodosRes { created })
 }
 
 #[cfg(test)]
@@ -636,6 +703,7 @@ mod tests {
             folder: d.path().to_string_lossy().into_owned(),
             title: "  Order 2 kg of Black PLA!! ".into(),
             due: Some("2026-10-28".into()),
+            pri: None,
             context: Some("Same brand as last time.".into()),
             spec: None,
             success: Some("it arrives".into()),
@@ -658,16 +726,17 @@ mod tests {
             folder: d.path().to_string_lossy().into_owned(),
             title: "order: \"filament\"".into(),
             due: None,
+            pri: None,
             context: Some("ctx\n## Plan\nmore".into()),
             spec: Some("do it".into()),
             success: None,
         };
         let r = create_in(&req, d.path()).unwrap();
         let text = read(&FabricReadReq { path: r.path.clone() }).unwrap().text;
-        assert!(text.starts_with("---\nschema: 2\n"));
+        assert!(text.starts_with("---\nschema: 3\n"));
         assert_eq!(updated_at(&text).len(), 20);
         assert!(text.contains(&format!("id: {}\n", r.id)));
-        assert!(text.contains("title: \"order: \\\"filament\\\"\"\ndue: null\nstate: reminder\nstep: null\nwaiting: false\n"));
+        assert!(text.contains("title: \"order: \\\"filament\\\"\"\ndue: null\npri: 0\nstate: reminder\nstep: null\nwaiting: false\n"));
         assert!(text.contains("created_at: ") && text.contains("requests: {delegate: false, cancel: false, redelegate: false}\n"));
         assert!(text.contains(
             "grants: {requested: [], granted: []}\nplan_meta: null\nassertions: []\napproval: null\nverdict: null\ncost_usd: 0\n"
@@ -684,6 +753,7 @@ mod tests {
             folder: d.path().to_string_lossy().into_owned(),
             title: "a".into(),
             due: None,
+            pri: None,
             context: None,
             spec: None,
             success: None,
@@ -706,5 +776,108 @@ mod tests {
         assert_eq!(slugify("Hello,  World"), "hello-world");
         assert_eq!(slugify("!!!"), "task");
         assert_eq!(slugify(&format!("{} z", "a".repeat(39))), "a".repeat(39));
+    }
+
+    fn create_req(dir: &Path, title: &str) -> FabricCreateReq {
+        FabricCreateReq {
+            folder: dir.to_string_lossy().into_owned(),
+            title: title.into(),
+            due: None,
+            pri: None,
+            context: None,
+            spec: None,
+            success: None,
+        }
+    }
+
+    #[test]
+    fn create_takes_priority_and_timed_due() {
+        let d = tempfile::tempdir().unwrap();
+        let req = FabricCreateReq { due: Some("2026-10-28T09:30".into()), pri: Some(3), ..create_req(d.path(), "call the bank") };
+        let made = create_in(&req, d.path()).unwrap();
+        let rec = taskrec::parse(&read(&FabricReadReq { path: made.path }).unwrap().text).unwrap();
+        assert_eq!((rec.schema, rec.pri, rec.due.as_deref(), rec.state), (3, 3, Some("2026-10-28T09:30"), State::Reminder));
+        for bad in ["2026-10-28T25:00", "2026-10-28T9:30", "2026-10-28 09:30"] {
+            let r = create_in(&FabricCreateReq { due: Some(bad.into()), ..create_req(d.path(), "x") }, d.path());
+            assert!(matches!(r, Err(FabrError::BadRequest(_))), "{bad}");
+        }
+        let r = create_in(&FabricCreateReq { pri: Some(4), ..create_req(d.path(), "x") }, d.path());
+        assert!(matches!(r, Err(FabrError::BadRequest(_))));
+        let items = front_matter_items(d.path());
+        assert_eq!(items.len(), 1);
+        assert_eq!((items[0].pri, items[0].due.as_deref()), (3, Some("2026-10-28T09:30")));
+    }
+
+    fn written(dir: &Path, state: State) -> (String, TaskRecord) {
+        let made = create_in(&create_req(dir, "pay rent"), dir).unwrap();
+        let mut rec = taskrec::parse(&read(&FabricReadReq { path: made.path.clone() }).unwrap().text).unwrap();
+        rec.state = state;
+        (made.path, rec)
+    }
+
+    fn put_state(path: &str, rec: &TaskRecord) -> Result<FabricWriteRes, FabrError> {
+        let expected = taskrec::parse(&std::fs::read_to_string(path).unwrap()).unwrap().updated_at;
+        write(&FabricWriteReq { path: path.into(), text: taskrec::render(rec), expected_updated_at: expected })
+    }
+
+    #[test]
+    fn a_reminder_can_be_marked_done_by_hand() {
+        let d = tempfile::tempdir().unwrap();
+        let (path, rec) = written(d.path(), State::Succeeded);
+        put_state(&path, &rec).unwrap();
+        let after = taskrec::parse(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(after.state, State::Succeeded);
+        assert!(after.verdict.is_none() && after.step.is_none());
+        assert!(after.log.trim_end().ends_with(" done by hand") && after.log.starts_with("- 20"), "{}", after.log);
+        assert_eq!(front_matter_items(d.path())[0].status, crate::item::Status::Done);
+    }
+
+    #[test]
+    fn every_other_state_change_is_refused() {
+        let d = tempfile::tempdir().unwrap();
+        for to in [State::Task, State::Defined, State::InProgress, State::Failed] {
+            let (path, rec) = written(d.path(), to);
+            let err = put_state(&path, &rec).unwrap_err();
+            assert!(matches!(err, FabrError::BadRequest(_)), "{to:?}");
+            assert_eq!(taskrec::parse(&std::fs::read_to_string(&path).unwrap()).unwrap().state, State::Reminder);
+        }
+        let (path, mut rec) = written(d.path(), State::Succeeded);
+        put_state(&path, &rec).unwrap();
+        rec.state = State::Reminder;
+        assert!(put_state(&path, &rec).is_err());
+        rec.state = State::Failed;
+        assert!(put_state(&path, &rec).is_err());
+    }
+
+    #[test]
+    fn import_creates_reminders_for_open_lines_and_renames_the_file() {
+        let d = tempfile::tempdir().unwrap();
+        let xs = d.path().join(".fabr");
+        std::fs::create_dir_all(&xs).unwrap();
+        std::fs::write(
+            xs.join(".todo"),
+            "# fabr todo\nwip  2026-10-19  Migrate auth  pri:2  id:3380\ndone -  Shipped\ntodo 2026-10-20T09:30  Call the bank\nnot a line\n",
+        )
+        .unwrap();
+        let req = ImportTodosReq { path: d.path().to_string_lossy().into_owned() };
+        assert_eq!(import_todos_in(&req, d.path()).unwrap().created, 2);
+        assert!(!xs.join(".todo").exists() && xs.join(".todo.imported").is_file());
+        let mut items = front_matter_items(d.path());
+        items.sort_by(|a, b| a.title.cmp(&b.title));
+        assert_eq!(items.iter().map(|i| i.title.as_str()).collect::<Vec<_>>(), ["Call the bank", "Migrate auth"]);
+        assert_eq!((items[0].due.as_deref(), items[0].pri), (Some("2026-10-20T09:30"), 0));
+        assert_eq!((items[1].due.as_deref(), items[1].pri), (Some("2026-10-19"), 2));
+        assert!(items.iter().all(|i| i.status == crate::item::Status::Todo));
+        let text = std::fs::read_to_string(d.path().join(".fabric-space/tasks").join(format!("{}.md", items[1].id))).unwrap();
+        assert!(taskrec::parse(&text).unwrap().context.contains("Imported from .fabr/.todo"));
+        assert_eq!(import_todos_in(&req, d.path()).unwrap().created, 0);
+        assert_eq!(front_matter_items(d.path()).len(), 2);
+    }
+
+    #[test]
+    fn import_refuses_a_missing_folder() {
+        let d = tempfile::tempdir().unwrap();
+        let req = ImportTodosReq { path: d.path().join("nope").to_string_lossy().into_owned() };
+        assert!(matches!(import_todos_in(&req, d.path()), Err(FabrError::NotFound(_))));
     }
 }

@@ -106,16 +106,16 @@ fn save_conflict_and_stamp() {
     let (_, s1) = srv.get("/api/get_stamp");
     let (_, tree) = srv.get("/api/get_tree");
     let work = tree["root"]["children"][0]["children"].as_array().unwrap().iter().find(|c| c["path"] == "work").unwrap().clone();
-    let mut items = work["items"].as_array().unwrap().clone();
-    items.push(json!({"status": "todo", "due": null, "title": "from test"}));
-    let req = json!({"source": "local", "path": "work", "version": work["version"], "items": items});
-    let (status, body) = srv.post("/api/save_todo", &req, &[]);
+    let mut meta = work["meta"].clone();
+    meta["description"] = json!("from test");
+    let req = json!({"source": "local", "path": "work", "version": work["version"], "meta": meta});
+    let (status, body) = srv.post("/api/save_meta", &req, &[]);
     assert_eq!(status, 200, "{body}");
-    assert_eq!(body["items"].as_array().unwrap().last().unwrap()["title"], "from test");
-    assert!(std::fs::read_to_string(srv.root.join("work/.fabr/.todo")).unwrap().contains("from test"));
+    assert_eq!(body["meta"]["description"], "from test");
+    assert!(std::fs::read_to_string(srv.root.join("work/.fabr/meta.toml")).unwrap().contains("from test"));
     let (_, s2) = srv.get("/api/get_stamp");
     assert_ne!(s1["stamp"], s2["stamp"]);
-    let (status, body) = srv.post("/api/save_todo", &req, &[]);
+    let (status, body) = srv.post("/api/save_meta", &req, &[]);
     assert_eq!(status, 409);
     assert_eq!(body["code"], 409);
     assert_eq!(body["node"]["path"], "work");
@@ -161,39 +161,35 @@ fn meta_init_sources_settings() {
 #[test]
 fn rejects_bad_requests() {
     let srv = start();
-    let (status, body) = srv.post("/api/save_todo", &json!({"source": "local", "path": "../", "version": "x", "items": []}), &[]);
+    let (status, body) = srv.post("/api/save_meta", &json!({"source": "local", "path": "../", "version": "x", "meta": {"name": "x"}}), &[]);
     assert_eq!(status, 400);
     assert_eq!(body["code"], 400);
-    let ok = json!({"source": "local", "path": "work", "version": "x", "items": []});
-    let (status, _) = srv.post("/api/save_todo", &ok, &[("Origin", "http://evil.example")]);
+    let ok = json!({"source": "local", "path": "work", "version": "x", "meta": {"name": "work"}});
+    let (status, _) = srv.post("/api/save_meta", &ok, &[("Origin", "http://evil.example")]);
     assert_eq!(status, 403);
     let origin = format!("http://127.0.0.1:{}", srv.port);
-    let (status, _) = srv.post("/api/save_todo", &ok, &[("Origin", origin.as_str())]);
+    let (status, _) = srv.post("/api/save_meta", &ok, &[("Origin", origin.as_str())]);
     assert_eq!(status, 409);
-    let (status, _) = srv.post("/api/save_todo", &ok, &[("Origin", "null")]);
+    let (status, _) = srv.post("/api/save_meta", &ok, &[("Origin", "null")]);
     assert_eq!(status, 403);
     let (s, _, _) = srv.raw("GET", "/api/get_tree", None, &[("Host", "evil.example")]);
     assert_eq!(s, 403);
     let host = format!("localhost:{}", srv.port);
     let (s, _, _) = srv.raw("GET", "/api/get_stamp", None, &[("Host", host.as_str())]);
     assert_eq!(s, 200);
-    let (s, _, _) = srv.raw("POST", "/api/save_todo", Some(ok.to_string().as_bytes()), &[("Content-Type", "text/plain")]);
+    let (s, _, _) = srv.raw("POST", "/api/save_meta", Some(ok.to_string().as_bytes()), &[("Content-Type", "text/plain")]);
     assert_eq!(s, 415);
-    let (s, _, _) = srv.raw("POST", "/api/save_todo", Some(b"{}"), &[]);
+    let (s, _, _) = srv.raw("POST", "/api/save_meta", Some(b"{}"), &[]);
     assert_eq!(s, 415);
     let big = vec![b' '; server::MAX_BODY + 10];
-    let (s, _, _) = srv.raw("POST", "/api/save_todo", Some(&big), &[("Content-Type", "application/json")]);
+    let (s, _, _) = srv.raw("POST", "/api/save_meta", Some(&big), &[("Content-Type", "application/json")]);
     assert_eq!(s, 413);
-    let (s, _, _) = srv.raw("POST", "/api/save_todo", Some(b"{nope"), &[("Content-Type", "application/json; charset=utf-8")]);
+    let (s, _, _) = srv.raw("POST", "/api/save_meta", Some(b"{nope"), &[("Content-Type", "application/json; charset=utf-8")]);
     assert_eq!(s, 400);
-    let (s, _) = srv.post(
-        "/api/save_todo",
-        &json!({"source": "local", "path": "work", "version": "x", "items": [{"status": "nope", "title": "x"}]}),
-        &[],
-    );
+    let (s, _) = srv.post("/api/save_meta", &json!({"source": "local", "path": "work", "version": "x", "meta": "nope"}), &[]);
     assert_eq!(s, 400);
     assert_eq!(srv.get("/api/nope").0, 404);
-    assert_eq!(srv.get("/api/save_todo").0, 405);
+    assert_eq!(srv.get("/api/save_meta").0, 405);
     assert_eq!(srv.post("/api/get_tree", &json!({}), &[]).0, 405);
 }
 
@@ -258,7 +254,7 @@ fn cli_init_depth() {
     assert_eq!(crate::cmd_init(root.clone(), false, None).unwrap_err().code(), 409);
     crate::cmd_init(root.clone(), false, Some(2)).unwrap();
     for d in ["a", "b", "a/x"] {
-        assert!(root.join(d).join(".fabr/.todo").is_file(), "{d}");
+        assert!(root.join(d).join(".fabr/meta.toml").is_file(), "{d}");
     }
     for d in ["a/x/deep", "node_modules", ".dot"] {
         assert!(!root.join(d).join(".fabr").exists(), "{d}");

@@ -139,14 +139,14 @@ mod tests {
     fn phase5_reject_reserved_paths() {
         let (_tmp, node) = node();
         std::fs::create_dir_all(node.join(".fabr")).unwrap();
-        std::fs::write(node.join(".fabr/.todo"), "keep\n").unwrap();
+        std::fs::write(node.join(".fabr/meta.toml"), "keep\n").unwrap();
         std::fs::create_dir_all(node.join(".fabric-space")).unwrap();
-        let err = write_file(&node, ".fabr/.todo", "hack").unwrap_err();
-        assert_eq!(std::fs::read_to_string(node.join(".fabr/.todo")).unwrap(), "keep\n", "{err}");
+        let err = write_file(&node, ".fabr/meta.toml", "hack").unwrap_err();
+        assert_eq!(std::fs::read_to_string(node.join(".fabr/meta.toml")).unwrap(), "keep\n", "{err}");
         assert!(write_file(&node, ".fabric-space/secret", "no").is_err());
         assert!(!node.join(".fabric-space/secret").exists());
-        assert!(read_file(&node, ".fabr/.todo").is_err());
-        assert_eq!(std::fs::read_to_string(node.join(".fabr/.todo")).unwrap(), "keep\n");
+        assert!(read_file(&node, ".fabr/meta.toml").is_err());
+        assert_eq!(std::fs::read_to_string(node.join(".fabr/meta.toml")).unwrap(), "keep\n");
     }
 
     #[test]

@@ -1,4 +1,5 @@
-use crate::node::{META_FILE, NODE_DIR, TODO_FILE};
+use crate::item::{SPACE_DIR, TASKS_DIR};
+use crate::node::{META_FILE, NODE_DIR};
 use crate::scan::Watched;
 use std::path::Path;
 use std::time::UNIX_EPOCH;
@@ -23,11 +24,13 @@ pub fn stamp_paths(root: &Path, paths: &[Watched]) -> String {
         match std::fs::metadata(&xs) {
             Ok(st) if st.is_dir() => {
                 h.update(format!("x{}", mtime_ns(&st)).as_bytes());
-                for f in [META_FILE, TODO_FILE] {
-                    match std::fs::metadata(xs.join(f)) {
-                        Ok(st) => h.update(format!("f{}:{}", mtime_ns(&st), st.len()).as_bytes()),
-                        Err(_) => h.update(b"f-"),
-                    }
+                match std::fs::metadata(xs.join(META_FILE)) {
+                    Ok(st) => h.update(format!("f{}:{}", mtime_ns(&st), st.len()).as_bytes()),
+                    Err(_) => h.update(b"f-"),
+                }
+                match std::fs::metadata(d.join(SPACE_DIR).join(TASKS_DIR)) {
+                    Ok(st) if st.is_dir() => h.update(format!("t{}", mtime_ns(&st)).as_bytes()),
+                    _ => h.update(b"t-"),
                 }
             }
             _ => h.update(b"x-"),

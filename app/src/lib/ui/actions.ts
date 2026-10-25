@@ -22,3 +22,5 @@ export function commit(node: HTMLElement, opts: CommitOpts) {
     },
   };
 }
+
+export const commitInput = (fn: (el: HTMLInputElement) => void) => (el: HTMLInputElement) => commit(el, () => fn(el)).destroy;

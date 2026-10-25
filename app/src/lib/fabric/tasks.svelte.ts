@@ -8,6 +8,7 @@ import { loadReadPosition, parseEvents, reconcileReadPosition, saveReadPosition,
 import { COLUMNS, columnOf, folderName, folderOf, nodeFolder, type ColumnId, type Entry } from './folder';
 import { createFabricSource } from './live';
 import { parseRecord } from './parse';
+import { submitDone } from './done';
 import { submitRequest, type RequestKey } from './requests';
 import type { CreateFields, FabricSource } from './source';
 import { buildAgents, mostAdvanced, sortAgents, type AgentView } from './stage';
@@ -19,6 +20,10 @@ export type Held = Entry & { text: string };
 export type FolderCounts = { byColumn: Record<ColumnId, number>; waiting: number; total: number };
 
 const EMPTY: Held[] = [];
+
+function itemsSig(records: Held[]): string {
+  return records.map((h) => `${h.path}|${h.record.state}|${h.record.title}|${h.record.due ?? ''}|${h.record.pri}`).join('\n');
+}
 
 export function localRoots(sources: Source[] | undefined): string[] {
   return (sources ?? []).filter((s) => !s.host).map((s) => s.root);
@@ -36,12 +41,14 @@ export class FabricStore {
   actionError = $state<string | null>(null);
   openPath = $state<string | null>(null);
   home = $state<string | null>(null);
+  onItemsChange: (() => void) | null = null;
 
   #source: FabricSource | null = null;
   #timer: ReturnType<typeof setInterval> | null = null;
   #last = '';
   #dead = false;
   #eventsKey = 'events';
+  #itemsSig: string | null = null;
 
   constructor(source: FabricSource | null = null) {
     this.#source = source;
@@ -83,6 +90,7 @@ export class FabricStore {
         const settings = await api.fabricSettingsRead();
         this.#source = await createFabricSource(settings, treeRoots);
         if (isTauri()) this.home = (await (await import('@tauri-apps/api/path')).homeDir()).replace(/\/+$/, '');
+        else if (import.meta.env.VITE_MOCK === '1') this.home = '/home/mock';
       }
     } catch (e) {
       this.errors = [(e as Error).message];
@@ -125,11 +133,15 @@ export class FabricStore {
     }
     this.records = ok;
     this.errors = bad;
+    const sig = itemsSig(ok);
+    const changed = this.#itemsSig !== null && sig !== this.#itemsSig;
+    this.#itemsSig = sig;
     this.registry = loadRegistry(await src.listRegistry()).entries;
     this.events = parseEvents(await src.readEvents());
     this.readPosition = reconcileReadPosition(this.#eventsKey, this.readPosition, this.events.length);
     this.heartbeat = await src.readBackendHeartbeat();
     this.loaded = true;
+    if (changed) this.onItemsChange?.();
   }
 
   folderFor(source: Source | undefined, path: string): string | null {
@@ -198,6 +210,15 @@ export class FabricStore {
   async request(h: Held, key: RequestKey): Promise<void> {
     await submitRequest(this.#source!, h.path, h.text, key);
     await this.#reread(h.path);
+  }
+
+  async markDone(path: string): Promise<void> {
+    const h = this.records.find((x) => x.path === path);
+    if (!h) throw new Error(`no loaded record for ${path}`);
+    await submitDone(this.#source!, h.path, h.text);
+    await this.#reread(h.path);
+    this.#itemsSig = itemsSig(this.records);
+    this.onItemsChange?.();
   }
 
   async createTask(folder: string, fields: CreateFields): Promise<Held> {

@@ -34,10 +34,7 @@ pub fn dir_entries(raw: impl IntoIterator<Item = (String, bool)>, prune: &HashSe
 #[derive(Debug, Clone, Default)]
 pub struct NodeFiles {
     pub meta: Option<Vec<u8>>,
-    pub todo: Option<Vec<u8>>,
 }
-
-pub const TODO_HEADER: &str = "# fabr todo";
 
 impl NodeFiles {
     pub fn initial(name: &str, show_depth: Option<u32>) -> NodeFiles {
@@ -47,7 +44,7 @@ impl NodeFiles {
             m.insert("show_depth".into(), MetaValue::Int(d as i64));
         }
         let meta = render_meta("", &m).expect("empty toml parses");
-        NodeFiles { meta: Some(meta.into_bytes()), todo: Some(format!("{TODO_HEADER}\n").into_bytes()) }
+        NodeFiles { meta: Some(meta.into_bytes()) }
     }
 }
 

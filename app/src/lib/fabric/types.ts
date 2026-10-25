@@ -5,9 +5,12 @@ export const STEPS = ['gather', 'define', 'plan', 'approve', 'execute', 'evaluat
 export type Step = (typeof STEPS)[number];
 
 export const FIELDS = [
-  'schema', 'id', 'source', 'title', 'due', 'state', 'step', 'waiting', 'created_at', 'updated_at', 'requests',
+  'schema', 'id', 'source', 'title', 'due', 'pri', 'state', 'step', 'waiting', 'created_at', 'updated_at', 'requests',
   'question', 'answers', 'grants', 'plan_meta', 'assertions', 'approval', 'verdict', 'cost_usd', 'links',
 ] as const;
+
+export const SCHEMA = 3;
+export const OPTIONAL_FIELDS: readonly string[] = ['pri'];
 
 export const SECTION_HEADINGS = ['Context', 'Spec', 'Success', 'Plan', 'Log'] as const;
 
@@ -70,6 +73,7 @@ export interface FrontMatter {
   source: TaskSource | null;
   title: string;
   due: string | null;
+  pri: number;
   state: State;
   step: Step | null;
   waiting: boolean;

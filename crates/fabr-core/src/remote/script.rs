@@ -19,15 +19,16 @@ pub fn snapshot_script(prune: &[String]) -> Result<String, FabrError> {
         format!("-o \"(\" {} \")\" -type d -prune -print0 ", names.join(" -o "))
     };
     Ok(format!(
-        "cd \"$1\" || exit {EXIT_NOT_NODE}; find . \"(\" -type d -name \".*\" \"!\" -name . \"!\" -name .fabr \")\" -prune \
-{pruned}-o \"(\" -type d -o -path \"*/.fabr/meta.toml\" -o -path \"*/.fabr/.todo\" \")\" -print0 | {TAR}"
+        "cd \"$1\" || exit {EXIT_NOT_NODE}; find . \"(\" -type d -name \".*\" \"!\" -name . \"!\" -name .fabr \"!\" -name .fabric-space \")\" -prune \
+{pruned}-o \"(\" -type d -o -path \"*/.fabr/meta.toml\" -o -path \"*/.fabric-space/tasks/*.md\" \")\" -print0 | {TAR}"
     ))
 }
 
 pub fn node_script() -> String {
     format!(
         "cd \"$1\" || exit {EXIT_NOT_NODE}; [ -d \"$2/.fabr\" ] || exit {EXIT_NOT_NODE}; \
-find \"$2/.fabr\" \"(\" -type d \"!\" -name .fabr \")\" -prune -o \"(\" -type d -o -name meta.toml -o -name .todo \")\" -print0 | {TAR}"
+{{ find \"$2/.fabr\" \"(\" -type d \"!\" -name .fabr \")\" -prune -o \"(\" -type d -o -name meta.toml \")\" -print0; \
+[ -d \"$2/.fabric-space/tasks\" ] && find \"$2/.fabric-space/tasks\" \"(\" -type d \"!\" -name tasks \")\" -prune -o \"(\" -type d -o -name \"*.md\" \")\" -print0; }} | {TAR}"
     )
 }
 
@@ -66,7 +67,7 @@ fn version_guard() -> Vec<String> {
         "d=\"$1/.fabr\"".to_string(),
         format!("[ -d \"$d\" ] || exit {nn}"),
         format!("cd \"$d\" || exit {io}"),
-        "h() { { cat meta.toml 2>/dev/null; dd if=/dev/zero bs=1 count=1 2>/dev/null; cat .todo 2>/dev/null; } | { sha1sum 2>/dev/null || shasum -a 1; }; }".to_string(),
+        "h() { cat meta.toml 2>/dev/null | { sha1sum 2>/dev/null || shasum -a 1; }; }".to_string(),
         format!("cur=$(h) || exit {io}"),
         "cur=${cur%% *}".to_string(),
         format!("[ -n \"$cur\" ] || exit {io}"),
@@ -94,9 +95,9 @@ pub fn write_script() -> String {
 pub fn remove_script() -> String {
     let (io, ex) = (EXIT_IO, EXIT_EXTRA_FILES);
     guarded(vec![
-        "extra=$(ls -A | grep -v -e '^meta[.]toml$' -e '^[.]todo$' | head -n 1)".to_string(),
+        "extra=$(ls -A | grep -v -e '^meta[.]toml$' | head -n 1)".to_string(),
         format!("[ -z \"$extra\" ] || exit {ex}"),
-        format!("rm -f meta.toml .todo || exit {io}"),
+        format!("rm -f meta.toml || exit {io}"),
         format!("cd .. || exit {io}"),
         format!("rmdir .fabr || exit {io}"),
     ])

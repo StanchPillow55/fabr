@@ -60,7 +60,7 @@ describe('FabricStore.createTask', () => {
 describe('add task UI', () => {
   it('the Panel shows the Add task line for a local node', async () => {
     const n = (path: string, o: Partial<Node> = {}): Node => ({
-      source: 'local', path, name: path || 'root', managed: true, meta: {}, items: [], warnings: [], version: 'v', via: null, has_todo: true, children: [], ...o,
+      source: 'local', path, name: path || 'root', managed: true, meta: {}, items: [], warnings: [], version: 'v', via: null, children: [], ...o,
     });
     const tree: Tree = {
       root: { ...n('', { managed: false, source: '' }), children: [n('', { children: [n('work')] })] },
@@ -77,9 +77,9 @@ describe('add task UI', () => {
     expect(body).toContain('data-testid="add-task"');
     expect(body).not.toContain('New task');
   });
-  it('the New task sheet has five fields and both actions', () => {
+  it('the New task sheet has the title, due, time, priority and three text fields and both actions', () => {
     const { body } = render(NewTaskSheet, { props: { title: 'Call the bank', onsave: () => {}, ongenerate: () => {}, oncancel: () => {} } });
-    for (const t of ['New task', 'Title', 'Due', 'Context', 'Spec', 'Success', 'what you know', 'Save', 'Generate with AI', 'Cancel']) expect(body).toContain(t);
+    for (const t of ['New task', 'Title', 'Due', 'Time', 'Priority', 'High', 'Medium', 'Low', 'Context', 'Spec', 'Success', 'what you know', 'Save', 'Generate with AI', 'Cancel']) expect(body).toContain(t);
     expect(body).toContain('value="Call the bank"');
     expect(body.match(/<textarea/g)).toHaveLength(3);
   });

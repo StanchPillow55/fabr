@@ -1,6 +1,7 @@
-import type { Item, Meta, Node, Status } from '../lib/api/types';
+import type { Item, Meta, Node, Pri, Status } from '../lib/api/types';
+import { taskSlug } from '../lib/fabric/source';
 
-type T = [Status, number | null, string, number?, string?];
+type T = [Status, number | null, string, Pri?, string?];
 type Spec = [path: string, meta: Meta | null, todos: T[] | null];
 
 export const SAMPLE: Spec[] = [
@@ -59,11 +60,11 @@ export function buildSample(source: string, today: string, specs: Spec[] = SAMPL
   for (const [path, meta, todos] of specs) {
     const name = path.split('/').pop() || source;
     const items: Item[] = (todos ?? []).map(([status, off, title, pri, time]) => ({
-      id: hex4(`${path}:${title}`), status, due: off === null ? null : addDays(today, off) + (time ? `T${time}` : ''), title, pri: pri ?? null,
+      id: `${today}-${taskSlug(title)}`, status, due: off === null ? null : addDays(today, off) + (time ? `T${time}` : ''), title, pri: pri ?? 0,
     }));
     nodes.set(path, {
       source, path, name, managed: meta !== null, meta: meta ?? {}, items, warnings: [],
-      version: meta !== null ? hex4(path + 'v').repeat(10) : null, via: null, has_todo: todos !== null, children: [],
+      version: meta !== null ? hex4(path + 'v').repeat(10) : null, via: null, children: [],
     });
   }
   const root = nodes.get('')!;

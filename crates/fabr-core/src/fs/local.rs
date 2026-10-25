@@ -83,4 +83,8 @@ impl Fs for LocalFs {
     fn read(&self, rel: &str) -> Option<Vec<u8>> {
         std::fs::read(self.path(rel)).ok()
     }
+    fn files(&self, rel: &str) -> Vec<String> {
+        let Ok(rd) = std::fs::read_dir(self.path(rel)) else { return Vec::new() };
+        rd.flatten().filter(|e| e.file_type().is_ok_and(|t| t.is_file())).filter_map(|e| e.file_name().into_string().ok()).collect()
+    }
 }

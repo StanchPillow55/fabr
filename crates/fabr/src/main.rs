@@ -1,16 +1,15 @@
 mod server;
 
 use clap::{Parser, Subcommand};
+use fabr_core::fabric::{FabricCreateReq, ImportTodosReq};
 use fabr_core::workspace::{Workspace, today};
-use fabr_core::{
-    AppDirs, FabrError, InitChildrenReq, Item, ListDirsReq, Node, NodeRef, RemoveNodeReq, SaveTodoReq, Status, format_item, write_sample,
-};
+use fabr_core::{AppDirs, FabrError, InitChildrenReq, Item, ListDirsReq, Node, NodeRef, RemoveNodeReq, Status, write_sample};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::sync::Arc;
 
 #[derive(Parser)]
-#[command(name = "fabr", version, about = "Tree of per-directory todos")]
+#[command(name = "fabr", version, about = "Tree of per-directory tasks")]
 struct Cli {
     #[command(subcommand)]
     cmd: Cmd,
@@ -52,17 +51,17 @@ enum Cmd {
         #[arg(long, short = 'y', help = "Do not ask for confirmation")]
         yes: bool,
     },
-    #[command(about = "Add an item to a node's .todo")]
+    #[command(about = "Add a reminder to a node (a task record in state reminder)")]
     Add {
         path: PathBuf,
         title: String,
-        #[arg(long)]
+        #[arg(long, help = "YYYY-MM-DD or YYYY-MM-DDTHH:MM")]
         due: Option<String>,
-        #[arg(long)]
+        #[arg(long, help = "0-3")]
         pri: Option<u8>,
-        #[arg(long)]
-        status: Option<String>,
     },
+    #[command(about = "Turn the lines of a node's old .fabr/.todo into reminders and rename it to .todo.imported")]
+    Import { path: PathBuf },
     #[command(about = "Run one setup check and print its JSON result")]
     Check {
         #[command(subcommand)]
@@ -225,20 +224,23 @@ fn managed(ws: &Workspace, path: &Path) -> Result<(Node, String), FabrError> {
     }
 }
 
-fn cmd_add(path: PathBuf, title: String, due: Option<String>, pri: Option<u8>, status: Option<String>) -> Result<(), FabrError> {
-    let status = match status.as_deref() {
-        None => Status::Todo,
-        Some(s) => Status::parse(s).ok_or_else(|| FabrError::BadRequest(format!("bad status {s:?} (todo|wip|done)")))?,
-    };
+fn absolute(path: &Path) -> Result<String, FabrError> {
+    let p = path.canonicalize().map_err(|e| FabrError::NotFound(format!("{}: {e}", path.display())))?;
+    Ok(p.to_string_lossy().into_owned())
+}
+
+fn cmd_add(path: PathBuf, title: String, due: Option<String>, pri: Option<u8>) -> Result<(), FabrError> {
     let ws = workspace(Some(path.clone()))?;
-    let (node, version) = managed(&ws, &path)?;
-    let mut items = node.items;
-    items.push(Item { id: None, status, due, title, pri });
-    let n = items.len();
-    let saved = ws.save_todo(SaveTodoReq { source: "local".into(), path: String::new(), version, items })?;
-    if let Some(i) = saved.items.get(n - 1) {
-        println!("{}", format_item(i));
-    }
+    managed(&ws, &path)?;
+    let req = FabricCreateReq { folder: absolute(&path)?, title, due, pri, context: None, spec: None, success: None };
+    let made = fabr_core::fabric::create(&req)?;
+    println!("{}", made.id);
+    Ok(())
+}
+
+fn cmd_import(path: PathBuf) -> Result<(), FabrError> {
+    let made = fabr_core::fabric::import_todos(&ImportTodosReq { path: absolute(&path)? })?;
+    println!("imported {} reminders", made.created);
     Ok(())
 }
 
@@ -258,20 +260,20 @@ fn cmd_ls(path: Option<PathBuf>, all: bool, overdue: bool, wip: bool) -> Result<
     let today = today();
     let mut rows = Vec::new();
     collect_rows(&tree.root, &mut rows);
-    rows.sort_by_key(|(_, i)| fabr_core::due_sort_key(i.due.as_deref()));
-    let now = fabr_core::todo::now_minute();
+    rows.sort_by_key(|(_, i)| (fabr_core::due_sort_key(i.due.as_deref()), std::cmp::Reverse(i.pri)));
+    let now = fabr_core::now_minute();
     for (n, i) in rows {
         let keep = if all {
             true
         } else if overdue {
-            i.status != Status::Done && i.due.as_deref().is_some_and(|d| fabr_core::todo::is_overdue_at(d, &today, &now))
+            i.status != Status::Done && i.due.as_deref().is_some_and(|d| fabr_core::is_overdue_at(d, &today, &now))
         } else if wip {
             i.status == Status::Wip
         } else {
             i.status != Status::Done
         };
         if keep {
-            let marks = i.pri.map_or(String::new(), |p| "!".repeat(p.clamp(1, 3) as usize));
+            let marks = "!".repeat(i.pri.min(3) as usize);
             let node = if n.path.is_empty() { "." } else { &n.path };
             println!("{:<4} {:<16} {:<3} {}  [{}]", i.status.as_str(), i.due.as_deref().unwrap_or("-"), marks, i.title, node);
         }
@@ -361,7 +363,8 @@ fn main() -> ExitCode {
         Cmd::Sample { dir } => cmd_sample(&dir),
         Cmd::Init { path, children, depth } => cmd_init(path, children, depth),
         Cmd::Remove { path, yes } => cmd_remove(path, yes),
-        Cmd::Add { path, title, due, pri, status } => cmd_add(path, title, due, pri, status),
+        Cmd::Add { path, title, due, pri } => cmd_add(path, title, due, pri),
+        Cmd::Import { path } => cmd_import(path),
         Cmd::Ls { all, overdue, wip, path } => cmd_ls(path, all, overdue, wip),
         Cmd::Check { .. } | Cmd::Telegram { .. } | Cmd::Agent { .. } => unreachable!(),
     };

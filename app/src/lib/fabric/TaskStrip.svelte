@@ -1,5 +1,4 @@
 <script lang="ts">
-  import { COLUMNS } from './folder';
   import StageBar from './StageBar.svelte';
   import { mostAdvanced, statusOf } from './stage';
   import type { FabricStore } from './tasks.svelte';
@@ -9,12 +8,18 @@
   const c = $derived(fabric.countsFor(folder));
   const active = $derived(fabric.agentsFor(folder).filter((v) => v.activity !== 'parked'));
   const lead = $derived(mostAdvanced(active));
-  const shown = $derived(COLUMNS.filter((col) => c.byColumn[col.id] > 0));
+  const shown = $derived(
+    [
+      { id: 'todo', label: 'Todo (reminders)', n: c.byColumn.reminder },
+      { id: 'active', label: 'Active tasks', n: c.byColumn.task + c.byColumn.defined + c.byColumn.in_progress },
+      { id: 'done', label: 'Succeeded or failed', n: c.byColumn.done },
+    ].filter((x) => x.n > 0),
+  );
 </script>
 
 {#if c.total > 0}
   <span class="tstrip" data-testid="task-strip" title="{c.total} {c.total === 1 ? 'task' : 'tasks'}">
-    {#each shown as col (col.id)}<span class="tstrip__n" title={col.label}>{c.byColumn[col.id]}<span class="tstrip__k">{col.id === 'in_progress' ? 'run' : col.id === 'done' ? 'done' : col.id}</span></span>{/each}
+    {#each shown as col (col.id)}<span class="tstrip__n" title={col.label}>{col.n}<span class="tstrip__k">{col.id}</span></span>{/each}
     {#if c.waiting > 0}<span class="tstrip__wait" title="Waiting for you">waiting</span>{/if}
     {#if lead}
       <span class="tstrip__bar" title="Agent {statusOf(lead, fabric.now)}: {lead.stage}"><StageBar view={lead} now={fabric.now} /></span>

@@ -102,7 +102,7 @@
             <input class="switch" type="checkbox" role="switch" checked={!store.hideDone} onchange={() => store.setHideDone(!store.hideDone)} />
           </label>
           <label class="prow prow--sub" title="Show or hide empty nodes (e)">
-            <span class="prow__label">Empty nodes<span class="prow__sub">hide nodes with no todo matching See</span></span>
+            <span class="prow__label">Empty nodes<span class="prow__sub">hide nodes with no task matching See</span></span>
             <input class="switch" type="checkbox" role="switch" checked={!store.hideEmpty} onchange={() => store.setHideEmpty(!store.hideEmpty)} />
           </label>
         </div>

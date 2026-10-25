@@ -1,5 +1,6 @@
 mod common;
 use common::*;
+use fabr_core::fabric::{self, FabricCreateReq};
 use fabr_core::scan::{count_nodes, default_prune};
 use fabr_core::*;
 
@@ -79,11 +80,26 @@ fn items_loaded() {
     assert_eq!(api.items.len(), 5);
     assert!(api.warnings.is_empty());
     assert_eq!(api.meta["kind"], MetaValue::Str("project".into()));
+    let titles: Vec<_> = api.items.iter().map(|i| i.title.as_str()).collect();
+    assert_eq!(
+        titles,
+        [
+            "Set up CI pipeline",
+            "Fix N+1 query on /users",
+            "Migrate auth to OAuth2",
+            "Add rate limiting",
+            "Investigate flaky integration test"
+        ]
+    );
     let pris: Vec<_> = api.items.iter().map(|i| i.pri).collect();
-    assert_eq!(pris, [Some(2), Some(3), None, None, None]);
-    assert_eq!(find(&tree.root, "personal/finance").unwrap().items[0].pri, Some(1));
+    assert_eq!(pris, [0, 0, 2, 3, 0]);
+    let status: Vec<_> = api.items.iter().map(|i| i.status).collect();
+    assert_eq!(status, [Status::Done, Status::Done, Status::Wip, Status::Todo, Status::Todo]);
+    let tax = find(&tree.root, "personal/finance").unwrap().items.iter().find(|i| i.title == "File tax return").unwrap();
+    assert_eq!(tax.pri, 1);
+    assert!(tax.due.is_some() && !tax.id.is_empty());
     let meetings = find(&tree.root, "work/meetings").unwrap();
-    assert!(meetings.managed && !meetings.has_todo && meetings.items.is_empty());
+    assert!(meetings.managed && meetings.items.is_empty());
     assert_eq!(api.version.as_ref().unwrap().len(), 40);
     assert_eq!(tree.today.len(), 10);
 }
@@ -92,11 +108,14 @@ fn items_loaded() {
 fn warnings_for_bad_files() {
     let f = Fixture::new();
     std::fs::write(f.p("work/.fabr/meta.toml"), "name = \n").unwrap();
-    std::fs::write(f.p("personal/.fabr/.todo"), "# ok\nnot an item\n").unwrap();
+    std::fs::write(f.p("personal/.fabr/.todo"), "# ok\ntodo - old line\n").unwrap();
     std::fs::write(f.p("research/.fabr/meta.toml"), "show_depth = -1\n").unwrap();
     let tree = f.ws().get_tree(false);
     assert!(find(&tree.root, "work").unwrap().warnings[0].starts_with("meta.toml does not parse"));
-    assert_eq!(find(&tree.root, "personal").unwrap().warnings, [".todo line 2 not understood: \"not an item\""]);
+    let personal = find(&tree.root, "personal").unwrap();
+    assert_eq!(personal.warnings.len(), 1);
+    assert!(personal.warnings[0].starts_with(".fabr/.todo is no longer read"), "{:?}", personal.warnings);
+    assert_eq!(personal.items.len(), 1);
     assert!(find(&tree.root, "research").unwrap().warnings[0].contains("show_depth -1"));
 }
 
@@ -116,37 +135,35 @@ fn truncation_at_cap() {
 }
 
 #[test]
-fn save_todo_and_conflict() {
+fn the_version_hash_covers_meta_only() {
     let f = Fixture::new();
     let ws = f.ws();
-    let n = node(&ws, "work/frontend");
-    let mut items = n.items.clone();
-    items[0].status = Status::Done;
-    let req = |items: Vec<Item>, v: &str| SaveTodoReq { source: "local".into(), path: "work/frontend".into(), version: v.into(), items };
-    let new = ws.save_todo(req(items.clone(), n.version.as_deref().unwrap())).unwrap();
-    assert_eq!(new.items[0].status, Status::Done);
-    assert_ne!(new.version, n.version);
-    assert!(read(&f.p("work/frontend/.fabr/.todo")).starts_with("# fabr todo\ndone"));
-    let e = ws.save_todo(req(items, n.version.as_deref().unwrap())).unwrap_err();
+    let n = node(&ws, "work");
+    let v = n.version.clone().unwrap();
+    assert_eq!(v, version_of(read(&f.p("work/.fabr/meta.toml")).as_bytes()));
+    let req = FabricCreateReq {
+        folder: f.p("work").display().to_string(),
+        title: "new one".into(),
+        due: None,
+        pri: None,
+        context: None,
+        spec: None,
+        success: None,
+    };
+    fabric::create_in(&req, f.tmp.path()).unwrap();
+    std::fs::write(f.p("work/.fabr/.todo"), "todo - stray\n").unwrap();
+    let after = node(&ws, "work");
+    assert_eq!(after.version.as_ref(), Some(&v));
+    assert_eq!(after.items.len(), n.items.len() + 1);
+    let mut meta = n.meta.clone();
+    meta.insert("description".into(), MetaValue::Str("changed".into()));
+    let saved = ws.save_meta(SaveMetaReq { source: "local".into(), path: "work".into(), version: v.clone(), meta: meta.clone() }).unwrap();
+    assert_ne!(saved.version.as_ref(), Some(&v));
+    assert_eq!(saved.items.len(), n.items.len() + 1);
+    let e = ws.save_meta(SaveMetaReq { source: "local".into(), path: "work".into(), version: v, meta }).unwrap_err();
     assert_eq!(e.code(), 409);
     let FabrError::Conflict { node: Some(cn), .. } = &e else { panic!("{e:?}") };
-    assert_eq!(cn.version, new.version);
-    assert_eq!(ErrorDto::from(e).node.unwrap().path, "work/frontend");
-}
-
-#[test]
-fn save_todo_validates_and_assigns_ids() {
-    let f = Fixture::new();
-    let ws = f.ws();
-    let n = node(&ws, "work/api-server/tests");
-    let item = Item { id: None, status: Status::Todo, due: None, title: "first".into(), pri: Some(2) };
-    let bad = Item { title: "".into(), ..item.clone() };
-    let req = |items| SaveTodoReq { source: "local".into(), path: n.path.clone(), version: n.version.clone().unwrap(), items };
-    assert_eq!(ws.save_todo(req(vec![bad])).unwrap_err().code(), 400);
-    let saved = ws.save_todo(req(vec![item])).unwrap();
-    let id = saved.items[0].id.clone().unwrap();
-    assert_eq!(id.len(), 4);
-    assert_eq!(read(&f.p("work/api-server/tests/.fabr/.todo")), format!("# fabr todo\ntodo -           first  pri:2  id:{id}\n"));
+    assert_eq!(cn.version, saved.version);
 }
 
 #[test]
@@ -154,16 +171,16 @@ fn path_outside_root() {
     let f = Fixture::new();
     let ws = f.ws();
     for bad in ["../", "../../etc", "/etc", "work/../../x"] {
-        let e = ws.save_todo(SaveTodoReq { source: "local".into(), path: bad.into(), version: "x".into(), items: vec![] }).unwrap_err();
+        let e = ws.save_meta(SaveMetaReq { source: "local".into(), path: bad.into(), version: "x".into(), meta: Meta::new() }).unwrap_err();
         assert_eq!(e.code(), 400, "{bad}");
     }
-    let e = ws.save_todo(SaveTodoReq { source: "local".into(), path: "nope".into(), version: "x".into(), items: vec![] }).unwrap_err();
+    let e = ws.save_meta(SaveMetaReq { source: "local".into(), path: "nope".into(), version: "x".into(), meta: Meta::new() }).unwrap_err();
     assert_eq!(e.code(), 404);
     let e = ws
-        .save_todo(SaveTodoReq { source: "local".into(), path: "personal/finance/receipts".into(), version: "x".into(), items: vec![] })
+        .save_meta(SaveMetaReq { source: "local".into(), path: "personal/finance/receipts".into(), version: "x".into(), meta: Meta::new() })
         .unwrap_err();
     assert_eq!(e.code(), 404);
-    let e = ws.save_todo(SaveTodoReq { source: "zzz".into(), path: "".into(), version: "x".into(), items: vec![] }).unwrap_err();
+    let e = ws.save_meta(SaveMetaReq { source: "zzz".into(), path: "".into(), version: "x".into(), meta: Meta::new() }).unwrap_err();
     assert_eq!(e.code(), 404);
     std::os::unix::fs::symlink("/", f.p("escape")).unwrap();
     let e = ws.get_node(NodeRef { source: "local".into(), path: "escape".into() }).unwrap_err();
@@ -221,9 +238,10 @@ fn init_node() {
     let ws = f.ws();
     let r = NodeRef { source: "local".into(), path: "personal/finance/receipts".into() };
     let n = ws.init_node(r.clone()).unwrap();
-    assert!(n.managed && n.has_todo);
+    assert!(n.managed && n.items.is_empty());
     assert_eq!(n.meta["name"], MetaValue::Str("receipts".into()));
-    assert_eq!(read(&f.p("personal/finance/receipts/.fabr/.todo")), "# fabr todo\n");
+    let files: Vec<_> = std::fs::read_dir(f.p("personal/finance/receipts/.fabr")).unwrap().map(|e| e.unwrap().file_name()).collect();
+    assert_eq!(files, ["meta.toml"]);
     let e = ws.init_node(r).unwrap_err();
     assert_eq!(e.code(), 409);
     assert!(matches!(e, FabrError::Conflict { node: Some(_), .. }));
@@ -234,14 +252,17 @@ fn init_node() {
 fn write_keeps_permissions() {
     use std::os::unix::fs::PermissionsExt;
     let f = Fixture::new();
-    let tp = f.p("work/.fabr/.todo");
+    let tp = f.p("work/.fabr/meta.toml");
     std::fs::set_permissions(&tp, std::fs::Permissions::from_mode(0o640)).unwrap();
     let ws = f.ws();
     let n = node(&ws, "work");
-    ws.save_todo(SaveTodoReq { source: "local".into(), path: "work".into(), version: n.version.unwrap(), items: vec![] }).unwrap();
+    let mut meta = n.meta.clone();
+    meta.insert("description".into(), MetaValue::Str("perm".into()));
+    ws.save_meta(SaveMetaReq { source: "local".into(), path: "work".into(), version: n.version.unwrap(), meta }).unwrap();
+    assert!(read(&tp).contains("perm"));
     assert_eq!(std::fs::metadata(&tp).unwrap().permissions().mode() & 0o777, 0o640);
     let leftovers: Vec<_> = std::fs::read_dir(f.p("work/.fabr")).unwrap().map(|e| e.unwrap().file_name()).collect();
-    assert_eq!(leftovers.len(), 2, "{leftovers:?}");
+    assert_eq!(leftovers.len(), 1, "{leftovers:?}");
 }
 
 #[test]
@@ -251,10 +272,16 @@ fn stamp_changes_on_edit() {
     let s1 = ws.get_stamp().stamp;
     assert_eq!(s1, ws.get_stamp().stamp);
     assert_eq!(s1.len(), 40);
-    let n = node(&ws, "work");
-    let mut items = n.items.clone();
-    items.push(Item { id: None, status: Status::Todo, due: None, title: "from test".into(), pri: None });
-    ws.save_todo(SaveTodoReq { source: "local".into(), path: "work".into(), version: n.version.unwrap(), items }).unwrap();
+    let req = FabricCreateReq {
+        folder: f.p("work").display().to_string(),
+        title: "from test".into(),
+        due: None,
+        pri: None,
+        context: None,
+        spec: None,
+        success: None,
+    };
+    fabric::create_in(&req, f.tmp.path()).unwrap();
     assert_ne!(s1, ws.get_stamp().stamp);
     let s2 = ws.get_stamp().stamp;
     std::fs::create_dir(f.p("work/frontend/node_modules/x")).unwrap();
@@ -313,9 +340,11 @@ fn sources_settings_and_multi_source_tree() {
     let ws2 = Workspace::from_config(&f.config(), &f.cache(), None).unwrap();
     assert_eq!(ws2.list_sources(), vec![a, b, gone]);
     let n = ws.get_node(NodeRef { source: "b".into(), path: "work".into() }).unwrap();
-    ws.save_todo(SaveTodoReq { source: "b".into(), path: "work".into(), version: n.version.unwrap(), items: vec![] }).unwrap();
-    assert!(!read(&other.join("work/.fabr/.todo")).contains("timesheet"));
-    assert!(read(&f.p("work/.fabr/.todo")).contains("timesheet"));
+    let mut meta = n.meta.clone();
+    meta.insert("description".into(), MetaValue::Str("only b".into()));
+    ws.save_meta(SaveMetaReq { source: "b".into(), path: "work".into(), version: n.version.unwrap(), meta }).unwrap();
+    assert!(read(&other.join("work/.fabr/meta.toml")).contains("only b"));
+    assert!(!read(&f.p("work/.fabr/meta.toml")).contains("only b"));
     assert_eq!(ws.get_settings(), Settings::default());
     assert_eq!(ws.save_settings(Settings { poll_ms: 1, ..Settings::default() }).unwrap_err().code(), 400);
     let s = Settings { poll_ms: 5000, remote_poll_ms: 60_000, search_depth: 6, full_rescan_ms: 60_000, max_nodes: 5000, log_path: None };
@@ -363,10 +392,12 @@ fn json_shapes() {
     );
     let api = &v["root"]["children"][0]["children"].as_array().unwrap().iter().find(|c| c["path"] == "work").unwrap()["children"][0];
     assert_eq!(api["path"], "work/api-server");
-    let item = &api["items"][0];
+    let item = &api["items"][2];
     assert_eq!(item["status"], "wip");
     assert_eq!(item["pri"], 2);
-    assert!(api["items"][2]["pri"].is_null() && api["items"][2]["due"].is_null());
+    assert!(item["id"].is_string() && item["due"].is_string() && item["title"] == "Migrate auth to OAuth2");
+    assert!(api["items"][4]["due"].is_null() && api["items"][4]["pri"] == 0);
+    assert!(api.get("has_todo").is_none());
     assert_eq!(v["sources"][0]["host"], serde_json::Value::Null);
     let e = serde_json::to_value(ErrorDto::from(FabrError::NotFound("x".into()))).unwrap();
     assert_eq!(e, serde_json::json!({"code": 404, "message": "x", "node": null}));
@@ -428,7 +459,7 @@ fn remove_node_with_other_files_deletes_nothing() {
     let e = rm(&ws, "work", v).unwrap_err();
     assert_eq!(e.code(), 409);
     assert!(e.message().contains("contains other files; remove it by hand"), "{}", e.message());
-    assert!(f.p("work/.fabr/meta.toml").is_file() && f.p("work/.fabr/.todo").is_file());
+    assert!(f.p("work/.fabr/meta.toml").is_file());
     assert!(f.p("work/.fabr/notes.txt").is_file());
 }
 
@@ -505,7 +536,9 @@ fn two_show_all_clients_do_not_rescan_each_other() {
     assert_eq!(ws.local_scan_count(), 2, "alternating polls must not rescan");
 
     let n = node(&ws, "work");
-    ws.save_todo(SaveTodoReq { source: "local".into(), path: "work".into(), version: n.version.unwrap(), items: vec![] }).unwrap();
+    let mut meta = n.meta.clone();
+    meta.insert("description".into(), MetaValue::Str("moved".into()));
+    ws.save_meta(SaveMetaReq { source: "local".into(), path: "work".into(), version: n.version.unwrap(), meta }).unwrap();
     let moved = ws.get_stamp().stamp;
     assert_ne!(moved, stamp);
     for _ in 0..3 {
@@ -514,12 +547,22 @@ fn two_show_all_clients_do_not_rescan_each_other() {
         assert_eq!(ws.get_stamp().stamp, moved);
     }
     assert_eq!(ws.local_scan_count(), 4);
-    assert!(find(&ws.get_tree(true).root, "work").unwrap().items.is_empty());
-    assert!(find(&ws.get_tree(false).root, "work").unwrap().items.is_empty());
+    assert_eq!(find(&ws.get_tree(true).root, "work").unwrap().items.len(), 2);
+    assert_eq!(find(&ws.get_tree(false).root, "work").unwrap().items.len(), 2);
     assert_eq!(ws.local_scan_count(), 4);
 
-    std::fs::write(f.p("work/.fabr/.todo"), "# fabr todo\ntodo - outside  id:ab12\n").ok();
+    let outside = FabricCreateReq {
+        folder: f.p("work").display().to_string(),
+        title: "added outside".into(),
+        due: None,
+        pri: None,
+        context: None,
+        spec: None,
+        success: None,
+    };
+    fabric::create_in(&outside, f.tmp.path()).unwrap();
     assert_ne!(ws.get_stamp().stamp, moved);
+    assert_eq!(find(&ws.get_tree(false).root, "work").unwrap().items.len(), 3);
 }
 
 #[test]

@@ -1,7 +1,7 @@
-use crate::backend::TODO_HEADER;
+use crate::item::Status;
 use crate::meta::MetaValue;
-use crate::node::{META_FILE, NODE_DIR, TODO_FILE};
-use crate::todo::{Item, Status, format_item};
+use crate::node::{META_FILE, NODE_DIR};
+use crate::taskrec::{self, Grants, Links, Requests, SCHEMA, State, TaskRecord};
 use std::io;
 use std::path::Path;
 
@@ -167,6 +167,52 @@ fn meta_text(meta: &[(&str, MetaValue)]) -> String {
     lines.join("\n") + "\n"
 }
 
+fn write_records(node: &Path, todos: &[Todo], today: chrono::NaiveDate) -> io::Result<()> {
+    if todos.is_empty() {
+        return Ok(());
+    }
+    let dir = node.join(".fabric-space/tasks");
+    std::fs::create_dir_all(&dir)?;
+    let now = chrono::Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string();
+    for (status, days, title, pri) in todos {
+        let id = format!("{}-{}", today.format("%Y-%m-%d"), crate::fabric::slugify(title));
+        let rec = TaskRecord {
+            schema: SCHEMA,
+            id: id.clone(),
+            source: None,
+            title: title.clone(),
+            due: days.map(|d| (today + chrono::Duration::days(d)).format("%Y-%m-%d").to_string()),
+            pri: pri.unwrap_or(0),
+            state: match status {
+                Status::Todo => State::Reminder,
+                Status::Wip => State::Defined,
+                Status::Done => State::Succeeded,
+            },
+            step: None,
+            waiting: false,
+            created_at: now.clone(),
+            updated_at: now.clone(),
+            requests: Requests { delegate: false, cancel: false, redelegate: false },
+            question: None,
+            answers: Vec::new(),
+            grants: Grants { requested: Vec::new(), granted: Vec::new() },
+            plan_meta: None,
+            assertions: Vec::new(),
+            approval: None,
+            verdict: None,
+            cost_usd: 0.0,
+            links: Links { redelegated_from: None, redelegated_to: None },
+            context: String::new(),
+            spec: String::new(),
+            success: String::new(),
+            plan: String::new(),
+            log: String::new(),
+        };
+        std::fs::write(dir.join(format!("{id}.md")), taskrec::render(&rec))?;
+    }
+    Ok(())
+}
+
 pub fn write_sample(root: &Path) -> io::Result<usize> {
     let today = chrono::Local::now().date_naive();
     if root.exists() {
@@ -184,15 +230,7 @@ pub fn write_sample(root: &Path) -> io::Result<usize> {
         std::fs::create_dir(&xs)?;
         std::fs::write(xs.join(META_FILE), meta_text(meta))?;
         if let Some(todos) = &spec.todos {
-            let path = xs.join(TODO_FILE);
-            let mut lines = vec![TODO_HEADER.to_string()];
-            for (status, days, title, pri) in todos {
-                let due = days.map(|d| (today + chrono::Duration::days(d)).format("%Y-%m-%d").to_string());
-                let digest = sha1_smol::Sha1::from(format!("{}:{title}", path.display())).digest().to_string();
-                let item = Item { id: Some(digest[..4].to_string()), status: *status, due, title: title.clone(), pri: *pri };
-                lines.push(format_item(&item));
-            }
-            std::fs::write(&path, lines.join("\n") + "\n")?;
+            write_records(&node, todos, today)?;
         }
     }
     Ok(specs.len())

@@ -3,6 +3,8 @@ import { ApiError, type Node } from '../lib/api/types';
 import { COMMANDS } from '../lib/api/commands';
 import { createMockApi } from './api';
 import { markStep } from '../lib/setup/wizard';
+import { parseRecord } from '../lib/fabric/parse';
+import { serializeRecord } from '../lib/fabric/serialize';
 
 const count = (n: Node): number => 1 + n.children.reduce((a, c) => a + count(c), 0);
 const find = (n: Node, path: string): Node | undefined =>
@@ -33,13 +35,42 @@ describe('mock api', () => {
     const t = await api.getTree(false);
     const work = find(t.root, 'work')!;
     const s1 = (await api.getStamp()).stamp;
-    const saved = await api.saveTodo({ source: 'local', path: 'work', version: work.version!, items: work.items });
+    const saved = await api.saveMeta({ source: 'local', path: 'work', version: work.version!, meta: { ...work.meta, kind: 'area' } });
     expect(saved.version).not.toBe(work.version);
     expect((await api.getStamp()).stamp).not.toBe(s1);
-    const err = await api.saveTodo({ source: 'local', path: 'work', version: work.version!, items: [] }).catch((e) => e);
+    const err = await api.saveMeta({ source: 'local', path: 'work', version: work.version!, meta: {} }).catch((e) => e);
     expect(err).toBeInstanceOf(ApiError);
     expect(err.code).toBe(409);
     expect(err.node.version).toBe(saved.version);
+  });
+
+  it('items look like records: record-style ids, pri 0..3, no has_todo, no saveTodo', async () => {
+    const api = createMockApi({ today: '2026-10-19', latency: 0 });
+    const work = find((await api.getTree(false)).root, 'work')!;
+    expect(work.items[0]).toEqual({ id: '2026-10-19-submit-timesheet', status: 'todo', due: '2026-10-20T17:00', title: 'Submit timesheet', pri: 2 });
+    expect(work.items.every((i) => [0, 1, 2, 3].includes(i.pri))).toBe(true);
+    expect('has_todo' in work).toBe(false);
+    expect('saveTodo' in api).toBe(false);
+  });
+
+  it('fabric_write lets a reminder become succeeded (and logs it) but refuses other state changes', async () => {
+    const api = createMockApi({ latency: 0 });
+    const list = (await api.fabricList({})).records;
+    const read = async (name: string) => {
+      const path = list.find((r) => r.path.includes(name))!.path;
+      return { path, text: (await api.fabricRead(path)).text };
+    };
+    const rem = await read('01-reminder');
+    const rec = parseRecord(rem.text);
+    const done = serializeRecord({ ...rec, state: 'succeeded', updated_at: '2030-01-01T00:00:00Z' });
+    await api.fabricWrite({ path: rem.path, text: done, expected_updated_at: rec.updated_at });
+    const after = parseRecord((await api.fabricRead(rem.path)).text);
+    expect(after).toMatchObject({ state: 'succeeded', schema: 3 });
+    expect(after.sections.logEntries.at(-1)?.message).toMatch(/done by hand/);
+    const run = await read('05-running');
+    const forged = serializeRecord({ ...parseRecord(run.text), state: 'succeeded' });
+    const err = await api.fabricWrite({ path: run.path, text: forged, expected_updated_at: parseRecord(run.text).updated_at }).catch((e) => e);
+    expect([err.code, err.message]).toEqual([403, expect.stringMatching(/state may not change/)]);
   });
 
   it('implements exactly the COMMANDS operations', () => {

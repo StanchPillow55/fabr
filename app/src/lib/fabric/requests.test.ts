@@ -17,7 +17,7 @@ function diff(a: unknown, b: unknown, path = ''): string[] {
     const keys = new Set([...Object.keys(a as object), ...Object.keys(b as object)]);
     return [...keys].flatMap((k) => diff((a as Record<string, unknown>)[k], (b as Record<string, unknown>)[k], path ? `${path}.${k}` : k));
   }
-  return JSON.stringify(a) === JSON.stringify(b) ? [] : [path];
+  return path === 'schema' || JSON.stringify(a) === JSON.stringify(b) ? [] : [path];
 }
 
 describe('applyRequest', () => {

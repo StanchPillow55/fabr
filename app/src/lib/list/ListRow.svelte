@@ -4,9 +4,8 @@
   import Pill from '../ui/Pill.svelte';
   import Priority from '../ui/Priority.svelte';
 
-  let { row, oncycle, onopen, today = '', showSource = false, sourceName = '', selected = false, color = null }: {
+  let { row, onopen, today = '', showSource = false, sourceName = '', selected = false, color = null }: {
     row: ListRow;
-    oncycle: () => void;
     onopen: () => void;
     today?: string;
     showSource?: boolean;
@@ -24,7 +23,7 @@
   {#if showSource}<td class="table__td table__td--muted">{sourceName || row.source}</td>{/if}
   <td class="table__td table__td--node" title={row.path || row.nodeName}>{#if color}<span class="table__dot" style:background={color} aria-hidden="true"></span>{/if}{row.path || row.nodeName}</td>
   <td class="table__td table__td--pri"><Priority pri={row.item.pri} /></td>
-  <td class="table__td table__td--status"><Pill status={row.item.status} onclick={oncycle} /></td>
+  <td class="table__td table__td--status"><Pill status={row.item.status} /></td>
   <td class="table__td table__td--title"><span class="row__title">{row.item.title}</span></td>
   <td class="table__td table__td--due"><DueBadge item={row.item} {today} full /></td>
 </tr>

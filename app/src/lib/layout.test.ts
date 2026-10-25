@@ -6,7 +6,7 @@ import { boxModel, nodeKey } from './model';
 
 const node = (path: string, o: Partial<Node> = {}): Node => ({
   source: 'local', path, name: path.split('/').pop() || 'root', managed: true, meta: {}, items: [],
-  warnings: [], version: 'v', via: null, has_todo: true, children: [], ...o,
+  warnings: [], version: 'v', via: null, children: [], ...o,
 });
 
 const H: Record<string, number> = { '': 40, a: 100, b: 60, 'a/x': 30, 'a/y': 80, 'b/z': 50 };
@@ -44,7 +44,7 @@ describe('layout', () => {
   });
 
   it('works with boxModel: a collapsed node\'s children are not laid out', () => {
-    const root = node('', { children: [node('arch', { items: [{ id: null, status: 'done', due: null, title: 'x', pri: null }], children: [node('arch/old')] })] });
+    const root = node('', { children: [node('arch', { items: [{ id: 'x', status: 'done', due: null, title: 'x', pri: 0 }], children: [node('arch/old')] })] });
     const none = new Set<string>();
     const ctx = { today: '2026-10-19', filter: 'all' as const, hideDone: false, collapsed: new Set(['local:arch']), moreOpen: none, forceOpen: none };
     const r = layout(root, (n) => boxModel(n, ctx));

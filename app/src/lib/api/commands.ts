@@ -1,6 +1,6 @@
 import type {
-  Tree, Stamp, Node, NodeRef, RemoveNodeReq, SaveTodoReq, SaveMetaReq, Source, TestResult, Settings, ListDirsReq, DirEntry,
-  InitChildrenReq, FabricListReq, FabricListRes, FabricReadRes, FabricWriteReq, FabricWriteRes, FabricStampReq, FabricCreateReq, FabricCreateRes, HostKey, TrustResult, PasswordState, InstallKeyReq, InstallKeyResult,
+  Tree, Stamp, Node, NodeRef, RemoveNodeReq, SaveMetaReq, Source, TestResult, Settings, ListDirsReq, DirEntry,
+  InitChildrenReq, FabricListReq, FabricListRes, FabricReadRes, FabricWriteReq, FabricWriteRes, FabricStampReq, FabricCreateReq, FabricCreateRes, ImportTodosReq, ImportTodosRes, HostKey, TrustResult, PasswordState, InstallKeyReq, InstallKeyResult,
   FabricSettings, FabricSettingsRead, FabricSecretsWriteReq, FabricSecretsStatus, FabricCheckReq, FabricCheckResult, FabricAgentStatus,
 } from './types';
 
@@ -16,7 +16,6 @@ const self = <T>(r: T) => r;
 export const COMMANDS = {
   getTree: op<[showAll: boolean, rescan?: boolean], Tree>({ get: true, req: (show_all, rescan = false) => ({ show_all, rescan }) }),
   getStamp: op<[], Stamp>({ get: true }),
-  saveTodo: op<[req: SaveTodoReq], Node>({ req: self }),
   saveMeta: op<[req: SaveMetaReq], Node>({ req: self }),
   initNode: op<[req: NodeRef], Node>({ req: self }),
   removeNode: op<[req: RemoveNodeReq], Node>({ req: self }),
@@ -38,6 +37,7 @@ export const COMMANDS = {
   fabricRead: op<[path: string], FabricReadRes>({ req: (path) => ({ path }) }),
   fabricWrite: op<[req: FabricWriteReq], FabricWriteRes>({ req: self }),
   fabricCreate: op<[req: FabricCreateReq], FabricCreateRes>({ req: self }),
+  importTodos: op<[req: ImportTodosReq], ImportTodosRes>({ req: self }),
   fabricStamp: op<[req: FabricStampReq], Stamp>({ req: self }),
   fabricSettingsRead: op<[], FabricSettingsRead>({}),
   fabricSettingsWrite: op<[settings: FabricSettings], FabricSettingsRead>({ req: (settings) => ({ settings }) }),

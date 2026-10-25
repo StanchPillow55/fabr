@@ -132,8 +132,8 @@ describe('task strip', () => {
     const f = await realPathStore();
     const { body } = render(TaskStrip, { props: { fabric: f, folder: '/home/me/proj' } });
     expect(body).toContain('data-testid="task-strip"');
-    expect(body).toMatch(/1<span class="tstrip__k[^"]*">reminder/);
-    expect(body).toMatch(/1<span class="tstrip__k[^"]*">task/);
+    expect(body).toMatch(/1<span class="tstrip__k[^"]*">todo/);
+    expect(body).toMatch(/1<span class="tstrip__k[^"]*">active/);
     expect(body).toContain('waiting');
     expect(body).not.toContain('running');
     expect(body).not.toContain('defined');

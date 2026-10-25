@@ -80,6 +80,7 @@
   $effect(() => {
     if (store?.tree && !fabric) {
       fabric = new FabricStore();
+      fabric.onItemsChange = () => store?.reloadSoon();
       void fabric.start(localRoots(store.tree.sources));
     }
   });

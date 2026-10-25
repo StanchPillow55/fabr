@@ -62,16 +62,16 @@ fn remote_edits_conflicts_and_init() {
     assert!(ws.wait_remote(Duration::from_secs(30)));
     let s1 = ws.get_stamp().stamp;
     let n = ws.get_node(NodeRef { source: "r".into(), path: "work".into() }).unwrap();
-    let mut items = n.items.clone();
-    items[0].status = Status::Wip;
-    let req = SaveTodoReq { source: "r".into(), path: "work".into(), version: n.version.clone().unwrap(), items };
-    let saved = ws.save_todo(req.clone()).unwrap();
-    assert_eq!(saved.items[0].status, Status::Wip);
-    assert!(std::fs::read_to_string(root.join("work/.fabr/.todo")).unwrap().contains("wip  "));
+    let mut meta = n.meta.clone();
+    meta.insert("description".into(), MetaValue::Str("edited".into()));
+    let req = SaveMetaReq { source: "r".into(), path: "work".into(), version: n.version.clone().unwrap(), meta };
+    let saved = ws.save_meta(req.clone()).unwrap();
+    assert_eq!(saved.meta["description"], MetaValue::Str("edited".into()));
+    assert!(std::fs::read_to_string(root.join("work/.fabr/meta.toml")).unwrap().contains("edited"));
     ws.get_stamp();
     assert!(ws.wait_remote(Duration::from_secs(30)));
     assert_ne!(s1, ws.get_stamp().stamp);
-    let e = ws.save_todo(req).unwrap_err();
+    let e = ws.save_meta(req).unwrap_err();
     let FabrError::Conflict { node: Some(cn), .. } = &e else { panic!("{e:?}") };
     assert_eq!(cn.version, saved.version);
     let mut meta = saved.meta.clone();
@@ -85,7 +85,8 @@ fn remote_edits_conflicts_and_init() {
     assert_eq!(ws.init_node(at).unwrap_err().code(), 409);
     assert_eq!(ws.init_node(NodeRef { source: "r".into(), path: "missing".into() }).unwrap_err().code(), 404);
     assert_eq!(ws.get_node(NodeRef { source: "r".into(), path: "../x".into() }).unwrap_err().code(), 400);
-    let e = ws.save_todo(SaveTodoReq { source: "r".into(), path: "personal".into(), version: "0".repeat(40), items: vec![] }).unwrap_err();
+    let e =
+        ws.save_meta(SaveMetaReq { source: "r".into(), path: "personal".into(), version: "0".repeat(40), meta: Meta::new() }).unwrap_err();
     assert_eq!(e.code(), 409);
     let t = ws.test_source(ws.list_sources()[0].clone());
     assert!(t.ok, "{}", t.message);

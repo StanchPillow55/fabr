@@ -1,7 +1,7 @@
 use super::{ALREADY_NODE, Backend, CONFLICT_MSG, DirEntry, EXTRA_FILES_MSG, NOT_A_NODE, NodeFiles, dir_entries};
 use crate::error::FabrError;
 use crate::fs::{Fs, LocalFs};
-use crate::node::{META_FILE, NODE_DIR, TODO_FILE, leaf, version_of};
+use crate::node::{META_FILE, NODE_DIR, leaf, version_of};
 use crate::scan::Watched;
 use crate::sources::{Source, local_root};
 use crate::stamp::stamp_paths;
@@ -60,16 +60,16 @@ impl LocalBackend {
         LocalFs::new(self.root.clone())
     }
 
-    fn checked_node(&self, path: &str, expected_version: &str) -> Result<(PathBuf, PathBuf, PathBuf), FabrError> {
+    fn checked_node(&self, path: &str, expected_version: &str) -> Result<(PathBuf, PathBuf), FabrError> {
         let xs = self.fs().resolve(path)?.join(NODE_DIR);
         if !xs.is_dir() {
             return Err(FabrError::NotFound(NOT_A_NODE.into()));
         }
-        let (meta_p, todo_p) = (xs.join(META_FILE), xs.join(TODO_FILE));
-        if version_of(&read_or_empty(&meta_p)?, &read_or_empty(&todo_p)?) != expected_version {
+        let meta_p = xs.join(META_FILE);
+        if version_of(&read_or_empty(&meta_p)?) != expected_version {
             return Err(FabrError::Conflict { message: CONFLICT_MSG.into(), node: None });
         }
-        Ok((xs, meta_p, todo_p))
+        Ok((xs, meta_p))
     }
 
     fn check_root(&self) -> Result<(), FabrError> {
@@ -126,29 +126,24 @@ impl Backend for LocalBackend {
     }
 
     fn write_node(&self, path: &str, expected_version: &str, files: NodeFiles) -> Result<(), FabrError> {
-        let (_, meta_p, todo_p) = self.checked_node(path, expected_version)?;
+        let (_, meta_p) = self.checked_node(path, expected_version)?;
         if let Some(b) = &files.meta {
             atomic_write(&meta_p, b)?;
-        }
-        if let Some(b) = &files.todo {
-            atomic_write(&todo_p, b)?;
         }
         Ok(())
     }
 
     fn remove_node(&self, path: &str, expected_version: &str) -> Result<(), FabrError> {
-        let (xs, meta_p, todo_p) = self.checked_node(path, expected_version)?;
+        let (xs, meta_p) = self.checked_node(path, expected_version)?;
         for entry in std::fs::read_dir(&xs).map_err(io_at(&xs))? {
             let name = entry.map_err(io_at(&xs))?.file_name();
-            if name != META_FILE && name != TODO_FILE {
+            if name != META_FILE {
                 return Err(FabrError::Conflict { message: EXTRA_FILES_MSG.into(), node: None });
             }
         }
-        for f in [&meta_p, &todo_p] {
-            match std::fs::remove_file(f) {
-                Err(e) if e.kind() != std::io::ErrorKind::NotFound => return Err(io_at(f)(e)),
-                _ => {}
-            }
+        match std::fs::remove_file(&meta_p) {
+            Err(e) if e.kind() != std::io::ErrorKind::NotFound => return Err(io_at(&meta_p)(e)),
+            _ => {}
         }
         std::fs::remove_dir(&xs).map_err(io_at(&xs))
     }
@@ -167,7 +162,6 @@ impl Backend for LocalBackend {
         };
         let files = NodeFiles::initial(&name, show_depth);
         atomic_write(&xs.join(META_FILE), files.meta.as_deref().unwrap_or_default())?;
-        atomic_write(&xs.join(TODO_FILE), files.todo.as_deref().unwrap_or_default())?;
         Ok(())
     }
 }

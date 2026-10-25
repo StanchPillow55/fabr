@@ -6,11 +6,10 @@ use crate::state::{append_log, clean_message, is_terminal, pending_tail, questio
 use crate::store::mutate;
 use crate::tools;
 use crate::verify::{self, CheckOutcome};
+use fabr_core::FabrError;
 use fabr_core::taskrec::{
     Approval, Assertion, Check, PlanMeta, Question, State, Step, TaskRecord, Verdict, VerdictItem, approval_digest, registry_filename,
 };
-use fabr_core::todo::Status;
-use fabr_core::{FabrError, NodeRef, SaveTodoReq, Workspace};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
@@ -177,11 +176,7 @@ fn stage_error(record_path: &Path, ctl: &Ctl, err: FabrError) -> Result<(), Fabr
     }
 }
 
-#[allow(clippy::too_many_arguments)]
 pub fn advance(
-    ws: &Workspace,
-    source: &str,
-    node_path: &str,
     node_dir: &Path,
     record_path: &Path,
     fabric_space: &Path,
@@ -189,36 +184,18 @@ pub fn advance(
     model: &impl Model,
 ) -> Result<(), FabrError> {
     let ctl = Ctl::new(fabric_space, heartbeat_interval_s);
-    advance_with(ws, source, node_path, node_dir, record_path, &ctl, model)
+    advance_with(node_dir, record_path, &ctl, model)
 }
 
-pub fn advance_with(
-    ws: &Workspace,
-    source: &str,
-    node_path: &str,
-    node_dir: &Path,
-    record_path: &Path,
-    ctl: &Ctl,
-    model: &impl Model,
-) -> Result<(), FabrError> {
+pub fn advance_with(node_dir: &Path, record_path: &Path, ctl: &Ctl, model: &impl Model) -> Result<(), FabrError> {
     let rec = load_record(record_path)?;
-    match step_once(ws, source, node_path, node_dir, record_path, ctl, model, rec) {
+    match step_once(node_dir, record_path, ctl, model, rec) {
         Ok(()) => Ok(()),
         Err(err) => stage_error(record_path, ctl, err),
     }
 }
 
-#[allow(clippy::too_many_arguments)]
-fn step_once(
-    ws: &Workspace,
-    source: &str,
-    node_path: &str,
-    node_dir: &Path,
-    record_path: &Path,
-    ctl: &Ctl,
-    model: &impl Model,
-    mut rec: TaskRecord,
-) -> Result<(), FabrError> {
+fn step_once(node_dir: &Path, record_path: &Path, ctl: &Ctl, model: &impl Model, mut rec: TaskRecord) -> Result<(), FabrError> {
     let mut base = rec.clone();
     if is_terminal(&rec) && !pending_tail(&rec) {
         forget(ctl, &rec, record_path);
@@ -243,12 +220,11 @@ fn step_once(
             rec.step = Some(Step::Gather);
             rec.waiting = false;
             append_log(&mut rec.log, "task", "delegated");
-            persist(record_path, &mut rec, &mut base)?;
-            project(ws, source, node_path, &rec, Status::Wip)
+            persist(record_path, &mut rec, &mut base)
         }
         State::Task => match rec.step {
             Some(Step::Define) => define_stage(node_dir, record_path, ctl, &mut rec, &mut base, model),
-            Some(Step::Plan) => plan_stage(ws, source, node_path, node_dir, record_path, ctl, &mut rec, &mut base, model, false),
+            Some(Step::Plan) => plan_stage(node_dir, record_path, ctl, &mut rec, &mut base, model, false),
             _ => gather_stage(node_dir, record_path, ctl, &mut rec, &mut base),
         },
         State::Defined => {
@@ -262,7 +238,7 @@ fn step_once(
                     Some(n) => append_log(&mut rec.log, "approve", &format!("refused: {n}")),
                     None => append_log(&mut rec.log, "approve", "refused"),
                 }
-                return plan_stage(ws, source, node_path, node_dir, record_path, ctl, &mut rec, &mut base, model, true);
+                return plan_stage(node_dir, record_path, ctl, &mut rec, &mut base, model, true);
             }
             if status != "approved" {
                 return Ok(());
@@ -287,10 +263,10 @@ fn step_once(
             append_log(&mut rec.log, "execute", "started");
             persist(record_path, &mut rec, &mut base)?;
             mark(ctl, node_dir, record_path, &rec, Activity::Tool);
-            project(ws, source, node_path, &rec, Status::Wip)
+            Ok(())
         }
         State::InProgress => match rec.step {
-            Some(Step::Evaluate) => finish_checks(ws, source, node_path, node_dir, record_path, ctl, &mut rec, &mut base),
+            Some(Step::Evaluate) => finish_checks(node_dir, record_path, ctl, &mut rec, &mut base),
             Some(Step::Learn | Step::Notify) => tail_step(node_dir, record_path, ctl, &mut rec, &mut base),
             _ => execute_stage(node_dir, record_path, ctl, &mut rec, &mut base, model),
         },
@@ -474,11 +450,7 @@ fn define_stage(
     Ok(())
 }
 
-#[allow(clippy::too_many_arguments)]
 fn plan_stage(
-    ws: &Workspace,
-    source: &str,
-    node_path: &str,
     node_dir: &Path,
     record_path: &Path,
     ctl: &Ctl,
@@ -521,7 +493,7 @@ fn plan_stage(
     append_log(&mut rec.log, "plan", if refused { "redrafted" } else { "plan written" });
     persist(record_path, rec, base)?;
     mark(ctl, node_dir, record_path, rec, Activity::Model);
-    project(ws, source, node_path, rec, Status::Wip)
+    Ok(())
 }
 
 fn execute_stage(
@@ -566,17 +538,7 @@ fn execute_stage(
     Ok(())
 }
 
-#[allow(clippy::too_many_arguments)]
-fn finish_checks(
-    ws: &Workspace,
-    source: &str,
-    node_path: &str,
-    node_dir: &Path,
-    record_path: &Path,
-    ctl: &Ctl,
-    rec: &mut TaskRecord,
-    base: &mut TaskRecord,
-) -> Result<(), FabrError> {
+fn finish_checks(node_dir: &Path, record_path: &Path, ctl: &Ctl, rec: &mut TaskRecord, base: &mut TaskRecord) -> Result<(), FabrError> {
     let checks = rec.plan_meta.as_ref().map(|m| m.checks.clone()).unwrap_or_default();
     mark(ctl, node_dir, record_path, rec, Activity::Check);
     let outcomes = verify::run_checks(node_dir, &checks, Duration::from_secs(ctl.check_timeout_s))?;
@@ -590,7 +552,7 @@ fn finish_checks(
     append_log(&mut rec.log, "evaluate", if pass { "verdict pass" } else { "verdict fail" });
     persist(record_path, rec, base)?;
     mark(ctl, node_dir, record_path, rec, Activity::Tool);
-    project(ws, source, node_path, rec, if pass { Status::Done } else { Status::Wip })
+    Ok(())
 }
 
 fn verdict_items(node_dir: &Path, rec: &TaskRecord, outcomes: &[CheckOutcome]) -> Vec<VerdictItem> {
@@ -673,34 +635,6 @@ fn persist(path: &Path, rec: &mut TaskRecord, base: &mut TaskRecord) -> Result<(
     update_record(path, rec, base)
 }
 
-fn project(ws: &Workspace, source: &str, node_path: &str, rec: &TaskRecord, status: Status) -> Result<(), FabrError> {
-    let Some(todo_id) = rec.source.as_ref().map(|s| s.todo_id.clone()) else {
-        log::warn!("record {} has no source; skipping todo projection", rec.id);
-        return Ok(());
-    };
-    for attempt in 0..2 {
-        let node = ws.get_node(NodeRef { source: source.to_string(), path: node_path.to_string() })?;
-        let Some(version) = node.version.clone() else {
-            return Err(FabrError::NotFound("node has no version".into()));
-        };
-        let mut items = node.items;
-        let Some(item) = items.iter_mut().find(|i| i.id.as_deref() == Some(todo_id.as_str())) else {
-            log::warn!("todo {todo_id} is missing from {node_path}; skipping projection");
-            return Ok(());
-        };
-        if item.status == status {
-            return Ok(());
-        }
-        item.status = status;
-        match ws.save_todo(SaveTodoReq { source: source.to_string(), path: node_path.to_string(), version, items }) {
-            Ok(_) => return Ok(()),
-            Err(FabrError::Conflict { .. }) if attempt == 0 => continue,
-            Err(e) => return Err(e),
-        }
-    }
-    Err(FabrError::Conflict { message: "todo changed while projecting status".into(), node: None })
-}
-
 #[cfg(test)]
 mod answers_in_context {
     use super::*;
@@ -725,12 +659,7 @@ mod answers_in_context {
 
     #[test]
     fn choice_answers_carry_the_prior_and_grant_answers_carry_the_fields() {
-        let mut rec = crate::link::new_reminder(
-            "t",
-            "",
-            "",
-            &fabr_core::todo::Item { id: None, status: Status::Todo, due: None, title: "order".into(), pri: None },
-        );
+        let mut rec = crate::link::test_reminder("order");
         rec.context = "base context".into();
         let mut choice = answered("q1", "choice", "Reuse the shop?", answer(Some("always")));
         choice.prior = Some(Prior { text: "shop.example.test".into(), source_task: None, last_confirmed: None });
@@ -749,12 +678,7 @@ mod answers_in_context {
 
     #[test]
     fn question_ids_do_not_repeat() {
-        let mut rec = crate::link::new_reminder(
-            "t",
-            "",
-            "",
-            &fabr_core::todo::Item { id: None, status: Status::Todo, due: None, title: "order".into(), pri: None },
-        );
+        let mut rec = crate::link::test_reminder("order");
         assert_eq!(next_question_id(&rec), "q1");
         rec.answers = vec![answered("q1", "open", "a?", answer(Some("x"))), answered("q2", "open", "b?", answer(Some("y")))];
         assert_eq!(next_question_id(&rec), "q3");

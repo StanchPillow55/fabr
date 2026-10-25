@@ -2,7 +2,7 @@
   import type { MetaValue } from '../api/types';
   import { COLOR_NAMES, COLOR_RE, colorCss } from '../model';
   import Icon from '../ui/Icon.svelte';
-  import { commitInput } from './itemcommit';
+  import { commitInput } from '../ui/actions';
 
   let { entries, known, note = null, oncommit, onerror, inherited = null, section }: {
     section: 'identity' | 'display' | 'more';

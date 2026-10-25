@@ -45,7 +45,7 @@
   <div class="welcome__card">
     <img class="welcome__icon" src="/favicon.svg" alt="" width="64" height="64" />
     <h2 class="welcome__title">Welcome to Fabr</h2>
-    <p class="welcome__text">Pick a folder to start. Any directory under it can become a node with its own todos, kept as plain text next to your files.</p>
+    <p class="welcome__text">Pick a folder to start. Any directory under it can become a node with its own tasks, kept as plain text next to your files.</p>
     {#if native}
       <Field label="Name (optional)">
         <input type="text" bind:value={name} placeholder={root ? nameFromPath(root) : 'Home'} />

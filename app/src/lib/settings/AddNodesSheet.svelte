@@ -60,7 +60,7 @@
 </script>
 
 <Sheet open={!!target} title="Add nodes" onclose={close} width={480}>
-  <p class="hint">Choose the subdirectories of <b>{target?.name}</b> to turn into fabr nodes. Each gets its own todos and metadata.</p>
+  <p class="hint">Choose the subdirectories of <b>{target?.name}</b> to turn into fabr nodes. Each gets its own tasks and metadata.</p>
   {#if loading}
     <p class="hint">Reading folders…</p>
   {:else if !dirs.length && !error}

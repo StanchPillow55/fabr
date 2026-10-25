@@ -243,7 +243,6 @@ fn yaml_quote(s: &str) -> String {
 mod tests {
     use super::*;
     use crate::runner::heartbeat::{Beating, Heartbeat};
-    use fabr_core::todo::{Item, Status};
 
     #[test]
     fn the_heartbeat_thread_keeps_entries_fresh_while_the_runner_thread_is_blocked() {
@@ -252,8 +251,8 @@ mod tests {
         let node = dir.path().join("node");
         let record = node.join(".fabric-space/tasks/t.md");
         std::fs::create_dir_all(record.parent().unwrap()).unwrap();
-        let item = Item { id: None, status: Status::Todo, due: None, title: "t".into(), pri: None };
-        let rec = crate::link::new_reminder("t", "", "", &item);
+        let mut rec = crate::link::test_reminder("t");
+        rec.id = "t".into();
         let board = Board::new(&space, 1, None);
         board.publish(&node, &record, &rec, Extras::doing(Activity::Model)).unwrap();
         let file = board.file_for("t", &crate::task_path_key(&record));
@@ -278,8 +277,8 @@ mod tests {
         let space = dir.path().join("space");
         let record = dir.path().join("node/.fabric-space/tasks/t.md");
         std::fs::create_dir_all(record.parent().unwrap()).unwrap();
-        let item = Item { id: None, status: Status::Todo, due: None, title: "t".into(), pri: None };
-        let rec = crate::link::new_reminder("t", "", "", &item);
+        let mut rec = crate::link::test_reminder("t");
+        rec.id = "t".into();
         let board = Board::new(&space, 1, None);
         board.publish(dir.path(), &record, &rec, Extras::default()).unwrap();
         board.remove("t", &crate::task_path_key(&record));

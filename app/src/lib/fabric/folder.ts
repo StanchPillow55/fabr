@@ -13,7 +13,7 @@ export const COLUMNS = [
 export type ColumnId = (typeof COLUMNS)[number]['id'];
 
 export const STATE_LABEL: Record<State, string> = {
-  reminder: 'reminder', task: 'task', defined: 'defined', in_progress: 'in progress', succeeded: 'succeeded', failed: 'failed',
+  reminder: 'todo', task: 'task', defined: 'defined', in_progress: 'in progress', succeeded: 'succeeded', failed: 'failed',
 };
 
 export const columnOf = (state: State): ColumnId => COLUMNS.find((c) => (c.states as readonly string[]).includes(state))!.id;

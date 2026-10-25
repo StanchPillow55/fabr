@@ -3,6 +3,7 @@ pub mod dto;
 pub mod error;
 pub mod fabric;
 pub mod fs;
+pub mod item;
 pub mod logging;
 pub mod meta;
 pub mod node;
@@ -25,11 +26,11 @@ pub mod workspace;
 pub use backend::{Backend, DirEntry, LocalBackend, NodeFiles, SshBackend};
 pub use dto::{
     Empty, GetTreeReq, HostReq, InitChildrenReq, InstallKeyReq, ListDirsReq, NodeRef, OpenUrlReq, PasswordState, RemoveNodeReq,
-    RevealPathReq, SaveMetaReq, SaveSourcesReq, SaveTodoReq, SourceError, SourceIdReq, SourcePasswordReq, Stamp, Tree, TrustResult,
-    VIRTUAL_ROOT_NAME,
+    RevealPathReq, SaveMetaReq, SaveSourcesReq, SourceError, SourceIdReq, SourcePasswordReq, Stamp, Tree, TrustResult, VIRTUAL_ROOT_NAME,
 };
 pub use error::{ErrorDto, FabrError, client_error};
 pub use fs::{Fs, LocalFs, TarSnapshot};
+pub use item::{Item, Status, due_sort_key, is_overdue_at, items_in, now_minute};
 pub use meta::{Meta, MetaValue, parse_meta, render_meta, validate_meta};
 pub use node::{Node, load_node, version_of};
 pub use ops::{Desktop, Done, OPS, Op, Verb, dispatch, url_allowed};
@@ -47,5 +48,4 @@ pub use taskrec::{
     QuestionKind, Requests, Reversibility, Scope, State, Step, TaskRecord, TaskSource, Verdict, VerdictItem, apply_gui, approval_digest,
     normalize_section, parse, registry_filename, render, stamp_updated, write_record,
 };
-pub use todo::{Item, Line, Status, due_sort_key, format_item, is_overdue_at, now_minute, parse_todo, render_todo, validate_items};
 pub use workspace::Workspace;

@@ -9,6 +9,10 @@ pub trait Fs: Send + Sync {
     fn subdirs(&self, rel: &str) -> Vec<String>;
     fn exists(&self, rel: &str) -> bool;
     fn read(&self, rel: &str) -> Option<Vec<u8>>;
+    fn files(&self, rel: &str) -> Vec<String> {
+        let _ = rel;
+        Vec::new()
+    }
     fn try_subdirs(&self, rel: &str) -> Result<Vec<String>, String> {
         Ok(self.subdirs(rel))
     }

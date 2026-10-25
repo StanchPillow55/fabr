@@ -11,7 +11,7 @@ describe('serializeRecord', () => {
     const name = path.split('fixtures/')[1];
     it(`round-trips ${name}`, () => {
       const out = serializeRecord(parseRecord(text));
-      expect(parseRecord(out)).toEqual(parseRecord(text));
+      expect(parseRecord(out)).toEqual({ ...parseRecord(text), schema: 3 });
       expect(Object.keys(parseFrontMatter(out).data)).toEqual([...FIELDS]);
     });
   }
@@ -31,5 +31,27 @@ describe('serializeRecord', () => {
     expect(out).toContain('options: [once, always, "no"]');
     expect(out).toMatch(/^updated_at: 2026-10-24T18:05:30Z$/m);
     expect(out).toMatch(/^requests: \{delegate: false, cancel: false, redelegate: false\}$/m);
+  });
+
+  it('reads schema 2 as pri 0 and writes schema 3 with pri', () => {
+    const old = parseRecord(records.find((x) => x.path.includes('01-reminder'))!.text);
+    expect([old.schema, old.pri]).toEqual([2, 0]);
+    const out = serializeRecord(old);
+    expect(out).toMatch(/^schema: 3$/m);
+    expect(out).toMatch(/^pri: 0$/m);
+    expect(out.indexOf('\ndue:')).toBeLessThan(out.indexOf('\npri:'));
+    expect(parseRecord(out)).toMatchObject({ schema: 3, pri: 0 });
+  });
+
+  it('keeps pri and a timed due through a round trip', () => {
+    const r = parseRecord(records[0].text);
+    const out = parseRecord(serializeRecord({ ...r, pri: 2, due: '2026-11-01T09:30' }));
+    expect([out.pri, out.due]).toEqual([2, '2026-11-01T09:30']);
+  });
+
+  it('refuses an unknown schema and a bad pri', () => {
+    const text = records[0].text;
+    expect(() => parseRecord(text.replace(/^schema: 2$/m, 'schema: 4'))).toThrow(/schema/);
+    expect(() => parseRecord(serializeRecord(parseRecord(text)).replace(/^pri: 0$/m, 'pri: 9'))).toThrow(/pri/);
   });
 });

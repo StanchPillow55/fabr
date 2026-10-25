@@ -2,7 +2,6 @@ use crate::meta::Meta;
 use crate::node::Node;
 use crate::secrets::Secret;
 use crate::sources::Source;
-use crate::todo::Item;
 use serde::{Deserialize, Serialize};
 
 pub const VIRTUAL_ROOT_NAME: &str = "/";
@@ -59,14 +58,6 @@ pub struct RemoveNodeReq {
     pub source: String,
     pub path: String,
     pub version: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SaveTodoReq {
-    pub source: String,
-    pub path: String,
-    pub version: String,
-    pub items: Vec<Item>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -226,6 +226,8 @@ pub struct FrontMatter {
     pub title: String,
     #[serde(default)]
     pub due: Option<String>,
+    #[serde(default)]
+    pub pri: u8,
     pub state: State,
     #[serde(default)]
     pub step: Option<Step>,
@@ -263,6 +265,7 @@ pub struct TaskRecord {
     pub source: Option<TaskSource>,
     pub title: String,
     pub due: Option<String>,
+    pub pri: u8,
     pub state: State,
     pub step: Option<Step>,
     pub waiting: bool,
@@ -285,6 +288,16 @@ pub struct TaskRecord {
     pub log: String,
 }
 
+pub const SCHEMA: i64 = 3;
+
+pub fn valid_due(s: &str) -> bool {
+    match s.len() {
+        10 => chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d").is_ok(),
+        16 => chrono::NaiveDateTime::parse_from_str(s, "%Y-%m-%dT%H:%M").is_ok(),
+        _ => false,
+    }
+}
+
 const SECTIONS: [&str; 5] = ["Context", "Spec", "Success", "Plan", "Log"];
 
 pub fn parse(text: &str) -> Result<TaskRecord, FabrError> {
@@ -293,13 +306,20 @@ pub fn parse(text: &str) -> Result<TaskRecord, FabrError> {
     let yaml = &rest[..end];
     let body = rest[end + 4..].strip_prefix('\n').unwrap_or(&rest[end + 4..]);
     let fm: FrontMatter = serde_yaml::from_str(yaml).map_err(|e| FabrError::Unprocessable(format!("front matter: {e}")))?;
+    if !matches!(fm.schema, 2 | 3) {
+        return Err(FabrError::Unprocessable(format!("unsupported record schema {}", fm.schema)));
+    }
+    if fm.pri > 3 {
+        return Err(FabrError::Unprocessable(format!("pri must be 0-3, got {}", fm.pri)));
+    }
     let mut sections = split_sections(body);
     Ok(TaskRecord {
-        schema: fm.schema,
+        schema: SCHEMA,
         id: fm.id,
         source: fm.source,
         title: fm.title,
         due: fm.due,
+        pri: fm.pri,
         state: fm.state,
         step: fm.step,
         waiting: fm.waiting,
@@ -347,10 +367,11 @@ fn split_sections(body: &str) -> std::collections::HashMap<String, String> {
 
 pub fn render(rec: &TaskRecord) -> String {
     let fm = FrontMatter {
-        schema: rec.schema,
+        schema: SCHEMA,
         id: rec.id.clone(),
         title: rec.title.clone(),
         due: rec.due.clone(),
+        pri: rec.pri,
         state: rec.state,
         step: rec.step,
         waiting: rec.waiting,
@@ -587,8 +608,37 @@ mod tests {
         for path in recs {
             let text = std::fs::read_to_string(&path).unwrap();
             let rec = parse(&text).unwrap_or_else(|e| panic!("{}: {}", path.display(), e.message()));
-            assert_eq!(rec.schema, 2, "{}", path.display());
+            assert_eq!(rec.schema, 3, "{}", path.display());
+            assert_eq!(rec.pri, 0, "{}", path.display());
+            assert!(render(&rec).starts_with("---\nschema: 3\n"), "{}", path.display());
             assert!(!rec.id.is_empty(), "{}", path.display());
+        }
+    }
+
+    #[test]
+    fn schema_two_upgrades_and_bad_values_are_refused() {
+        let text =
+            std::fs::read_to_string(fixtures_dir().join("01-reminder/project/.fabric-space/tasks/2026-10-24-check-printer-firmware.md"))
+                .unwrap();
+        assert!(text.starts_with("---\nschema: 2\n"));
+        let rec = parse(&text).unwrap();
+        assert_eq!((rec.schema, rec.pri), (3, 0));
+        let out = render(&rec);
+        assert!(out.starts_with("---\nschema: 3\n") && out.contains("\npri: 0\n"));
+        let mut rec = rec;
+        rec.pri = 2;
+        assert_eq!(parse(&render(&rec)).unwrap().pri, 2);
+        assert!(parse(&text.replacen("schema: 2", "schema: 4", 1)).is_err());
+        assert!(parse(&text.replacen("schema: 2\n", "schema: 3\npri: 4\n", 1)).is_err());
+    }
+
+    #[test]
+    fn due_accepts_dates_and_minutes_only() {
+        for ok in ["2026-10-28", "2026-10-28T09:30", "2026-02-28T23:59"] {
+            assert!(valid_due(ok), "{ok}");
+        }
+        for bad in ["", "tomorrow", "2026-13-01", "2026-10-28T24:00", "2026-10-28 09:30", "2026-10-28T09:30:00", "2026-10-8"] {
+            assert!(!valid_due(bad), "{bad}");
         }
     }
 

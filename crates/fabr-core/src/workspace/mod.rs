@@ -4,19 +4,18 @@ mod remote;
 
 use self::local::LocalCache;
 use self::remote::{RemoteCache, RemoteView};
-use crate::backend::{Backend, CONFLICT_MSG, DirEntry, LocalBackend, NOT_A_NODE, NodeFiles, SshBackend, TODO_HEADER, dir_entries};
+use crate::backend::{Backend, CONFLICT_MSG, DirEntry, LocalBackend, NOT_A_NODE, NodeFiles, SshBackend, dir_entries};
 use crate::dto::{
-    GetTreeReq, InitChildrenReq, ListDirsReq, NodeRef, RemoveNodeReq, SaveMetaReq, SaveTodoReq, SourceError, Stamp, Tree, VIRTUAL_ROOT_NAME,
+    GetTreeReq, InitChildrenReq, ListDirsReq, NodeRef, RemoveNodeReq, SaveMetaReq, SourceError, Stamp, Tree, VIRTUAL_ROOT_NAME,
 };
 use crate::error::FabrError;
 use crate::fs::{Fs, LocalFs};
 use crate::meta::{render_meta, validate_meta};
-use crate::node::{META_FILE, NODE_DIR, Node, TODO_FILE, join, leaf, load_node};
+use crate::node::{META_FILE, NODE_DIR, Node, join, leaf, load_node};
 use crate::scan::{ScanOpts, ScanResult, scan, scan_at, source_prune};
 use crate::settings::{Settings, load_settings, save_settings, validate_settings};
 use crate::sources::{Source, default_local, load_sources, local_root, save_sources, validate_sources};
 use crate::sync::{Shared, lock};
-use crate::todo::{Line, parse_todo, render_todo, validate_items};
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -343,21 +342,10 @@ impl Workspace {
         })
     }
 
-    pub fn save_todo(&self, req: SaveTodoReq) -> Result<Node, FabrError> {
-        self.save("save_todo", &req.source, &req.path, &req.version, TODO_FILE, |old| {
-            let items = validate_items(req.items)?;
-            let mut old = parse_todo(old);
-            if old.is_empty() {
-                old.push(Line::Raw { text: TODO_HEADER.into(), bad: false, line: 1 });
-            }
-            Ok(NodeFiles { meta: None, todo: Some(render_todo(&old, items).into_bytes()) })
-        })
-    }
-
     pub fn save_meta(&self, req: SaveMetaReq) -> Result<Node, FabrError> {
         self.save("save_meta", &req.source, &req.path, &req.version, META_FILE, |old| {
             let meta = validate_meta(req.meta)?;
-            Ok(NodeFiles { meta: Some(render_meta(old, &meta)?.into_bytes()), todo: None })
+            Ok(NodeFiles { meta: Some(render_meta(old, &meta)?.into_bytes()) })
         })
     }
 

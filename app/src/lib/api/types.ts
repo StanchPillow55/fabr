@@ -1,11 +1,13 @@
 export type Status = 'todo' | 'wip' | 'done';
 
+export type Pri = 0 | 1 | 2 | 3;
+
 export interface Item {
-  id: string | null;
+  id: string;
   status: Status;
   due: string | null;
   title: string;
-  pri: number | null;
+  pri: Pri;
 }
 
 export type MetaValue = string | number | boolean;
@@ -21,7 +23,6 @@ export interface Node {
   warnings: string[];
   version: string | null;
   via: string | null;
-  has_todo: boolean;
   children: Node[];
 }
 
@@ -119,13 +120,6 @@ export interface RemoveNodeReq {
   version: string;
 }
 
-export interface SaveTodoReq {
-  source: string;
-  path: string;
-  version: string;
-  items: Item[];
-}
-
 export interface SaveMetaReq {
   source: string;
   path: string;
@@ -143,7 +137,9 @@ export interface FabricListRes { records: FabricFile[]; registry: FabricFile[]; 
 export interface FabricReadRes { text: string; mtime: number }
 export interface FabricWriteReq { path: string; text: string; expected_updated_at: string }
 export interface FabricWriteRes { mtime: number }
-export interface FabricCreateReq { folder: string; title: string; due?: string | null; context?: string; spec?: string; success?: string }
+export interface FabricCreateReq { folder: string; title: string; due?: string | null; pri?: number; context?: string; spec?: string; success?: string }
+export interface ImportTodosReq { path: string }
+export interface ImportTodosRes { created: number }
 export interface FabricCreateRes { path: string; id: string }
 export interface FabricStampReq { roots: string[]; home?: string | null }
 

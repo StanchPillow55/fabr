@@ -144,11 +144,20 @@ fn stamp_is_incremental_and_rescan_finds_deep_changes() {
     assert_eq!(find(&t.root, "zz/a/b/c").unwrap().via.as_deref(), Some("a/b/c"));
     let s2 = ws.get_stamp().stamp;
     assert_ne!(s1, s2);
-    std::fs::write(f.p("personal/health/.fabr/.todo"), "todo -           external edit\n").unwrap();
+    let req = fabric::FabricCreateReq {
+        folder: f.p("personal/health").display().to_string(),
+        title: "external edit".into(),
+        due: None,
+        pri: None,
+        context: None,
+        spec: None,
+        success: None,
+    };
+    fabric::create_in(&req, f.tmp.path()).unwrap();
     let s3 = ws.get_stamp().stamp;
     assert_ne!(s2, s3);
     let t = ws.get_tree(false);
-    assert_eq!(find(&t.root, "personal/health").unwrap().items[0].title, "external edit");
+    assert!(find(&t.root, "personal/health").unwrap().items.iter().any(|i| i.title == "external edit"));
     mk(&f, "personal/newdir");
     assert_ne!(s3, ws.get_stamp().stamp);
 }
@@ -213,7 +222,7 @@ fn init_children_and_root_show_depth() {
     assert_eq!(kids, [("personal/finance/receipts/2025", true), ("personal/finance/receipts/2026", true)]);
     assert_eq!(n.children[0].children.iter().map(|c| c.path.as_str()).collect::<Vec<_>>(), ["personal/finance/receipts/2025/q1"]);
     assert_eq!(read(&f.p("personal/finance/receipts/2025/.fabr/meta.toml")), "name = \"2025\"\nshow_depth = 1\n");
-    assert_eq!(read(&f.p("personal/finance/receipts/2025/.fabr/.todo")), "# fabr todo\n");
+    assert!(!f.p("personal/finance/receipts/2025/.fabr/.todo").exists());
     assert!(read(&f.p("personal/finance/receipts/2026/.fabr/meta.toml")).contains("kind"));
     assert!(find(&ws.get_tree(false).root, "personal/finance/receipts/2025").unwrap().managed);
     let fresh = f.tmp.path().join("fresh");

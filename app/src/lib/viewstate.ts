@@ -13,8 +13,8 @@ export interface ShowPrefs {
 const MODE_LABEL: Record<ViewMode, string> = { nodes: 'Nodes', folders: 'Folders', all: 'All' };
 export const FILTERS: { value: Filter; label: string; title: string }[] = [
   { value: 'all', label: 'All', title: 'All items (1)' },
-  { value: 'open', label: 'Open', title: 'Open: todo + wip (2)' },
-  { value: 'wip', label: 'WIP', title: 'Only wip (3)' },
+  { value: 'open', label: 'Open', title: 'Open: todo + active (2)' },
+  { value: 'wip', label: 'Active', title: 'Only active (3)' },
   { value: 'overdue', label: 'Overdue', title: 'Only overdue (4)' },
 ];
 
@@ -32,15 +32,14 @@ export function showLabel(p: ShowPrefs): string {
 export type CountTone = 'zero' | 'plain' | 'wip' | 'overdue';
 export interface CountPart {
   n: number;
-  label: 'open' | 'wip' | 'overdue';
+  label: 'todo' | 'active' | 'overdue';
   tone: CountTone;
 }
 
 export function countParts(r: Pick<Rollup, 'todo' | 'wip' | 'overdue'>): CountPart[] {
-  const open = r.todo + r.wip;
   return [
-    { n: open, label: 'open', tone: open ? 'plain' : 'zero' },
-    { n: r.wip, label: 'wip', tone: r.wip ? 'wip' : 'zero' },
+    { n: r.todo, label: 'todo', tone: r.todo ? 'plain' : 'zero' },
+    { n: r.wip, label: 'active', tone: r.wip ? 'wip' : 'zero' },
     { n: r.overdue, label: 'overdue', tone: r.overdue ? 'overdue' : 'zero' },
   ];
 }
@@ -109,11 +108,11 @@ export function keyAction(e: { key: string; ctrlKey?: boolean; metaKey?: boolean
 }
 
 export const SHORTCUTS: { keys: string[]; what: string }[] = [
-  { keys: ['1', '2', '3', '4'], what: 'See: All, Open, WIP, Overdue' },
+  { keys: ['1', '2', '3', '4'], what: 'See: All, Open, Active, Overdue' },
   { keys: ['t', 'l'], what: 'Tree view, List view' },
   { keys: ['h'], what: 'Show or hide hidden nodes' },
   { keys: ['d'], what: 'Show or hide done items' },
-  { keys: ['e'], what: 'Show or hide empty nodes (no todo matching See)' },
+  { keys: ['e'], what: 'Show or hide empty nodes (nothing matching See)' },
   { keys: ['r'], what: 'Rescan the directories' },
   { keys: ['f'], what: 'Fit the tree to the window' },
   { keys: ['/'], what: 'Search' },

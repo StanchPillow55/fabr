@@ -83,7 +83,6 @@ pub fn start_gate(ctx: &Ctx) -> Result<Gate, FabrError> {
 pub struct Runner {
     space: PathBuf,
     root: PathBuf,
-    ws: Workspace,
     model: AnthropicModel,
     calls: Arc<CallLog>,
     board: Arc<Board>,
@@ -104,7 +103,7 @@ pub struct Runner {
 }
 
 impl Runner {
-    pub fn new(ctx: &Ctx, ws: Workspace, opts: Options, sink: Sink) -> Result<Runner, FabrError> {
+    pub fn new(ctx: &Ctx, _ws: Workspace, opts: Options, sink: Sink) -> Result<Runner, FabrError> {
         let gate = start_gate(ctx)?;
         let fp = fingerprint(gate.key.expose());
         let calls = CallLog::new(sink.clone(), fp.clone());
@@ -117,7 +116,6 @@ impl Runner {
             events: Events::new(&space),
             space,
             root: gate.default_folder,
-            ws,
             model,
             calls,
             board,
@@ -310,7 +308,6 @@ impl Runner {
     fn process(&mut self, path: &Path) {
         let Some(mut rec) = self.load(path) else { return };
         let node_dir = node_dir_of(path);
-        let node_path = node_path_of(&self.root, &node_dir);
 
         let mut changed = false;
         if rec.requests.cancel {
@@ -364,7 +361,7 @@ impl Runner {
                 extras = Some(Extras { activity: Some(Activity::Retry), retry_in_s: Some(left), last_error: Some(message) });
             } else {
                 self.calls.begin(&rec.id);
-                let r = self.drive(path, &node_dir, &node_path);
+                let r = self.drive(path, &node_dir);
                 let cost = self.calls.take_cost();
                 if cost > 0.0
                     && let Err(e) = mutate(path, |r| r.cost_usd += cost)
@@ -402,7 +399,7 @@ impl Runner {
         }
     }
 
-    fn drive(&self, path: &Path, node_dir: &Path, node_path: &str) -> Result<(), FabrError> {
+    fn drive(&self, path: &Path, node_dir: &Path) -> Result<(), FabrError> {
         for _ in 0..16 {
             let before = std::fs::read_to_string(path).map_err(|e| FabrError::Io(e.to_string()))?;
             let rec = parse(&before)?;
@@ -412,7 +409,7 @@ impl Runner {
             if parked(&rec) {
                 break;
             }
-            advance_with(&self.ws, "local", node_path, node_dir, path, &self.ctl, &self.model)?;
+            advance_with(node_dir, path, &self.ctl, &self.model)?;
             let after = std::fs::read_to_string(path).map_err(|e| FabrError::Io(e.to_string()))?;
             if after == before {
                 break;
@@ -461,11 +458,12 @@ impl Runner {
                 let id = free_id(&tasks, &old.title);
                 let now = now_utc();
                 let rec = TaskRecord {
-                    schema: 2,
+                    schema: fabr_core::taskrec::SCHEMA,
                     id: id.clone(),
                     source: old.source.clone(),
                     title: old.title.clone(),
                     due: old.due.clone(),
+                    pri: old.pri,
                     state: State::Reminder,
                     step: None,
                     waiting: false,
@@ -520,11 +518,6 @@ fn fold_answer(path: &Path) -> Result<(), FabrError> {
 
 fn node_dir_of(record: &Path) -> PathBuf {
     record.parent().and_then(Path::parent).and_then(Path::parent).map(Path::to_path_buf).unwrap_or_default()
-}
-
-fn node_path_of(root: &Path, node_dir: &Path) -> String {
-    let rel = node_dir.strip_prefix(root).unwrap_or(Path::new(""));
-    rel.components().map(|c| c.as_os_str().to_string_lossy().into_owned()).collect::<Vec<_>>().join("/")
 }
 
 fn free_id(tasks: &Path, title: &str) -> String {

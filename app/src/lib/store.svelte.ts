@@ -1,7 +1,7 @@
 import { SvelteSet } from 'svelte/reactivity';
 import type { Api } from './api/index';
 import { isTauri } from './api/env';
-import { ApiError, errText, type Item, type Meta, type Node, type Settings, type Source, type Status, type Tree } from './api/types';
+import { ApiError, errText, type Meta, type Node, type Settings, type Source, type Tree } from './api/types';
 import type { Filter, GroupBy, Key, SortBy, SortDir, ViewMode } from './model';
 import { COLOR_NAMES, COLOR_RE, colorSpec, computeForceOpen, effectiveColors, indexTree, isCollapsed, isVirtualRoot, nodeKey, pruneEmpty, visibleTree } from './model';
 import { getPref, persist, restore, setPref } from './prefs';
@@ -12,7 +12,6 @@ export type View = 'tree' | 'list';
 export type SheetPage = 'sources';
 export type Theme = 'system' | 'light' | 'dark';
 export type Tint = (typeof COLOR_NAMES)[number];
-type NoteSlot = 'metaNote' | 'itemsNote';
 
 export interface Banner {
   kind: '' | 'error';
@@ -28,10 +27,8 @@ export interface PanelState {
   name: string;
   original: Meta;
   warnings: string[];
-  items: Item[];
   meta: [string, string | number | boolean][];
   metaNote: { key: string; kind: 'ok' | 'error'; text: string } | null;
-  itemsNote: { kind: 'ok' | 'error'; text: string } | null;
   banner: Banner | null;
 }
 
@@ -134,6 +131,8 @@ export class Store {
   }
 
   stop(): void {
+    if (this.#reloadTimer) clearTimeout(this.#reloadTimer);
+    this.#reloadTimer = null;
     if (this.#retryTimer) clearTimeout(this.#retryTimer);
     this.#retryTimer = null;
     if (this.#timer) clearTimeout(this.#timer);
@@ -293,6 +292,16 @@ export class Store {
     }
   }
 
+  #reloadTimer: ReturnType<typeof setTimeout> | null = null;
+
+  reloadSoon(ms = RELOAD_DEBOUNCE_MS): void {
+    if (this.#reloadTimer) clearTimeout(this.#reloadTimer);
+    this.#reloadTimer = setTimeout(() => {
+      this.#reloadTimer = null;
+      void this.load();
+    }, ms);
+  }
+
   async rescan(): Promise<void> {
     await this.load(true);
   }
@@ -367,45 +376,21 @@ export class Store {
     Object.assign(old, rest);
   }
 
-  async cycleStatus(k: Key, index: number): Promise<void> {
-    const n = this.byKey.get(k);
-    if (!n || !n.managed || !n.version || !n.items[index]) return;
-    await this.commitItems(k, (items) => (items[index] ? items.map((i, j) => (j === index ? { ...i, status: nextStatus(i.status) } : i)) : null));
-  }
-
-  async quickAdd(k: Key, title: string): Promise<boolean> {
-    const n = this.byKey.get(k);
-    const text = title.trim();
-    if (!n || !n.managed || !n.version || !text) return false;
-    return this.commitItems(k, (items) => [...items, { id: null, status: 'todo' as const, due: null, title: text, pri: null }]);
-  }
-
   openPanel(k: Key): void {
     const n = this.byKey.get(k);
     if (!n) return;
     this.selected = k;
     if (this.panel && this.panel.key === k) return;
     const was = !!this.panel;
-    this.itemFocus = false;
     this.#resetPanel(n);
     if (!was) this.relayout();
   }
 
   closePanel(): void {
-    if (this.#inflight > 0) {
-      const k = this.panel?.key;
-      const close = () => {
-        if (this.panel && this.panel.key === k) this.#closeNow();
-      };
-      this.#chain.then(close, close);
-      return;
-    }
     this.#closeNow();
   }
 
   #closeNow(): void {
-    this.itemFocus = false;
-    this.#pendingSync = false;
     const was = !!this.panel;
     this.panel = null;
     this.selected = null;
@@ -421,29 +406,8 @@ export class Store {
       return;
     }
     if (n.version === p.version && n.managed === p.managed) return;
-    if (this.itemFocus) {
-      this.#pendingSync = true;
-      return;
-    }
     this.#resetPanel(n);
   }
-
-  itemFocus = false;
-  #pendingSync = false;
-
-  setItemFocus(on: boolean): void {
-    this.itemFocus = on;
-    if (on || !this.#pendingSync) return;
-    const flush = () => {
-      if (this.itemFocus || !this.#pendingSync) return;
-      this.#pendingSync = false;
-      this.syncPanel();
-    };
-    if (this.#inflight === 0) flush();
-    else this.#chain.then(flush, flush);
-  }
-
-  #inflight = 0;
 
   #chain: Promise<unknown> = Promise.resolve();
 
@@ -453,49 +417,15 @@ export class Store {
     return out;
   }
 
-  commitItems(k: Key, mutate: (items: Item[]) => Item[] | null): Promise<boolean> {
-    this.#inflight++;
-    return this.#enqueue(async () => {
-      try {
-        const n = this.byKey.get(k);
-        if (!n || !n.managed || !n.version) return false;
-        const next = mutate(n.items.map((i) => ({ ...i })));
-        if (!next) return true;
-        let node: Node;
-        try {
-          node = await this.api.saveTodo({ source: n.source, path: n.path, version: n.version, items: next });
-        } catch (e) {
-          if (this.#conflict(e, (p, fresh) => (p.version = fresh.version))) return false;
-          const msg = errText(e) || 'save failed';
-          if (this.panel?.key === k) this.#flash('itemsNote', { kind: 'error', text: msg });
-          else this.notice = msg;
-          return false;
-        }
-        this.replaceNode(node);
-        const p = this.panel;
-        if (p && p.key === k) {
-          p.items = node.items.map((i) => ({ ...i }));
-          p.version = node.version;
-          p.warnings = [...node.warnings];
-          if (p.banner?.text === CONFLICT) p.banner = null;
-          this.#flash('itemsNote', { kind: 'ok', text: 'Saved' });
-        }
-        return true;
-      } finally {
-        this.#inflight--;
-      }
-    });
-  }
+  #seq = 0;
 
-  #seq: Record<NoteSlot, number> = { metaNote: 0, itemsNote: 0 };
-
-  #flash<S extends NoteSlot>(slot: S, note: NonNullable<PanelState[S]>): void {
+  #flash(note: NonNullable<PanelState['metaNote']>): void {
     if (!this.panel) return;
-    this.panel[slot] = note;
-    const n = ++this.#seq[slot];
+    this.panel.metaNote = note;
+    const n = ++this.#seq;
     if (note.kind === 'ok') {
       setTimeout(() => {
-        if (this.#seq[slot] === n && this.panel) this.panel[slot] = null;
+        if (this.#seq === n && this.panel) this.panel.metaNote = null;
       }, 1800);
     }
   }
@@ -523,14 +453,14 @@ export class Store {
     } catch (e) {
       this.#saveFailed(e);
       if (note && this.panel && this.panel.key === p.key && !(e instanceof ApiError && e.code === 409)) {
-        this.#flash('metaNote', { key: note, kind: 'error', text: errText(e) || 'save failed' });
+        this.#flash({ key: note, kind: 'error', text: errText(e) || 'save failed' });
       }
       return false;
     }
     this.replaceNode(node);
     if (this.panel && this.panel.key === p.key) {
       this.#resetPanel(node);
-      if (note) this.#flash('metaNote', { key: note, kind: 'ok', text: 'Saved' });
+      if (note) this.#flash({ key: note, kind: 'ok', text: 'Saved' });
     }
     await this.load();
     return true;
@@ -694,10 +624,8 @@ export class Store {
       name: String(n.meta.name || n.name),
       original: { ...n.meta },
       warnings: [...n.warnings],
-      items: n.items.map((i) => ({ ...i })),
       meta: Object.entries({ ...KNOWN_META, ...n.meta }),
       metaNote: null,
-      itemsNote: null,
       banner: null,
     };
   }
@@ -710,17 +638,13 @@ export class Store {
   }
 }
 
-export const STATUSES: Status[] = ['todo', 'wip', 'done'];
 export const TINTS = COLOR_NAMES;
 export const KNOWN_META: Meta = { name: '', kind: '', description: '', show_depth: 0, hidden: false };
 const SLOW_SCAN_DIRS = 2000;
+const RELOAD_DEBOUNCE_MS = 250;
 const CONFLICT = 'This node changed on disk; reloaded';
 const CHANGED = 'That node changed on disk; it has been reloaded. Try again.';
 const LOST = 'Lost connection to the fabr server.';
-
-export function nextStatus(s: Status): Status {
-  return STATUSES[(STATUSES.indexOf(s) + 1) % STATUSES.length];
-}
 
 export function metaPayload(p: Pick<PanelState, 'meta' | 'original'>): Meta {
   const out: Meta = {};
@@ -732,11 +656,11 @@ export function metaPayload(p: Pick<PanelState, 'meta' | 'original'>): Meta {
   return out;
 }
 
-export function removeSummary(n: Pick<Node, 'items'>): { todos: number; open: number; text: string } {
-  const todos = n.items.length;
+export function removeSummary(n: Pick<Node, 'items'>): { tasks: number; open: number; text: string } {
+  const tasks = n.items.length;
   const open = n.items.filter((i) => i.status !== 'done').length;
-  const text = todos === 0 ? 'no todos will be deleted' : `${todos} ${todos === 1 ? 'todo' : 'todos'} (${open} open) will be deleted`;
-  return { todos, open, text };
+  const text = tasks === 0 ? 'there are no tasks' : `its tasks stay in .fabric-space (${tasks}, ${open} open)`;
+  return { tasks, open, text };
 }
 
 export function visitedIn(reason: string | null | undefined): number {
