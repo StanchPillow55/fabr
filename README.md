@@ -98,4 +98,4 @@ cd app && npm run tauri build     # macOS bundles
 
 ## License
 
-GPL-3.0-only, see [LICENSE.txt](LICENSE.txt).
+MIT, see [LICENSE.txt](LICENSE.txt).

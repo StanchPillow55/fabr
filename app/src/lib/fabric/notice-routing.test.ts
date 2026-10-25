@@ -39,8 +39,10 @@ describe('redelegated-pair fixture shape (task 4.1 resolution target)', () => {
     const { from, successor } = pair(f);
     expect(from.record.state).toBe('failed');
     expect(from.record.links.redelegated_to).toBeTruthy();
-    expect(successor.record.state).toBe('task');
-    expect(successor.record.step).toBe('define');
+    expect(successor.record.state).toBe('defined');
+    expect(successor.record.step).toBe('approve');
+    expect(successor.record.waiting).toBe(true);
+    expect(successor.record.approval?.status).toBe('pending');
   });
 });
 
