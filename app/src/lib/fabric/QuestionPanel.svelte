@@ -85,7 +85,7 @@
           <div class="row"><Button variant="primary" disabled={busy || !replacement.trim()} onclick={() => send({ value: 'no', replacement })}>Send</Button></div>
         {/if}
       {:else}
-        <div class="tree">
+        <div class="fieldtree">
           {#each tree as [head, leaves] (head)}
             <div class="head">{head}</div>
             {#each leaves as l (l.field)}
@@ -119,7 +119,7 @@
   .err { margin: 0; color: var(--red); }
   .row { display: flex; gap: 8px; flex-wrap: wrap; }
   .in { width: 100%; box-sizing: border-box; font: inherit; padding: 8px 10px; border: 1px solid var(--sep); border-radius: var(--radius-ctl); background: transparent; color: inherit; }
-  .tree { display: flex; flex-direction: column; gap: 4px; }
+  .fieldtree { display: flex; flex-direction: column; gap: 4px; }
   .head { font-weight: 600; margin-top: 4px; }
   .leaf { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; padding-left: 14px; }
   .name { overflow-wrap: anywhere; }
