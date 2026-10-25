@@ -8,7 +8,7 @@ pub mod runner;
 pub mod settings;
 pub mod state;
 pub mod store;
-pub mod tools;
+pub mod toolset;
 pub mod verify;
 
 pub use caps::Harness;

@@ -1,4 +1,4 @@
-use crate::lifecycle::SUPPORTED_TOOLS;
+use crate::toolset::{ReadOnly, ToolSet, default_tools};
 use crate::verify::ALLOWED_COMMANDS;
 use fabr_core::FabrError;
 use fabr_core::setup::{Capabilities, Ctx, ExecuteMode, settings_read, settings_write};
@@ -21,11 +21,17 @@ impl Harness {
         let keep = |list: &[String], known: &[&str]| -> Vec<String> {
             known.iter().filter(|k| list.iter().any(|l| l == **k)).map(|k| (*k).to_string()).collect()
         };
-        let tools = keep(&self.caps.tools, &SUPPORTED_TOOLS);
+        let all = default_tools();
+        let names = all.names();
+        let names: Vec<&str> = names.iter().map(String::as_str).collect();
+        let tools = keep(&self.caps.tools, &names);
         let checks = keep(&self.caps.checks, &ALLOWED_COMMANDS);
         match self.mode {
             ExecuteMode::Full => Capabilities { tools, checks },
-            ExecuteMode::ReadOnly => Capabilities { tools: tools.into_iter().filter(|t| t != "write_file").collect(), checks: Vec::new() },
+            ExecuteMode::ReadOnly => {
+                let read_only = ReadOnly(&*all).names();
+                Capabilities { tools: tools.into_iter().filter(|t| read_only.contains(t)).collect(), checks: Vec::new() }
+            }
             ExecuteMode::Off => Capabilities::default(),
         }
     }
@@ -53,15 +59,12 @@ impl Harness {
 }
 
 pub fn static_caps() -> Capabilities {
-    Capabilities {
-        tools: SUPPORTED_TOOLS.iter().map(|t| (*t).to_string()).collect(),
-        checks: ALLOWED_COMMANDS.iter().map(|c| (*c).to_string()).collect(),
-    }
+    Capabilities { tools: default_tools().names(), checks: ALLOWED_COMMANDS.iter().map(|c| (*c).to_string()).collect() }
 }
 
 pub fn detect() -> Capabilities {
     Capabilities {
-        tools: SUPPORTED_TOOLS.iter().map(|t| (*t).to_string()).collect(),
+        tools: default_tools().names(),
         checks: ALLOWED_COMMANDS.iter().filter(|c| on_path(c)).map(|c| (*c).to_string()).collect(),
     }
 }
@@ -127,7 +130,10 @@ mod tests {
         std::fs::write(ctx.settings_path(), "model = \"claude-sonnet-5-5\"\nauto_mode = true\n").unwrap();
         let h = load(&ctx).unwrap();
         assert_eq!(h.mode, ExecuteMode::Full);
-        assert!(h.auto_mode && h.caps.tools == SUPPORTED_TOOLS && h.caps.checks.iter().all(|c| ALLOWED_COMMANDS.contains(&c.as_str())));
+        assert_eq!(h.caps.tools, ["read_file", "list_dir", "write_file", "make_dir"]);
+        assert!(
+            h.auto_mode && h.caps.tools == default_tools().names() && h.caps.checks.iter().all(|c| ALLOWED_COMMANDS.contains(&c.as_str()))
+        );
         assert!(h.caps.checks.contains(&"cat".to_string()) || std::env::var_os("PATH").is_none());
         let saved = settings_read(&ctx).unwrap().settings;
         assert_eq!(saved.capabilities, h.caps);

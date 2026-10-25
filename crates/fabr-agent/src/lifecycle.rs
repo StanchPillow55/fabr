@@ -5,7 +5,7 @@ use crate::model::{Block, EvaluateInput, ExecuteInput, Judgement, Message, Model
 use crate::now_utc;
 use crate::state::{append_log, clean_message, is_terminal, pending_tail, question_open, stage_label, state_name, suspended_now};
 use crate::store::mutate;
-use crate::tools;
+use crate::toolset::{Only, ReadOnly, ToolSet, default_tools};
 use crate::verify;
 use fabr_core::FabrError;
 use fabr_core::taskrec::{
@@ -17,8 +17,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 pub const MAX_STAGE_ERRORS: u32 = 3;
-pub const SUPPORTED_TOOLS: [&str; 3] = ["read_file", "write_file", "list_dir"];
-const TOOL_LINE_PREFIXES: [&str; 6] = ["read_file ", "write_file ", "list_dir ", "turn ", "tool failed", "asked "];
+const TOOL_LINE_PREFIXES: [&str; 7] = ["read_file ", "write_file ", "list_dir ", "make_dir ", "turn ", "tool failed", "asked "];
 
 pub struct Ctl {
     pub board: Arc<Board>,
@@ -26,6 +25,7 @@ pub struct Ctl {
     pub execute_max_turns: u32,
     pub evaluate_max_reads: usize,
     pub harness: Harness,
+    pub tools: Arc<dyn ToolSet>,
 }
 
 impl Ctl {
@@ -36,6 +36,7 @@ impl Ctl {
             execute_max_turns: crate::settings::DEFAULT_EXECUTE_MAX_TURNS,
             evaluate_max_reads: crate::settings::DEFAULT_EVALUATE_MAX_READS,
             harness: Harness::standard(),
+            tools: default_tools(),
         }
     }
 
@@ -46,6 +47,7 @@ impl Ctl {
             execute_max_turns: crate::settings::DEFAULT_EXECUTE_MAX_TURNS,
             evaluate_max_reads: crate::settings::DEFAULT_EVALUATE_MAX_READS,
             harness: Harness::standard(),
+            tools: default_tools(),
         }
     }
 }
@@ -77,8 +79,9 @@ fn check_approval(rec: &TaskRecord) -> Result<Option<&'static str>, FabrError> {
 }
 
 pub fn validate_plan(meta: &PlanMeta) -> Result<(), FabrError> {
+    let known = default_tools().names();
     for tool in &meta.tools {
-        if !SUPPORTED_TOOLS.contains(&tool.as_str()) {
+        if !known.contains(tool) {
             return Err(FabrError::BadRequest(format!("unsupported tool {tool}")));
         }
     }
@@ -719,12 +722,20 @@ fn must_stop(rec: &TaskRecord) -> bool {
     rec.requests.complete || rec.requests.pause || rec.paused || suspended_now(rec)
 }
 
-fn allowed_tools(rec: &TaskRecord) -> Vec<String> {
-    let mut tools = vec!["read_file".to_string(), "list_dir".to_string()];
-    if rec.plan_meta.as_ref().is_none_or(|m| m.tools.iter().any(|t| t == "write_file")) {
-        tools.push("write_file".into());
-    }
+fn allowed_tools(tools: &dyn ToolSet, rec: &TaskRecord) -> Vec<String> {
+    let listed = |name: &str| rec.plan_meta.as_ref().is_none_or(|m| m.tools.iter().any(|t| t == name));
+    let writes = listed("write_file");
     tools
+        .specs()
+        .into_iter()
+        .filter(|s| match s.name.as_str() {
+            _ if s.read_only => true,
+            "write_file" => writes,
+            "make_dir" => writes || listed("make_dir"),
+            other => listed(other),
+        })
+        .map(|s| s.name)
+        .collect()
 }
 
 fn execute_system(node_dir: &Path, rec: &TaskRecord, allowed: &[String]) -> String {
@@ -735,6 +746,9 @@ fn execute_system(node_dir: &Path, rec: &TaskRecord, allowed: &[String]) -> Stri
          When the work is done, reply with a short plain summary and no tool call.\n\n",
         allowed.join(", ")
     );
+    if allowed.iter().any(|t| t == "write_file") {
+        out.push_str("write_file writes Markdown files only; create folders with make_dir first.\n\n");
+    }
     out.push_str(&format!(
         "Task: {}\n\nSpec:\n{}\n\nPlan:\n{}\n\nAssertions that will be judged afterwards:\n",
         rec.title, rec.spec, rec.plan
@@ -781,13 +795,14 @@ fn execute_stage(
         rec.waiting = false;
     }
     let prior_log = rec.log.clone();
-    let allowed = allowed_tools(rec);
+    let allowed = allowed_tools(&*ctl.tools, rec);
+    let view = Only::new(&*ctl.tools, allowed.clone());
     let system = execute_system(node_dir, rec, &allowed);
     let mut messages = vec![Message::user(vec![Block::Text(execute_opening(&prior_log, &answers_text(rec)))])];
     let mut finished = false;
     for turn in 1..=ctl.execute_max_turns {
         mark(ctl, node_dir, record_path, rec, Activity::Model);
-        let out = model.execute_turn(&ExecuteInput { system: &system, tools: &allowed }, &mut messages)?;
+        let out = model.execute_turn(&ExecuteInput { system: &system, tools: &view }, &mut messages)?;
         append_log(&mut rec.log, "execute", &format!("turn {turn}"));
         match out.outcome {
             TurnOutcome::Done(_) => {
@@ -826,15 +841,15 @@ fn execute_stage(
                         append_log(&mut rec.log, "execute", &format!("tool failed: {} not allowed", call.name));
                         (format!("tool {} is not allowed", call.name), true)
                     } else {
-                        match tools::run(node_dir, &call.name, &call.path, call.content.as_deref()) {
-                            Ok((line, result)) => {
-                                append_log(&mut rec.log, "execute", &line);
+                        match view.call(node_dir, call) {
+                            Ok(result) => {
+                                append_log(&mut rec.log, "execute", format!("{} {}", call.name, call.path).trim_end());
                                 (result, false)
                             }
                             Err(e) => {
-                                let msg = clean_message(&e.message(), 160);
+                                let msg = clean_message(&e, 160);
                                 append_log(&mut rec.log, "execute", &format!("tool failed: {} {}: {msg}", call.name, call.path));
-                                (e.message(), true)
+                                (e, true)
                             }
                         }
                     };
@@ -892,12 +907,14 @@ fn finish_checks(
         mark(ctl, node_dir, record_path, rec, Activity::Model);
         let lines: Vec<&str> = rec.log.lines().filter(|l| l.contains(" execute: ")).collect();
         let log = lines[lines.len().saturating_sub(80)..].join("\n");
+        let read_only = ReadOnly(&*ctl.tools);
         let judged = model.evaluate(&EvaluateInput {
             title: &rec.title,
             assertions: &rec.assertions,
             log: &log,
             checks: &outcomes,
             node_dir,
+            tools: &read_only,
             max_reads: ctl.evaluate_max_reads,
         })?;
         let items: Vec<VerdictItem> = rec

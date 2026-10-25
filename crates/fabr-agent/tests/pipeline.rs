@@ -34,10 +34,10 @@ fn setup() -> (tempfile::TempDir, PathBuf, Workspace) {
 
 fn draft(plan: &str, tools: &[&str], check: (&str, &[&str])) -> PlanDraft {
     PlanDraft {
-        spec: "Write greet.txt containing hi".into(),
-        success: "greet.txt contains hi".into(),
+        spec: "Write greet.md containing hi".into(),
+        success: "greet.md contains hi".into(),
         plan: plan.into(),
-        assertions: vec![DraftAssertion { id: "a1".into(), text: "greet.txt contains hi".into() }],
+        assertions: vec![DraftAssertion { id: "a1".into(), text: "greet.md contains hi".into() }],
         reversibility: "reversible".into(),
         tools: tools.iter().map(|t| (*t).to_string()).collect(),
         checks: vec![DraftCheck { cmd: check.0.into(), args: check.1.iter().map(|a| (*a).to_string()).collect() }],
@@ -45,11 +45,11 @@ fn draft(plan: &str, tools: &[&str], check: (&str, &[&str])) -> PlanDraft {
 }
 
 fn greet_plan() -> PlanDraft {
-    draft("1. Write greet.txt", &["write_file"], ("test", &["-f", "greet.txt"]))
+    draft("1. Write greet.md", &["write_file"], ("test", &["-f", "greet.md"]))
 }
 
 fn write_call() -> ToolCall {
-    ToolCall { name: "write_file".into(), path: "greet.txt".into(), content: Some("hi".into()) }
+    ToolCall { name: "write_file".into(), path: "greet.md".into(), content: Some("hi".into()) }
 }
 
 fn record_path(root: &Path) -> PathBuf {
@@ -127,7 +127,7 @@ fn planner_stops_at_pending_approval() {
     let (_tmp, fabric, ws) = setup();
     let root = ws.local_path(&NodeRef { source: "local".into(), path: String::new() }).unwrap();
     let model = ScriptedModel::new(greet_plan(), vec![write_call()]);
-    save_one(&ws, "add greet.txt that contains hi");
+    save_one(&ws, "add greet.md that contains hi");
     run_once(&ws, "local", "", &fabric, &model).unwrap();
     let rec = load(&record_path(&root));
     assert_eq!(rec.state, State::Defined);
@@ -143,7 +143,7 @@ fn planner_stops_at_pending_approval() {
     assert_eq!(digest, taskrec::approval_digest(&rec));
     assert_eq!(rec.approval.as_ref().unwrap().status, "pending");
     assert_eq!(model.execute_count(), 0);
-    assert!(!root.join("greet.txt").exists());
+    assert!(!root.join("greet.md").exists());
 }
 
 #[test]
@@ -168,7 +168,7 @@ fn define_question_pauses_without_a_new_state() {
 fn a_plan_still_invalid_after_one_repair_round_parks_with_needs_and_no_error_count() {
     let (_tmp, fabric, ws) = setup();
     let root = ws.local_path(&NodeRef { source: "local".into(), path: String::new() }).unwrap();
-    let model = ScriptedModel::new(draft("1. Open the shop", &["browser"], ("test", &["-f", "greet.txt"])), vec![write_call()]);
+    let model = ScriptedModel::new(draft("1. Open the shop", &["browser"], ("test", &["-f", "greet.md"])), vec![write_call()]);
     model.push_plan(draft("1. Open the shop", &["browser"], ("git", &["status"])));
     save_one(&ws, "browse");
     run_once(&ws, "local", "", &fabric, &model).unwrap();
@@ -238,7 +238,7 @@ fn approval_refuses_pending_refused_and_stale_digest() {
     rec.approval.as_mut().unwrap().note = Some("shorter plan".into());
     let expected = rec.updated_at.clone();
     taskrec::write_record(&path, &rec, Some(&expected)).unwrap();
-    model.push_plan(draft("1. Write greet.txt differently", &["write_file"], ("test", &["-f", "greet.txt"])));
+    model.push_plan(draft("1. Write greet.md differently", &["write_file"], ("test", &["-f", "greet.md"])));
     run_once(&ws, "local", "", &fabric, &model).unwrap();
     let redrafted = load(&path);
     assert_eq!(redrafted.state, State::Defined);
@@ -283,7 +283,7 @@ fn executor_does_not_set_the_verdict() {
     assert_eq!(executed.state, State::InProgress);
     assert_eq!(executed.step, Some(Step::Evaluate));
     assert!(executed.verdict.is_none());
-    assert_eq!(std::fs::read_to_string(root.join("greet.txt")).unwrap(), "hi");
+    assert_eq!(std::fs::read_to_string(root.join("greet.md")).unwrap(), "hi");
     advance(&root, &path, &fabric, 10, &model).unwrap();
     let judged = load(&path);
     assert_eq!(judged.verdict.as_ref().unwrap().result, "pass");
@@ -317,31 +317,31 @@ fn restart_does_not_write_the_file_twice() {
     let root = ws.local_path(&NodeRef { source: "local".into(), path: String::new() }).unwrap();
     let model = ScriptedModel::new(
         greet_plan(),
-        vec![ToolCall { name: "write_file".into(), path: "greet.txt".into(), content: Some("HI-AGAIN".into()) }],
+        vec![ToolCall { name: "write_file".into(), path: "greet.md".into(), content: Some("HI-AGAIN".into()) }],
     );
     let path = save_one(&ws, "resume");
     let id = load(&path).id.clone();
-    std::fs::write(root.join("greet.txt"), "hi").unwrap();
+    std::fs::write(root.join("greet.md"), "hi").unwrap();
     let mut rec = load(&path);
     rec.state = State::InProgress;
     rec.step = Some(Step::Execute);
-    rec.spec = "Write greet.txt containing hi".into();
-    rec.plan = "1. Write greet.txt".into();
-    rec.log = "- 2026-10-24T00:00:00Z execute: write_file greet.txt\n".into();
+    rec.spec = "Write greet.md containing hi".into();
+    rec.plan = "1. Write greet.md".into();
+    rec.log = "- 2026-10-24T00:00:00Z execute: write_file greet.md\n".into();
     rec.plan_meta = Some(taskrec::PlanMeta {
         reversibility: Some("reversible".into()),
         tools: vec!["write_file".into()],
         assumptions: Vec::new(),
-        checks: vec![taskrec::Check { cmd: "test".into(), args: vec!["-f".into(), "greet.txt".into()] }],
+        checks: vec![taskrec::Check { cmd: "test".into(), args: vec!["-f".into(), "greet.md".into()] }],
         requires: Default::default(),
     });
     let expected = rec.updated_at.clone();
     taskrec::write_record(&path, &rec, Some(&expected)).unwrap();
     advance(&root, &path, &fabric, 10, &model).unwrap();
-    assert_eq!(std::fs::read_to_string(root.join("greet.txt")).unwrap(), "hi");
+    assert_eq!(std::fs::read_to_string(root.join("greet.md")).unwrap(), "hi");
     let after = load(&path);
     assert_eq!(after.id, id);
-    assert_eq!(after.log.matches("write_file greet.txt").count(), 1);
+    assert_eq!(after.log.matches("write_file greet.md").count(), 1);
     assert_eq!(after.step, Some(Step::Evaluate));
     assert!(after.verdict.is_none());
     let tasks = root.join(".fabric-space").join("tasks");
@@ -354,7 +354,7 @@ fn end_to_end_greet_file() {
     let (_tmp, fabric, ws) = setup();
     let root = ws.local_path(&NodeRef { source: "local".into(), path: String::new() }).unwrap();
     let model = ScriptedModel::new(greet_plan(), vec![write_call()]);
-    save_one(&ws, "add greet.txt that contains hi");
+    save_one(&ws, "add greet.md that contains hi");
     run_once(&ws, "local", "", &fabric, &model).unwrap();
     let path = record_path(&root);
     let drafted = load(&path);
@@ -363,7 +363,7 @@ fn end_to_end_greet_file() {
     approve(&path);
     run_once(&ws, "local", "", &fabric, &model).unwrap();
     let rec = load(&path);
-    assert_eq!(std::fs::read_to_string(root.join("greet.txt")).unwrap(), "hi");
+    assert_eq!(std::fs::read_to_string(root.join("greet.md")).unwrap(), "hi");
     assert_eq!(rec.state, State::Succeeded);
     assert_eq!(rec.verdict.as_ref().unwrap().result, "pass");
     assert!(rec.step.is_none());
@@ -512,7 +512,7 @@ fn gui_approval_does_not_write_state_and_execute_waits_for_it() {
     assert!(!secrets.contains("telegram"));
     let root = ws.local_path(&NodeRef { source: "local".into(), path: String::new() }).unwrap();
     let model = ScriptedModel::new(greet_plan(), vec![write_call()]);
-    save_one(&ws, "add greet.txt that contains hi");
+    save_one(&ws, "add greet.md that contains hi");
     run_once(&ws, "local", "", &fabric_space, &model).unwrap();
     let path = record_path(&root);
     let drafted = load(&path);
@@ -524,7 +524,7 @@ fn gui_approval_does_not_write_state_and_execute_waits_for_it() {
     assert!(!drafted.assertions.is_empty());
     assert!(drafted.source.is_none());
     assert_eq!(model.execute_count(), 0);
-    assert!(!root.join("greet.txt").exists());
+    assert!(!root.join("greet.md").exists());
 
     let mut moved = drafted.clone();
     moved.state = State::InProgress;
@@ -557,7 +557,7 @@ fn gui_approval_does_not_write_state_and_execute_waits_for_it() {
     assert_eq!(model.execute_count(), 0);
     run_once(&ws, "local", "", &fabric_space, &model).unwrap();
     assert!(model.execute_count() >= 1);
-    assert_eq!(std::fs::read_to_string(root.join("greet.txt")).unwrap(), "hi");
+    assert_eq!(std::fs::read_to_string(root.join("greet.md")).unwrap(), "hi");
     assert_eq!(load(&path).state, State::Succeeded);
 }
 
@@ -579,14 +579,14 @@ fn gui_refusal_redrafts_without_executing() {
     refused.updated_at = "2026-10-24T19:00:00Z".into();
     gui_write(&path, &refused, &drafted.updated_at);
     assert_eq!(load(&path).state, State::Defined);
-    model.push_plan(draft("1. Write greet.txt differently", &["write_file"], ("test", &["-f", "greet.txt"])));
+    model.push_plan(draft("1. Write greet.md differently", &["write_file"], ("test", &["-f", "greet.md"])));
     run_once(&ws, "local", "", &fabric_space, &model).unwrap();
     let redrafted = load(&path);
     assert_eq!(redrafted.state, State::Defined);
     assert_eq!(redrafted.approval.as_ref().unwrap().status, "pending");
     assert!(redrafted.plan.contains("differently"));
     assert_eq!(model.execute_count(), 0);
-    assert!(!root.join("greet.txt").exists());
+    assert!(!root.join("greet.md").exists());
 }
 
 struct Broken;
@@ -675,7 +675,7 @@ fn a_gui_write_between_read_and_write_is_folded_in() {
     assert!(mine.question.is_some());
 
     let answer = taskrec::Answer {
-        value: Some("greet.txt".into()),
+        value: Some("greet.md".into()),
         replacement: None,
         granted: None,
         by: Some("gui".into()),
@@ -727,7 +727,7 @@ impl fabr_agent::Model for CancelsMidRun {
             call: ToolCall { name: "write_file".into(), path: name.into(), content: Some("x".into()) },
         };
         Ok(fabr_agent::ExecuteTurn {
-            outcome: fabr_agent::TurnOutcome::Tools(vec![call("first.txt"), call("second.txt")]),
+            outcome: fabr_agent::TurnOutcome::Tools(vec![call("first.md"), call("second.md")]),
             stop_reason: "tool_use".into(),
         })
     }
@@ -752,8 +752,8 @@ fn a_cancel_that_lands_during_execute_survives_the_per_call_persist() {
     let rec = load(&path);
     assert!(rec.requests.cancel, "cancel was erased");
     assert_eq!(rec.state, State::InProgress);
-    assert!(root.join("first.txt").exists());
-    assert!(!root.join("second.txt").exists());
+    assert!(root.join("first.md").exists());
+    assert!(!root.join("second.md").exists());
     advance(&root, &path, &fabric, 10, &model).unwrap();
     let rec = load(&path);
     assert_eq!(rec.state, State::Failed);
@@ -766,7 +766,7 @@ fn a_cancel_that_lands_during_execute_survives_the_per_call_persist() {
 fn a_hung_check_is_killed_and_counted_as_a_stage_error() {
     let (_tmp, fabric, ws) = setup();
     let root = ws.local_path(&NodeRef { source: "local".into(), path: String::new() }).unwrap();
-    std::fs::write(root.join("greet.txt"), "hi").unwrap();
+    std::fs::write(root.join("greet.md"), "hi").unwrap();
     let path = delegated(&ws, &root);
     edit(&path, |r| {
         r.state = State::InProgress;
@@ -775,7 +775,7 @@ fn a_hung_check_is_killed_and_counted_as_a_stage_error() {
             reversibility: Some("reversible".into()),
             tools: vec![],
             assumptions: vec![],
-            checks: vec![taskrec::Check { cmd: "tail".into(), args: vec!["-f".into(), "greet.txt".into()] }],
+            checks: vec![taskrec::Check { cmd: "tail".into(), args: vec!["-f".into(), "greet.md".into()] }],
             requires: Default::default(),
         });
     });
@@ -944,7 +944,7 @@ fn registry_entry_mirrors_the_record_from_gather_to_notify_and_cancel_removes_it
     assert_eq!(entry(&fabric, &path).unwrap()["waiting"].as_str(), Some("question"));
     edit(&path, |r| {
         r.question.as_mut().unwrap().answer =
-            Some(taskrec::Answer { value: Some("greet.txt".into()), replacement: None, granted: None, by: Some("gui".into()), at: None });
+            Some(taskrec::Answer { value: Some("greet.md".into()), replacement: None, granted: None, by: Some("gui".into()), at: None });
     });
     for name in ["define-answered", "plan"] {
         let t = tick(name);
@@ -1002,13 +1002,13 @@ fn a_read_only_machine_plans_and_auto_approves_then_parks_at_execute_and_a_capab
     assert_eq!(rec.log.matches("execute: needs harness: write_file, checks: test").count(), 1, "{}", rec.log);
     assert_eq!(Phase::of(&rec, "2026-10-25T12:00"), Phase::NeedsHarness);
     assert_eq!(model.execute_count(), 0);
-    assert!(!root.join("greet.txt").exists());
+    assert!(!root.join("greet.md").exists());
     let full = fabr_agent::Ctl::new(&fabric, 10);
     drive_n(&root, &path, &full, &model, 12);
     let rec = load(&path);
     assert_eq!(rec.state, State::Succeeded, "{}", rec.log);
     assert!(rec.needs.is_none());
-    assert_eq!(std::fs::read_to_string(root.join("greet.txt")).unwrap(), "hi");
+    assert_eq!(std::fs::read_to_string(root.join("greet.md")).unwrap(), "hi");
 }
 
 #[test]
@@ -1027,7 +1027,7 @@ fn human_sections_are_not_regenerated_and_redo_steps_back() {
         r.by.spec = Some(taskrec::Author::Human);
         r.by.success = Some(taskrec::Author::Human);
         r.by.plan = Some(taskrec::Author::Human);
-        r.assertions = vec![taskrec::Assertion { id: "h1".into(), text: "greet.txt contains hi".into() }];
+        r.assertions = vec![taskrec::Assertion { id: "h1".into(), text: "greet.md contains hi".into() }];
     });
     drive_n(&root, &path, &ctl, &model, 3);
     let rec = load(&path);
@@ -1077,26 +1077,59 @@ fn execute_loops_over_turns_and_the_model_sees_the_tool_results() {
     std::fs::write(root.join("notes.txt"), "remember the milk").unwrap();
     let model = ScriptedModel::new(greet_plan(), vec![]).with_turns(vec![
         Tools(vec![tool("list_dir", ".", None), tool("read_file", "notes.txt", None)]),
-        Tools(vec![tool("write_file", "greet.txt", Some("hi"))]),
+        Tools(vec![tool("write_file", "greet.md", Some("hi"))]),
         Done,
     ]);
     let path = run_to_approval(&ws, &fabric, &model, &root);
     run_once(&ws, "local", "", &fabric, &model).unwrap();
-    assert_eq!(std::fs::read_to_string(root.join("greet.txt")).unwrap(), "hi");
+    assert_eq!(std::fs::read_to_string(root.join("greet.md")).unwrap(), "hi");
     let rec = load(&path);
     assert_eq!(rec.state, State::Succeeded);
-    for line in [
-        "execute: turn 1",
-        "execute: list_dir . (",
-        "execute: read_file notes.txt (17 bytes)",
-        "execute: turn 3",
-        "execute: write_file greet.txt",
-    ] {
+    for line in
+        ["execute: turn 1", "execute: list_dir .", "execute: read_file notes.txt", "execute: turn 3", "execute: write_file greet.md"]
+    {
         assert!(rec.log.contains(line), "{line}: {}", rec.log);
     }
     let seen = model.seen().join("\n");
     assert!(seen.contains("notes.txt") && seen.contains("remember the milk"), "{seen}");
     assert_eq!(model.execute_count(), 3);
+}
+
+#[test]
+fn a_refused_write_reaches_the_model_as_a_tool_error_and_the_run_continues() {
+    use fabr_agent::ScriptedTurn::{Done, Tools};
+    let (_tmp, fabric, ws) = setup();
+    let root = ws.local_path(&NodeRef { source: "local".into(), path: String::new() }).unwrap();
+    let model = ScriptedModel::new(greet_plan(), vec![]).with_turns(vec![
+        Tools(vec![tool("write_file", "notes.txt", Some("x"))]),
+        Tools(vec![tool("write_file", "greet.md", Some("hi"))]),
+        Done,
+    ]);
+    let path = run_to_approval(&ws, &fabric, &model, &root);
+    run_once(&ws, "local", "", &fabric, &model).unwrap();
+    assert!(!root.join("notes.txt").exists());
+    assert_eq!(std::fs::read_to_string(root.join("greet.md")).unwrap(), "hi");
+    let rec = load(&path);
+    assert_eq!(rec.state, State::Succeeded);
+    assert!(rec.log.contains("tool failed: write_file notes.txt: write_file only writes .md files; got notes.txt"), "{}", rec.log);
+    assert!(model.seen().join("\n").contains("write_file only writes .md files; got notes.txt"));
+}
+
+#[test]
+fn make_dir_then_write_file_lands_a_markdown_file_in_the_folder() {
+    use fabr_agent::ScriptedTurn::{Done, Tools};
+    let (_tmp, fabric, ws) = setup();
+    let root = ws.local_path(&NodeRef { source: "local".into(), path: String::new() }).unwrap();
+    let model = ScriptedModel::new(greet_plan(), vec![]).with_turns(vec![
+        Tools(vec![tool("make_dir", "notes/deep", None), tool("write_file", "notes/plan.md", Some("# plan"))]),
+        Tools(vec![tool("write_file", "greet.md", Some("hi"))]),
+        Done,
+    ]);
+    let path = run_to_approval(&ws, &fabric, &model, &root);
+    run_once(&ws, "local", "", &fabric, &model).unwrap();
+    assert!(root.join("notes/deep").is_dir());
+    assert_eq!(std::fs::read_to_string(root.join("notes/plan.md")).unwrap(), "# plan");
+    assert_eq!(load(&path).state, State::Succeeded);
 }
 
 #[test]
@@ -1154,7 +1187,7 @@ fn cancel_between_turns_fails_the_task_and_makes_no_further_call() {
     let root = ws.local_path(&NodeRef { source: "local".into(), path: String::new() }).unwrap();
     let inner = ScriptedModel::new(greet_plan(), vec![]).with_turns(vec![
         Tools(vec![]),
-        Tools(vec![tool("write_file", "greet.txt", Some("hi"))]),
+        Tools(vec![tool("write_file", "greet.md", Some("hi"))]),
         Done,
     ]);
     let path = {
@@ -1169,7 +1202,7 @@ fn cancel_between_turns_fails_the_task_and_makes_no_further_call() {
     assert_eq!(rec.state, State::Failed);
     assert!(rec.log.contains("execute: cancelled by user") && !rec.requests.cancel, "{}", rec.log);
     assert_eq!(model.inner.execute_count(), 1);
-    assert!(!root.join("greet.txt").exists());
+    assert!(!root.join("greet.md").exists());
 }
 
 #[test]
@@ -1179,7 +1212,7 @@ fn a_question_mid_run_parks_and_the_answer_continues_the_loop() {
     let root = ws.local_path(&NodeRef { source: "local".into(), path: String::new() }).unwrap();
     let model = ScriptedModel::new(greet_plan(), vec![]).with_turns(vec![
         Ask("Which greeting?".into()),
-        Tools(vec![tool("write_file", "greet.txt", Some("hi"))]),
+        Tools(vec![tool("write_file", "greet.md", Some("hi"))]),
         Done,
     ]);
     let path = run_to_approval(&ws, &fabric, &model, &root);
@@ -1210,9 +1243,9 @@ fn the_model_evaluator_decides_the_verdict_with_per_assertion_evidence() {
     use fabr_agent::{Judgement::Pass, ScriptedTurn::Tools};
     let (_tmp, fabric, ws) = setup();
     let root = ws.local_path(&NodeRef { source: "local".into(), path: String::new() }).unwrap();
-    let verdict = fabr_agent::EvalVerdict { items: vec![judged("a1", Pass, "greet.txt holds hi")] };
+    let verdict = fabr_agent::EvalVerdict { items: vec![judged("a1", Pass, "greet.md holds hi")] };
     let model = ScriptedModel::new(greet_plan(), vec![])
-        .with_turns(vec![Tools(vec![tool("write_file", "greet.txt", Some("hi"))])])
+        .with_turns(vec![Tools(vec![tool("write_file", "greet.md", Some("hi"))])])
         .with_verdicts(vec![verdict]);
     let path = run_to_approval(&ws, &fabric, &model, &root);
     run_once(&ws, "local", "", &fabric, &model).unwrap();
@@ -1220,9 +1253,9 @@ fn the_model_evaluator_decides_the_verdict_with_per_assertion_evidence() {
     assert_eq!(rec.assertions.len(), 1);
     let v = rec.verdict.as_ref().unwrap();
     assert_eq!((rec.state, v.result.as_str(), v.items.len()), (State::Succeeded, "pass", 1));
-    assert_eq!(v.items[0].evidence, "greet.txt holds hi");
+    assert_eq!(v.items[0].evidence, "greet.md holds hi");
     assert_eq!(model.evaluate_count(), 1);
-    assert!(model.seen().join("\n").contains("write_file greet.txt"));
+    assert!(model.seen().join("\n").contains("write_file greet.md"));
 }
 
 #[test]
@@ -1231,7 +1264,7 @@ fn one_failing_assertion_fails_the_task() {
     let (_tmp, fabric, ws) = setup();
     let root = ws.local_path(&NodeRef { source: "local".into(), path: String::new() }).unwrap();
     let mut plan = greet_plan();
-    plan.assertions.push(DraftAssertion { id: "a2".into(), text: "greet.txt is the only file written".into() });
+    plan.assertions.push(DraftAssertion { id: "a2".into(), text: "greet.md is the only file written".into() });
     let verdict = fabr_agent::EvalVerdict { items: vec![judged("a1", Pass, "ok"), judged("a2", Fail, "also wrote x.txt")] };
     let model = ScriptedModel::new(plan, vec![write_call()]).with_verdicts(vec![verdict]);
     let path = run_to_approval(&ws, &fabric, &model, &root);
@@ -1254,7 +1287,7 @@ fn a_check_on_a_file_that_is_not_in_the_folder_or_created_is_dropped() {
     let rec = load(&record_path(&root));
     let checks = &rec.plan_meta.as_ref().unwrap().checks;
     assert_eq!(checks.len(), 1);
-    assert_eq!(checks[0].args, vec!["-f".to_string(), "greet.txt".to_string()]);
+    assert_eq!(checks[0].args, vec!["-f".to_string(), "greet.md".to_string()]);
     assert!(rec.log.contains("plan: dropped check grep -q done tasks.md: unknown file"), "{}", rec.log);
 }
 

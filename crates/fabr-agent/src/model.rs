@@ -1,4 +1,4 @@
-use crate::tools;
+use crate::toolset::{ToolSet, ToolSpec};
 use crate::verify::CheckOutcome;
 use fabr_core::setup::Capabilities;
 use fabr_core::taskrec::Assertion;
@@ -99,7 +99,7 @@ impl Message {
 
 pub struct ExecuteInput<'a> {
     pub system: &'a str,
-    pub tools: &'a [String],
+    pub tools: &'a dyn ToolSet,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -127,6 +127,7 @@ pub struct EvaluateInput<'a> {
     pub log: &'a str,
     pub checks: &'a [CheckOutcome],
     pub node_dir: &'a Path,
+    pub tools: &'a dyn ToolSet,
     pub max_reads: usize,
 }
 
@@ -308,12 +309,15 @@ impl Model for ScriptedModel {
             .enumerate()
             .map(|(i, a)| {
                 let (pass, evidence) = match a.text.split_once(" contains ") {
-                    Some((file, needle)) => match tools::read_file(input.node_dir, file.trim()) {
+                    Some((file, needle)) => match input
+                        .tools
+                        .call(input.node_dir, &ToolCall { name: "read_file".into(), path: file.trim().to_string(), content: None })
+                    {
                         Ok(body) => {
                             let pass = body.contains(needle.trim());
                             (pass, format!("read {}: {pass}", file.trim()))
                         }
-                        Err(e) => (false, e.message()),
+                        Err(e) => (false, e),
                     },
                     None => match input.checks.get(i) {
                         Some(o) => (o.pass, o.evidence.clone()),
@@ -490,7 +494,7 @@ impl Model for AnthropicModel {
     }
 
     fn execute_turn(&self, input: &ExecuteInput, messages: &mut Vec<Message>) -> Result<ExecuteTurn, FabrError> {
-        let mut tool_defs: Vec<serde_json::Value> = input.tools.iter().filter_map(|t| file_tool(t)).collect();
+        let mut tool_defs = api_tools(input.tools);
         tool_defs.push(serde_json::json!({
             "name": "ask_user",
             "description": "Ask the user one question when something required is missing; the run pauses until they answer",
@@ -546,7 +550,7 @@ impl Model for AnthropicModel {
             An assertion about the agent's own behaviour (no writes, no side effects) is judged from the execute log, which lists every tool call. \
             Reply with only JSON: {\"items\":[{\"id\":\"<assertion id>\",\"status\":\"pass|fail|unchecked\",\"evidence\":\"one line\"}]} with one item per assertion. \
             Use unchecked only when nothing available can settle it.";
-        let tool_defs: Vec<serde_json::Value> = ["read_file", "list_dir"].iter().filter_map(|t| file_tool(t)).collect();
+        let tool_defs = api_tools(input.tools);
         let mut messages = vec![Message::user(vec![Block::Text(prompt)])];
         let mut reads = 0usize;
         for _ in 0..=input.max_reads + 2 {
@@ -569,14 +573,14 @@ impl Model for AnthropicModel {
                 let Block::ToolUse { id, name, input: args } = block else { continue };
                 let (content, is_error) = if reads >= input.max_reads {
                     ("read budget used up; give your verdict now".to_string(), true)
-                } else if name != "read_file" && name != "list_dir" {
+                } else if !input.tools.names().contains(name) {
                     (format!("tool {name} is not available"), true)
                 } else {
                     reads += 1;
-                    let path = args.get("path").and_then(|p| p.as_str()).unwrap_or("");
-                    match tools::run(input.node_dir, name, path, None) {
-                        Ok((_, result)) => (result, false),
-                        Err(e) => (e.message(), true),
+                    let path = args.get("path").and_then(|p| p.as_str()).unwrap_or("").to_string();
+                    match input.tools.call(input.node_dir, &ToolCall { name: name.clone(), path, content: None }) {
+                        Ok(result) => (result, false),
+                        Err(e) => (e, true),
                     }
                 };
                 results.push(Block::ToolResult { id: id.clone(), content, is_error });
@@ -587,13 +591,12 @@ impl Model for AnthropicModel {
     }
 }
 
-fn file_tool(name: &str) -> Option<serde_json::Value> {
-    match name {
-        "read_file" => Some(tool_schema("read_file", "Read a file inside the node", false)),
-        "write_file" => Some(tool_schema("write_file", "Write a file inside the node", true)),
-        "list_dir" => Some(tool_schema("list_dir", "List a directory inside the node", false)),
-        _ => None,
-    }
+fn api_tools(tools: &dyn ToolSet) -> Vec<serde_json::Value> {
+    tools.specs().iter().map(api_tool).collect()
+}
+
+fn api_tool(spec: &ToolSpec) -> serde_json::Value {
+    serde_json::json!({"name": spec.name, "description": spec.description, "input_schema": spec.input_schema})
 }
 
 fn blocks_of(value: &serde_json::Value) -> Result<Vec<Block>, FabrError> {
@@ -650,20 +653,6 @@ fn parse_verdict(text: &str, assertions: &[Assertion]) -> Result<EvalVerdict, Fa
         })
         .collect();
     Ok(EvalVerdict { items })
-}
-
-fn tool_schema(name: &str, description: &str, with_content: bool) -> serde_json::Value {
-    let mut properties = serde_json::json!({ "path": {"type": "string"} });
-    let mut required = vec!["path"];
-    if with_content {
-        properties["content"] = serde_json::json!({"type": "string"});
-        required.push("content");
-    }
-    serde_json::json!({
-        "name": name,
-        "description": description,
-        "input_schema": {"type": "object", "properties": properties, "required": required}
-    })
 }
 
 fn text_of(value: &serde_json::Value) -> Result<String, FabrError> {

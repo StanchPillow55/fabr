@@ -50,12 +50,12 @@ impl Fake {
                         q.fetch_sub(1, Ordering::SeqCst);
                     }
                     let question = if asked { json!("Which filename?") } else { json!(null) };
-                    let inner = json!({"spec": "write greet.txt", "success": "greet.txt exists", "assertions": [{"id": "a1", "text": "greet.txt exists"}], "question": question});
+                    let inner = json!({"spec": "write greet.md", "success": "greet.md exists", "assertions": [{"id": "a1", "text": "greet.md exists"}], "question": question});
                     json!({"content": [{"type": "text", "text": inner.to_string()}], "usage": {"input_tokens": 120, "output_tokens": 45}})
                         .to_string()
                 } else {
-                    let inner = json!({"spec": "write greet.txt", "success": "greet.txt exists", "plan": "1. write it", "assertions": [{"id": "a1", "text": "greet.txt exists"}],
-                        "plan_meta": {"reversibility": "reversible", "tools": ["write_file"], "checks": [{"cmd": "test", "args": ["-f", "greet.txt"]}]}});
+                    let inner = json!({"spec": "write greet.md", "success": "greet.md exists", "plan": "1. write it", "assertions": [{"id": "a1", "text": "greet.md exists"}],
+                        "plan_meta": {"reversibility": "reversible", "tools": ["write_file"], "checks": [{"cmd": "test", "args": ["-f", "greet.md"]}]}});
                     json!({"content": [{"type": "text", "text": inner.to_string()}], "usage": {"input_tokens": 300, "output_tokens": 80}})
                         .to_string()
                 };
@@ -299,7 +299,7 @@ fn answered_question_is_copied_to_answers_and_the_pipeline_advances() {
     r.tick();
     edit(&path, |rec| {
         rec.question.as_mut().unwrap().answer = Some(Answer {
-            value: Some("greet.txt".into()),
+            value: Some("greet.md".into()),
             replacement: None,
             granted: None,
             by: Some("gui".into()),
@@ -310,7 +310,7 @@ fn answered_question_is_copied_to_answers_and_the_pipeline_advances() {
     let rec = load(&path);
     assert!(rec.question.is_none());
     assert_eq!(rec.answers.len(), 1);
-    assert_eq!(rec.answers[0].answer.as_ref().unwrap().value.as_deref(), Some("greet.txt"));
+    assert_eq!(rec.answers[0].answer.as_ref().unwrap().value.as_deref(), Some("greet.md"));
     assert_eq!(rec.state, State::Defined);
     assert!(rec.waiting);
     assert_eq!(rec.approval.as_ref().unwrap().status, "pending");
@@ -546,7 +546,7 @@ fn the_registry_entry_follows_the_task_from_gather_to_notify() {
 
     edit(&path, |rec| {
         rec.question.as_mut().unwrap().answer =
-            Some(Answer { value: Some("greet.txt".into()), replacement: None, granted: None, by: Some("gui".into()), at: None });
+            Some(Answer { value: Some("greet.md".into()), replacement: None, granted: None, by: Some("gui".into()), at: None });
     });
     r.tick();
     let doc = registry_doc(&e);
