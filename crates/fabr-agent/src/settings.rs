@@ -8,6 +8,8 @@ pub struct AgentSettings {
     pub api_key: Secret,
     pub heartbeat_interval_s: u64,
     pub check_timeout_s: u64,
+    pub execute_max_turns: u32,
+    pub evaluate_max_reads: usize,
     pub completed_steps: Vec<String>,
 }
 
@@ -30,11 +32,22 @@ pub fn load_agent_settings(dir: &Path) -> Result<AgentSettings, FabrError> {
         .unwrap_or_default();
     let key = secrets.get("anthropic_api_key").and_then(|v| v.as_str()).unwrap_or("").to_string();
     let api_key = Secret::new(key);
-    let settings =
-        AgentSettings { default_folder, model, api_key, heartbeat_interval_s, check_timeout_s: read_check_timeout(&doc), completed_steps };
+    let settings = AgentSettings {
+        default_folder,
+        model,
+        api_key,
+        heartbeat_interval_s,
+        check_timeout_s: read_check_timeout(&doc),
+        execute_max_turns: read_limit(&doc, "execute_max_turns", DEFAULT_EXECUTE_MAX_TURNS as u64) as u32,
+        evaluate_max_reads: read_limit(&doc, "evaluate_max_reads", DEFAULT_EVALUATE_MAX_READS as u64) as usize,
+        completed_steps,
+    };
     require_ready(&settings)?;
     Ok(settings)
 }
+
+pub const DEFAULT_EXECUTE_MAX_TURNS: u32 = 12;
+pub const DEFAULT_EVALUATE_MAX_READS: usize = 6;
 
 pub fn require_ready(s: &AgentSettings) -> Result<(), FabrError> {
     for step in ["folder", "api_key", "model"] {
@@ -65,4 +78,19 @@ pub fn check_timeout_s(space: &Path) -> u64 {
         .and_then(|t| t.parse::<toml_edit::DocumentMut>().ok())
         .map(|d| read_check_timeout(&d))
         .unwrap_or(crate::verify::DEFAULT_CHECK_TIMEOUT_S)
+}
+
+fn read_limit(doc: &toml_edit::DocumentMut, key: &str, default: u64) -> u64 {
+    doc.get(key).and_then(|v| v.as_integer()).filter(|n| *n > 0).map(|n| (n as u64).min(200)).unwrap_or(default)
+}
+
+pub fn limits(space: &Path) -> (u32, usize) {
+    let doc = std::fs::read_to_string(space.join("settings.toml")).ok().and_then(|t| t.parse::<toml_edit::DocumentMut>().ok());
+    match doc {
+        Some(d) => (
+            read_limit(&d, "execute_max_turns", DEFAULT_EXECUTE_MAX_TURNS as u64) as u32,
+            read_limit(&d, "evaluate_max_reads", DEFAULT_EVALUATE_MAX_READS as u64) as usize,
+        ),
+        None => (DEFAULT_EXECUTE_MAX_TURNS, DEFAULT_EVALUATE_MAX_READS),
+    }
 }

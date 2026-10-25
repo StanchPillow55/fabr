@@ -600,8 +600,16 @@ impl fabr_agent::Model for Broken {
         Err(fabr_core::FabrError::Remote("no plan".into()))
     }
 
-    fn execute(&self, _: &str, _: &str, _: &str) -> Result<Vec<ToolCall>, fabr_core::FabrError> {
+    fn execute_turn(
+        &self,
+        _: &fabr_agent::ExecuteInput,
+        _: &mut Vec<fabr_agent::Message>,
+    ) -> Result<fabr_agent::ExecuteTurn, fabr_core::FabrError> {
         Err(fabr_core::FabrError::Remote("no execute".into()))
+    }
+
+    fn evaluate(&self, _: &fabr_agent::EvaluateInput) -> Result<fabr_agent::EvalVerdict, fabr_core::FabrError> {
+        Err(fabr_core::FabrError::Remote("no evaluate".into()))
     }
 }
 
@@ -708,10 +716,24 @@ impl fabr_agent::Model for CancelsMidRun {
         unreachable!()
     }
 
-    fn execute(&self, _: &str, _: &str, _: &str) -> Result<Vec<ToolCall>, fabr_core::FabrError> {
+    fn execute_turn(
+        &self,
+        _: &fabr_agent::ExecuteInput,
+        _: &mut Vec<fabr_agent::Message>,
+    ) -> Result<fabr_agent::ExecuteTurn, fabr_core::FabrError> {
         edit(&self.path, |r| r.requests.cancel = true);
-        let call = |name: &str| ToolCall { name: "write_file".into(), path: name.into(), content: Some("x".into()) };
-        Ok(vec![call("first.txt"), call("second.txt")])
+        let call = |name: &str| fabr_agent::ToolUse {
+            id: name.into(),
+            call: ToolCall { name: "write_file".into(), path: name.into(), content: Some("x".into()) },
+        };
+        Ok(fabr_agent::ExecuteTurn {
+            outcome: fabr_agent::TurnOutcome::Tools(vec![call("first.txt"), call("second.txt")]),
+            stop_reason: "tool_use".into(),
+        })
+    }
+
+    fn evaluate(&self, _: &fabr_agent::EvaluateInput) -> Result<fabr_agent::EvalVerdict, fabr_core::FabrError> {
+        unreachable!()
     }
 }
 
@@ -787,8 +809,16 @@ impl fabr_agent::Model for Recording {
         self.inner.as_ref().unwrap().plan(input)
     }
 
-    fn execute(&self, t: &str, s: &str, p: &str) -> Result<Vec<ToolCall>, fabr_core::FabrError> {
-        self.inner.as_ref().unwrap().execute(t, s, p)
+    fn execute_turn(
+        &self,
+        input: &fabr_agent::ExecuteInput,
+        messages: &mut Vec<fabr_agent::Message>,
+    ) -> Result<fabr_agent::ExecuteTurn, fabr_core::FabrError> {
+        self.inner.as_ref().unwrap().execute_turn(input, messages)
+    }
+
+    fn evaluate(&self, input: &fabr_agent::EvaluateInput) -> Result<fabr_agent::EvalVerdict, fabr_core::FabrError> {
+        self.inner.as_ref().unwrap().evaluate(input)
     }
 }
 
@@ -1021,4 +1051,222 @@ fn human_sections_are_not_regenerated_and_redo_steps_back() {
     drive_n(&root, &path, &ctl, &model, 1);
     let rec = load(&path);
     assert!(rec.requests.redo.is_none() && rec.log.contains("ignored request redo in state in_progress"), "{}", rec.log);
+}
+
+fn run_to_approval(ws: &Workspace, fabric: &Path, model: &impl fabr_agent::Model, root: &Path) -> PathBuf {
+    save_one(ws, "turns");
+    run_once(ws, "local", "", fabric, model).unwrap();
+    let path = record_path(root);
+    approve(&path);
+    path
+}
+
+fn tool(name: &str, path: &str, content: Option<&str>) -> ToolCall {
+    ToolCall { name: name.into(), path: path.into(), content: content.map(str::to_string) }
+}
+
+fn judged(id: &str, j: fabr_agent::Judgement, evidence: &str) -> fabr_agent::JudgedItem {
+    fabr_agent::JudgedItem { id: id.into(), judgement: j, evidence: evidence.into() }
+}
+
+#[test]
+fn execute_loops_over_turns_and_the_model_sees_the_tool_results() {
+    use fabr_agent::ScriptedTurn::{Done, Tools};
+    let (_tmp, fabric, ws) = setup();
+    let root = ws.local_path(&NodeRef { source: "local".into(), path: String::new() }).unwrap();
+    std::fs::write(root.join("notes.txt"), "remember the milk").unwrap();
+    let model = ScriptedModel::new(greet_plan(), vec![]).with_turns(vec![
+        Tools(vec![tool("list_dir", ".", None), tool("read_file", "notes.txt", None)]),
+        Tools(vec![tool("write_file", "greet.txt", Some("hi"))]),
+        Done,
+    ]);
+    let path = run_to_approval(&ws, &fabric, &model, &root);
+    run_once(&ws, "local", "", &fabric, &model).unwrap();
+    assert_eq!(std::fs::read_to_string(root.join("greet.txt")).unwrap(), "hi");
+    let rec = load(&path);
+    assert_eq!(rec.state, State::Succeeded);
+    for line in [
+        "execute: turn 1",
+        "execute: list_dir . (",
+        "execute: read_file notes.txt (17 bytes)",
+        "execute: turn 3",
+        "execute: write_file greet.txt",
+    ] {
+        assert!(rec.log.contains(line), "{line}: {}", rec.log);
+    }
+    let seen = model.seen().join("\n");
+    assert!(seen.contains("notes.txt") && seen.contains("remember the milk"), "{seen}");
+    assert_eq!(model.execute_count(), 3);
+}
+
+#[test]
+fn the_turn_cap_is_a_stage_error() {
+    use fabr_agent::ScriptedTurn::Tools;
+    let (_tmp, fabric, ws) = setup();
+    let root = ws.local_path(&NodeRef { source: "local".into(), path: String::new() }).unwrap();
+    let mut settings = std::fs::read_to_string(fabric.join("settings.toml")).unwrap();
+    settings.insert_str(0, "execute_max_turns = 2\n");
+    std::fs::write(fabric.join("settings.toml"), settings).unwrap();
+    let model = ScriptedModel::new(greet_plan(), vec![]).with_turns(vec![Tools(vec![tool("list_dir", ".", None)]); 5]);
+    let path = run_to_approval(&ws, &fabric, &model, &root);
+    assert!(run_once(&ws, "local", "", &fabric, &model).is_err());
+    let rec = load(&path);
+    assert_eq!((rec.state, rec.step), (State::InProgress, Some(Step::Execute)));
+    assert!(rec.log.contains("execute: turn cap reached") && rec.log.contains("execute: error 1: turn cap reached"), "{}", rec.log);
+    assert_eq!(model.execute_count(), 2);
+}
+
+struct CancelsOnTurn {
+    inner: ScriptedModel,
+    path: PathBuf,
+}
+
+impl fabr_agent::Model for CancelsOnTurn {
+    fn define(&self, t: &str, c: &str) -> Result<fabr_agent::DefineDraft, fabr_core::FabrError> {
+        self.inner.define(t, c)
+    }
+
+    fn plan(&self, i: &fabr_agent::PlanInput) -> Result<fabr_agent::PlanDraft, fabr_core::FabrError> {
+        self.inner.plan(i)
+    }
+
+    fn execute_turn(
+        &self,
+        input: &fabr_agent::ExecuteInput,
+        messages: &mut Vec<fabr_agent::Message>,
+    ) -> Result<fabr_agent::ExecuteTurn, fabr_core::FabrError> {
+        let turn = self.inner.execute_turn(input, messages)?;
+        if self.inner.execute_count() == 1 {
+            edit(&self.path, |r| r.requests.cancel = true);
+        }
+        Ok(turn)
+    }
+
+    fn evaluate(&self, i: &fabr_agent::EvaluateInput) -> Result<fabr_agent::EvalVerdict, fabr_core::FabrError> {
+        self.inner.evaluate(i)
+    }
+}
+
+#[test]
+fn cancel_between_turns_fails_the_task_and_makes_no_further_call() {
+    use fabr_agent::ScriptedTurn::{Done, Tools};
+    let (_tmp, fabric, ws) = setup();
+    let root = ws.local_path(&NodeRef { source: "local".into(), path: String::new() }).unwrap();
+    let inner = ScriptedModel::new(greet_plan(), vec![]).with_turns(vec![
+        Tools(vec![]),
+        Tools(vec![tool("write_file", "greet.txt", Some("hi"))]),
+        Done,
+    ]);
+    let path = {
+        save_one(&ws, "cancel");
+        run_once(&ws, "local", "", &fabric, &inner).unwrap();
+        record_path(&root)
+    };
+    approve(&path);
+    let model = CancelsOnTurn { inner, path: path.clone() };
+    run_once(&ws, "local", "", &fabric, &model).unwrap();
+    let rec = load(&path);
+    assert_eq!(rec.state, State::Failed);
+    assert!(rec.log.contains("execute: cancelled by user") && !rec.requests.cancel, "{}", rec.log);
+    assert_eq!(model.inner.execute_count(), 1);
+    assert!(!root.join("greet.txt").exists());
+}
+
+#[test]
+fn a_question_mid_run_parks_and_the_answer_continues_the_loop() {
+    use fabr_agent::ScriptedTurn::{Ask, Done, Tools};
+    let (_tmp, fabric, ws) = setup();
+    let root = ws.local_path(&NodeRef { source: "local".into(), path: String::new() }).unwrap();
+    let model = ScriptedModel::new(greet_plan(), vec![]).with_turns(vec![
+        Ask("Which greeting?".into()),
+        Tools(vec![tool("write_file", "greet.txt", Some("hi"))]),
+        Done,
+    ]);
+    let path = run_to_approval(&ws, &fabric, &model, &root);
+    run_once(&ws, "local", "", &fabric, &model).unwrap();
+    let parked = load(&path);
+    assert_eq!((parked.state, parked.step), (State::InProgress, Some(Step::Execute)));
+    assert!(parked.waiting && parked.question.as_ref().unwrap().text == "Which greeting?");
+    run_once(&ws, "local", "", &fabric, &model).unwrap();
+    assert_eq!(model.execute_count(), 1, "parked run must not call the model");
+    edit(&path, |r| {
+        r.question.as_mut().unwrap().answer = Some(taskrec::Answer {
+            value: Some("say hi please".into()),
+            replacement: None,
+            granted: None,
+            by: Some("gui".into()),
+            at: Some("2026-10-24T18:05:02Z".into()),
+        })
+    });
+    run_once(&ws, "local", "", &fabric, &model).unwrap();
+    let rec = load(&path);
+    assert_eq!(rec.state, State::Succeeded);
+    assert_eq!(rec.answers.len(), 1);
+    assert!(model.seen().join("\n").contains("say hi please"));
+}
+
+#[test]
+fn the_model_evaluator_decides_the_verdict_with_per_assertion_evidence() {
+    use fabr_agent::{Judgement::Pass, ScriptedTurn::Tools};
+    let (_tmp, fabric, ws) = setup();
+    let root = ws.local_path(&NodeRef { source: "local".into(), path: String::new() }).unwrap();
+    let verdict = fabr_agent::EvalVerdict { items: vec![judged("a1", Pass, "greet.txt holds hi")] };
+    let model = ScriptedModel::new(greet_plan(), vec![])
+        .with_turns(vec![Tools(vec![tool("write_file", "greet.txt", Some("hi"))])])
+        .with_verdicts(vec![verdict]);
+    let path = run_to_approval(&ws, &fabric, &model, &root);
+    run_once(&ws, "local", "", &fabric, &model).unwrap();
+    let rec = load(&path);
+    assert_eq!(rec.assertions.len(), 1);
+    let v = rec.verdict.as_ref().unwrap();
+    assert_eq!((rec.state, v.result.as_str(), v.items.len()), (State::Succeeded, "pass", 1));
+    assert_eq!(v.items[0].evidence, "greet.txt holds hi");
+    assert_eq!(model.evaluate_count(), 1);
+    assert!(model.seen().join("\n").contains("write_file greet.txt"));
+}
+
+#[test]
+fn one_failing_assertion_fails_the_task() {
+    use fabr_agent::Judgement::{Fail, Pass};
+    let (_tmp, fabric, ws) = setup();
+    let root = ws.local_path(&NodeRef { source: "local".into(), path: String::new() }).unwrap();
+    let mut plan = greet_plan();
+    plan.assertions.push(DraftAssertion { id: "a2".into(), text: "greet.txt is the only file written".into() });
+    let verdict = fabr_agent::EvalVerdict { items: vec![judged("a1", Pass, "ok"), judged("a2", Fail, "also wrote x.txt")] };
+    let model = ScriptedModel::new(plan, vec![write_call()]).with_verdicts(vec![verdict]);
+    let path = run_to_approval(&ws, &fabric, &model, &root);
+    run_once(&ws, "local", "", &fabric, &model).unwrap();
+    let rec = load(&path);
+    let v = rec.verdict.as_ref().unwrap();
+    assert_eq!((rec.state, v.result.as_str()), (State::Failed, "fail"));
+    assert_eq!((v.items[0].pass, v.items[1].pass, v.items[1].evidence.as_str()), (true, false, "also wrote x.txt"));
+}
+
+#[test]
+fn a_check_on_a_file_that_is_not_in_the_folder_or_created_is_dropped() {
+    let (_tmp, fabric, ws) = setup();
+    let root = ws.local_path(&NodeRef { source: "local".into(), path: String::new() }).unwrap();
+    let mut plan = greet_plan();
+    plan.checks.push(DraftCheck { cmd: "grep".into(), args: vec!["-q".into(), "done".into(), "tasks.md".into()] });
+    let model = ScriptedModel::new(plan, vec![]);
+    save_one(&ws, "ground");
+    run_once(&ws, "local", "", &fabric, &model).unwrap();
+    let rec = load(&record_path(&root));
+    let checks = &rec.plan_meta.as_ref().unwrap().checks;
+    assert_eq!(checks.len(), 1);
+    assert_eq!(checks[0].args, vec!["-f".to_string(), "greet.txt".to_string()]);
+    assert!(rec.log.contains("plan: dropped check grep -q done tasks.md: unknown file"), "{}", rec.log);
+}
+
+#[test]
+fn more_than_three_assertions_is_a_stage_error() {
+    let (_tmp, fabric, ws) = setup();
+    let root = ws.local_path(&NodeRef { source: "local".into(), path: String::new() }).unwrap();
+    let mut plan = greet_plan();
+    plan.assertions = (1..=4).map(|n| DraftAssertion { id: format!("a{n}"), text: format!("claim {n}") }).collect();
+    let model = ScriptedModel::new(plan, vec![]);
+    save_one(&ws, "too many");
+    let err = run_once(&ws, "local", "", &fabric, &model).unwrap_err();
+    assert!(err.message().contains("4 assertions; 1 to 3 are allowed"), "{}", err.message());
+    assert!(load(&record_path(&root)).log.contains("define: error 1"));
 }

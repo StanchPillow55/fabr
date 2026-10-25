@@ -34,6 +34,29 @@ pub fn list_dir(node_root: &Path, rel: &str) -> Result<Vec<String>, FabrError> {
     Ok(names)
 }
 
+const RESULT_CAP: usize = 16 * 1024;
+
+pub fn run(node_root: &Path, name: &str, path: &str, content: Option<&str>) -> Result<(String, String), FabrError> {
+    match name {
+        "read_file" => {
+            let text = read_file(node_root, path)?;
+            let line = format!("read_file {path} ({} bytes)", text.len());
+            Ok((line, text.chars().take(RESULT_CAP).collect()))
+        }
+        "write_file" => {
+            let body = content.unwrap_or("");
+            write_file(node_root, path, body)?;
+            Ok((format!("write_file {path}"), format!("wrote {} bytes to {path}", body.len())))
+        }
+        "list_dir" => {
+            let names = list_dir(node_root, path)?;
+            let shown = if names.is_empty() { "(empty)".to_string() } else { names.join("\n") };
+            Ok((format!("list_dir {path} ({})", names.len()), shown.chars().take(RESULT_CAP).collect()))
+        }
+        other => Err(FabrError::BadRequest(format!("unknown tool {other}"))),
+    }
+}
+
 fn canonicalize_root(root: &Path) -> Result<PathBuf, FabrError> {
     root.canonicalize().map_err(|e| FabrError::NotFound(format!("node root: {e}")))
 }

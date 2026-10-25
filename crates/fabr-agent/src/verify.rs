@@ -58,6 +58,22 @@ pub fn validate_check(check: &Check) -> Result<(), FabrError> {
     Ok(())
 }
 
+pub fn file_args(check: &Check) -> Vec<&str> {
+    let mut args: Vec<&str> = check.args.iter().map(String::as_str).filter(|a| !a.starts_with('-') && !a.is_empty()).collect();
+    match check.cmd.as_str() {
+        "true" | "false" => args.clear(),
+        other if !ALLOWED_COMMANDS.contains(&other) => args.clear(),
+        "test" | "[" => args.retain(|a| !matches!(*a, "]" | "=" | "==" | "!=" | "!") && a.parse::<i64>().is_err()),
+        "grep" | "egrep" | "fgrep" => {
+            if !check.args.iter().any(|a| a == "-e" || a == "-f") && !args.is_empty() {
+                args.remove(0);
+            }
+        }
+        _ => args.retain(|a| a.parse::<i64>().is_err()),
+    }
+    args
+}
+
 pub fn run_checks(node_root: &Path, checks: &[Check], timeout: Duration) -> Result<Vec<CheckOutcome>, FabrError> {
     let mut out = Vec::with_capacity(checks.len());
     for check in checks {

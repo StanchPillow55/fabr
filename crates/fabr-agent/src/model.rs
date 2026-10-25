@@ -1,7 +1,11 @@
+use crate::tools;
+use crate::verify::CheckOutcome;
 use fabr_core::setup::Capabilities;
+use fabr_core::taskrec::Assertion;
 use fabr_core::{FabrError, Secret};
 use serde::Deserialize;
 use std::collections::VecDeque;
+use std::path::Path;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -48,23 +52,126 @@ pub struct PlanInput<'a> {
     pub title: &'a str,
     pub spec: &'a str,
     pub success: &'a str,
+    pub context: &'a str,
     pub refusal_note: Option<&'a str>,
     pub answers: &'a str,
     pub allowed: &'a Capabilities,
     pub rejection: Option<&'a str>,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub enum Block {
+    Text(String),
+    ToolUse { id: String, name: String, input: serde_json::Value },
+    ToolResult { id: String, content: String, is_error: bool },
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Message {
+    pub role: &'static str,
+    pub content: Vec<Block>,
+}
+
+impl Message {
+    pub fn user(content: Vec<Block>) -> Message {
+        Message { role: "user", content }
+    }
+
+    pub fn assistant(content: Vec<Block>) -> Message {
+        Message { role: "assistant", content }
+    }
+
+    fn to_json(&self) -> serde_json::Value {
+        let blocks: Vec<serde_json::Value> = self
+            .content
+            .iter()
+            .map(|b| match b {
+                Block::Text(text) => serde_json::json!({"type": "text", "text": text}),
+                Block::ToolUse { id, name, input } => serde_json::json!({"type": "tool_use", "id": id, "name": name, "input": input}),
+                Block::ToolResult { id, content, is_error } => {
+                    serde_json::json!({"type": "tool_result", "tool_use_id": id, "content": content, "is_error": is_error})
+                }
+            })
+            .collect();
+        serde_json::json!({"role": self.role, "content": blocks})
+    }
+}
+
+pub struct ExecuteInput<'a> {
+    pub system: &'a str,
+    pub tools: &'a [String],
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ToolUse {
+    pub id: String,
+    pub call: ToolCall,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum TurnOutcome {
+    Tools(Vec<ToolUse>),
+    Done(String),
+    Ask(String),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ExecuteTurn {
+    pub outcome: TurnOutcome,
+    pub stop_reason: String,
+}
+
+pub struct EvaluateInput<'a> {
+    pub title: &'a str,
+    pub assertions: &'a [Assertion],
+    pub log: &'a str,
+    pub checks: &'a [CheckOutcome],
+    pub node_dir: &'a Path,
+    pub max_reads: usize,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Judgement {
+    Pass,
+    Fail,
+    Unchecked,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct JudgedItem {
+    pub id: String,
+    pub judgement: Judgement,
+    pub evidence: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EvalVerdict {
+    pub items: Vec<JudgedItem>,
+}
+
 pub trait Model {
     fn define(&self, title: &str, context: &str) -> Result<DefineDraft, FabrError>;
     fn plan(&self, input: &PlanInput) -> Result<PlanDraft, FabrError>;
-    fn execute(&self, title: &str, spec: &str, plan: &str) -> Result<Vec<ToolCall>, FabrError>;
+    fn execute_turn(&self, input: &ExecuteInput, messages: &mut Vec<Message>) -> Result<ExecuteTurn, FabrError>;
+    fn evaluate(&self, input: &EvaluateInput) -> Result<EvalVerdict, FabrError>;
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum ScriptedTurn {
+    Tools(Vec<ToolCall>),
+    Ask(String),
+    Done,
 }
 
 #[derive(Debug)]
 pub struct ScriptedModel {
     plans: Mutex<VecDeque<PlanDraft>>,
     calls: Mutex<Vec<ToolCall>>,
+    script: Mutex<VecDeque<ScriptedTurn>>,
+    verdicts: Mutex<VecDeque<EvalVerdict>>,
     executed: AtomicUsize,
+    evaluated: AtomicUsize,
+    seen: Mutex<Vec<String>>,
     question: Mutex<Option<String>>,
     grants: Mutex<Vec<String>>,
     rejections: Mutex<Vec<Option<String>>>,
@@ -75,7 +182,11 @@ impl ScriptedModel {
         Self {
             plans: Mutex::new(VecDeque::from([plan])),
             calls: Mutex::new(calls),
+            script: Mutex::new(VecDeque::new()),
+            verdicts: Mutex::new(VecDeque::new()),
             executed: AtomicUsize::new(0),
+            evaluated: AtomicUsize::new(0),
+            seen: Mutex::new(Vec::new()),
             question: Mutex::new(None),
             grants: Mutex::new(Vec::new()),
             rejections: Mutex::new(Vec::new()),
@@ -91,6 +202,16 @@ impl ScriptedModel {
         self
     }
 
+    pub fn with_turns(self, turns: Vec<ScriptedTurn>) -> Self {
+        *self.script.lock().unwrap_or_else(|p| p.into_inner()) = turns.into();
+        self
+    }
+
+    pub fn with_verdicts(self, verdicts: Vec<EvalVerdict>) -> Self {
+        *self.verdicts.lock().unwrap_or_else(|p| p.into_inner()) = verdicts.into();
+        self
+    }
+
     pub fn with_question(plan: PlanDraft, question: impl Into<String>) -> Self {
         let model = Self::new(plan, Vec::new());
         *model.question.lock().unwrap_or_else(|p| p.into_inner()) = Some(question.into());
@@ -103,6 +224,14 @@ impl ScriptedModel {
 
     pub fn execute_count(&self) -> usize {
         self.executed.load(Ordering::SeqCst)
+    }
+
+    pub fn evaluate_count(&self) -> usize {
+        self.evaluated.load(Ordering::SeqCst)
+    }
+
+    pub fn seen(&self) -> Vec<String> {
+        self.seen.lock().unwrap_or_else(|p| p.into_inner()).clone()
     }
 }
 
@@ -126,9 +255,75 @@ impl Model for ScriptedModel {
         q.pop_front().ok_or_else(|| FabrError::BadRequest("no scripted plan".into()))
     }
 
-    fn execute(&self, _: &str, _: &str, _: &str) -> Result<Vec<ToolCall>, FabrError> {
-        self.executed.fetch_add(1, Ordering::SeqCst);
-        Ok(self.calls.lock().unwrap_or_else(|p| p.into_inner()).clone())
+    fn execute_turn(&self, _: &ExecuteInput, messages: &mut Vec<Message>) -> Result<ExecuteTurn, FabrError> {
+        let n = self.executed.fetch_add(1, Ordering::SeqCst);
+        if let Some(last) = messages.last() {
+            let mut seen = self.seen.lock().unwrap_or_else(|p| p.into_inner());
+            for block in &last.content {
+                match block {
+                    Block::Text(t) => seen.push(t.clone()),
+                    Block::ToolResult { content, .. } => seen.push(content.clone()),
+                    Block::ToolUse { .. } => {}
+                }
+            }
+        }
+        let scripted = self.script.lock().unwrap_or_else(|p| p.into_inner()).pop_front();
+        let turn = match scripted {
+            Some(t) => t,
+            None => {
+                let answered = messages.iter().any(|m| m.content.iter().any(|b| matches!(b, Block::ToolResult { .. })));
+                let calls = self.calls.lock().unwrap_or_else(|p| p.into_inner()).clone();
+                if answered || calls.is_empty() { ScriptedTurn::Done } else { ScriptedTurn::Tools(calls) }
+            }
+        };
+        let (outcome, stop_reason, content) = match turn {
+            ScriptedTurn::Done => (TurnOutcome::Done("done".into()), "end_turn", vec![Block::Text("done".into())]),
+            ScriptedTurn::Ask(q) => (TurnOutcome::Ask(q.clone()), "tool_use", vec![Block::Text(q)]),
+            ScriptedTurn::Tools(calls) => {
+                let uses: Vec<ToolUse> = calls.into_iter().enumerate().map(|(i, call)| ToolUse { id: format!("t{n}-{i}"), call }).collect();
+                let blocks = uses
+                    .iter()
+                    .map(|u| Block::ToolUse {
+                        id: u.id.clone(),
+                        name: u.call.name.clone(),
+                        input: serde_json::json!({"path": u.call.path, "content": u.call.content}),
+                    })
+                    .collect();
+                (TurnOutcome::Tools(uses), "tool_use", blocks)
+            }
+        };
+        messages.push(Message::assistant(content));
+        Ok(ExecuteTurn { outcome, stop_reason: stop_reason.into() })
+    }
+
+    fn evaluate(&self, input: &EvaluateInput) -> Result<EvalVerdict, FabrError> {
+        self.evaluated.fetch_add(1, Ordering::SeqCst);
+        self.seen.lock().unwrap_or_else(|p| p.into_inner()).push(format!("evaluate log: {}", input.log));
+        if let Some(v) = self.verdicts.lock().unwrap_or_else(|p| p.into_inner()).pop_front() {
+            return Ok(v);
+        }
+        let items = input
+            .assertions
+            .iter()
+            .enumerate()
+            .map(|(i, a)| {
+                let (pass, evidence) = match a.text.split_once(" contains ") {
+                    Some((file, needle)) => match tools::read_file(input.node_dir, file.trim()) {
+                        Ok(body) => {
+                            let pass = body.contains(needle.trim());
+                            (pass, format!("read {}: {pass}", file.trim()))
+                        }
+                        Err(e) => (false, e.message()),
+                    },
+                    None => match input.checks.get(i) {
+                        Some(o) => (o.pass, o.evidence.clone()),
+                        None => (false, "no evidence".into()),
+                    },
+                };
+                JudgedItem { id: a.id.clone(), judgement: if pass { Judgement::Pass } else { Judgement::Fail }, evidence }
+            })
+            .collect();
+        Ok(EvalVerdict { items })
     }
 }
 
@@ -252,7 +447,9 @@ impl Model for AnthropicModel {
              assertions is a list of objects with id and text. \
              question is a string when something required is missing, otherwise null. \
              grants is a list of personal data field names the task needs filled in, or an empty list. \
-             spec and success are non-empty strings when question is null."
+             spec and success are non-empty strings when question is null. \
+             Write between 1 and 3 assertions, as few as the success definition needs; one is fine. \
+             Every assertion must be something that can be evidenced from the files or the tool log; never add filler assertions."
         );
         let body = serde_json::json!({
             "model": self.model,
@@ -266,13 +463,14 @@ impl Model for AnthropicModel {
     }
 
     fn plan(&self, input: &PlanInput) -> Result<PlanDraft, FabrError> {
-        let PlanInput { title, spec, success, refusal_note, answers, allowed, rejection } = input;
+        let PlanInput { title, spec, success, context, refusal_note, answers, allowed, rejection } = input;
         let note = refusal_note.unwrap_or("");
         let rejected = rejection.map(|r| format!("\nYour previous plan was rejected: {r}. Return a corrected plan.")).unwrap_or_default();
         let prompt = format!(
-            "Task title: {title}\nSpec:\n{spec}\nSuccess:\n{success}\nRefusal note:\n{note}\nUser answers:{answers}\n\
+            "Task title: {title}\nContext:\n{context}\nSpec:\n{spec}\nSuccess:\n{success}\nRefusal note:\n{note}\nUser answers:{answers}\n\
              Return one JSON object with keys spec, success, plan, assertions, plan_meta. \
-             assertions is a list of objects with id and text. \
+             assertions is a list of 1 to 3 objects with id and text. \
+             Name only files that appear in the context or that your plan creates; a check must reference such a file or be omitted. \
              plan_meta has reversibility (reversible or irreversible), tools, \
              and checks (list of objects with cmd and args). checks is argv and must not use a shell. \
              spec, success, and plan are non-empty strings. \
@@ -291,17 +489,167 @@ impl Model for AnthropicModel {
         parse_plan(&text)
     }
 
-    fn execute(&self, title: &str, spec: &str, plan: &str) -> Result<Vec<ToolCall>, FabrError> {
-        let prompt = format!("Title: {title}\nSpec:\n{spec}\nPlan:\n{plan}\nUse tools to apply the plan. Stay inside the node.");
+    fn execute_turn(&self, input: &ExecuteInput, messages: &mut Vec<Message>) -> Result<ExecuteTurn, FabrError> {
+        let mut tool_defs: Vec<serde_json::Value> = input.tools.iter().filter_map(|t| file_tool(t)).collect();
+        tool_defs.push(serde_json::json!({
+            "name": "ask_user",
+            "description": "Ask the user one question when something required is missing; the run pauses until they answer",
+            "input_schema": {"type": "object", "properties": {"question": {"type": "string"}}, "required": ["question"]}
+        }));
         let body = serde_json::json!({
             "model": self.model,
             "max_tokens": MAX_TOKENS,
-            "tools": [tool_schema("read_file", "Read a file inside the node", false), tool_schema("write_file", "Write a file inside the node", true), tool_schema("list_dir", "List a directory inside the node", false)],
-            "messages": [{"role": "user", "content": prompt}]
+            "system": input.system,
+            "tools": tool_defs,
+            "messages": messages.iter().map(Message::to_json).collect::<Vec<_>>()
         });
         let value = self.post("execute", body)?;
-        tool_calls_of(&value)
+        let blocks = blocks_of(&value)?;
+        let stop_reason = value.get("stop_reason").and_then(|r| r.as_str()).unwrap_or("end_turn").to_string();
+        messages.push(Message::assistant(blocks.clone()));
+        let mut uses = Vec::new();
+        let mut text = String::new();
+        for block in &blocks {
+            match block {
+                Block::Text(t) => text.push_str(t),
+                Block::ToolUse { id, name, input } if name == "ask_user" => {
+                    let q = input.get("question").and_then(|q| q.as_str()).unwrap_or("").trim().to_string();
+                    if !q.is_empty() {
+                        return Ok(ExecuteTurn { outcome: TurnOutcome::Ask(q), stop_reason });
+                    }
+                    uses.push(ToolUse { id: id.clone(), call: ToolCall { name: name.clone(), path: String::new(), content: None } });
+                }
+                Block::ToolUse { id, name, input } => {
+                    let path = input.get("path").and_then(|p| p.as_str()).unwrap_or("").to_string();
+                    let content = input.get("content").and_then(|c| c.as_str()).map(str::to_string);
+                    uses.push(ToolUse { id: id.clone(), call: ToolCall { name: name.clone(), path, content } });
+                }
+                Block::ToolResult { .. } => {}
+            }
+        }
+        let outcome = if uses.is_empty() { TurnOutcome::Done(text) } else { TurnOutcome::Tools(uses) };
+        Ok(ExecuteTurn { outcome, stop_reason })
     }
+
+    fn evaluate(&self, input: &EvaluateInput) -> Result<EvalVerdict, FabrError> {
+        let mut prompt = format!("Task: {}\n\nAssertions:\n", input.title);
+        for a in input.assertions {
+            prompt.push_str(&format!("{}: {}\n", a.id, a.text));
+        }
+        prompt.push_str(&format!("\nExecute log (every tool call the agent made):\n{}\n\nCheck results (evidence only):\n", input.log));
+        for c in input.checks {
+            prompt.push_str(&format!("{} [{}]\n", c.evidence, if c.pass { "exit 0" } else { "non-zero" }));
+        }
+        let system = "You judge whether a finished task met its assertions, with fresh eyes. \
+            Use read_file and list_dir to look at the files when the log and checks do not settle an assertion. \
+            A check that names a missing file is evidence of absence, not an automatic failure of its assertion. \
+            An assertion about the agent's own behaviour (no writes, no side effects) is judged from the execute log, which lists every tool call. \
+            Reply with only JSON: {\"items\":[{\"id\":\"<assertion id>\",\"status\":\"pass|fail|unchecked\",\"evidence\":\"one line\"}]} with one item per assertion. \
+            Use unchecked only when nothing available can settle it.";
+        let tool_defs: Vec<serde_json::Value> = ["read_file", "list_dir"].iter().filter_map(|t| file_tool(t)).collect();
+        let mut messages = vec![Message::user(vec![Block::Text(prompt)])];
+        let mut reads = 0usize;
+        for _ in 0..=input.max_reads + 2 {
+            let body = serde_json::json!({
+                "model": self.model,
+                "max_tokens": MAX_TOKENS,
+                "system": system,
+                "tools": tool_defs,
+                "messages": messages.iter().map(Message::to_json).collect::<Vec<_>>()
+            });
+            let value = self.post("evaluate", body)?;
+            let blocks = blocks_of(&value)?;
+            messages.push(Message::assistant(blocks.clone()));
+            let uses: Vec<&Block> = blocks.iter().filter(|b| matches!(b, Block::ToolUse { .. })).collect();
+            if uses.is_empty() {
+                return parse_verdict(&text_of(&value)?, input.assertions);
+            }
+            let mut results = Vec::new();
+            for block in uses {
+                let Block::ToolUse { id, name, input: args } = block else { continue };
+                let (content, is_error) = if reads >= input.max_reads {
+                    ("read budget used up; give your verdict now".to_string(), true)
+                } else if name != "read_file" && name != "list_dir" {
+                    (format!("tool {name} is not available"), true)
+                } else {
+                    reads += 1;
+                    let path = args.get("path").and_then(|p| p.as_str()).unwrap_or("");
+                    match tools::run(input.node_dir, name, path, None) {
+                        Ok((_, result)) => (result, false),
+                        Err(e) => (e.message(), true),
+                    }
+                };
+                results.push(Block::ToolResult { id: id.clone(), content, is_error });
+            }
+            messages.push(Message::user(results));
+        }
+        Err(FabrError::Remote("evaluator did not give a verdict".into()))
+    }
+}
+
+fn file_tool(name: &str) -> Option<serde_json::Value> {
+    match name {
+        "read_file" => Some(tool_schema("read_file", "Read a file inside the node", false)),
+        "write_file" => Some(tool_schema("write_file", "Write a file inside the node", true)),
+        "list_dir" => Some(tool_schema("list_dir", "List a directory inside the node", false)),
+        _ => None,
+    }
+}
+
+fn blocks_of(value: &serde_json::Value) -> Result<Vec<Block>, FabrError> {
+    let raw =
+        value.get("content").and_then(|c| c.as_array()).ok_or_else(|| FabrError::Remote("anthropic response has no content".into()))?;
+    let mut out = Vec::new();
+    for block in raw {
+        match block.get("type").and_then(|t| t.as_str()) {
+            Some("text") => {
+                if let Some(t) = block.get("text").and_then(|t| t.as_str()) {
+                    out.push(Block::Text(t.to_string()));
+                }
+            }
+            Some("tool_use") => out.push(Block::ToolUse {
+                id: block.get("id").and_then(|n| n.as_str()).unwrap_or("").to_string(),
+                name: block.get("name").and_then(|n| n.as_str()).unwrap_or("").to_string(),
+                input: block.get("input").cloned().unwrap_or(serde_json::Value::Null),
+            }),
+            _ => {}
+        }
+    }
+    Ok(out)
+}
+
+#[derive(Deserialize)]
+struct RawVerdict {
+    #[serde(default)]
+    items: Vec<RawJudged>,
+}
+
+#[derive(Deserialize)]
+struct RawJudged {
+    id: String,
+    status: String,
+    #[serde(default)]
+    evidence: String,
+}
+
+fn parse_verdict(text: &str, assertions: &[Assertion]) -> Result<EvalVerdict, FabrError> {
+    let raw: RawVerdict = serde_json::from_str(&json_slice(text)).map_err(|e| FabrError::Remote(format!("verdict was not json: {e}")))?;
+    let items = assertions
+        .iter()
+        .map(|a| match raw.items.iter().find(|i| i.id == a.id) {
+            Some(i) => JudgedItem {
+                id: a.id.clone(),
+                judgement: match i.status.trim().to_ascii_lowercase().as_str() {
+                    "pass" => Judgement::Pass,
+                    "fail" => Judgement::Fail,
+                    _ => Judgement::Unchecked,
+                },
+                evidence: i.evidence.split_whitespace().collect::<Vec<_>>().join(" "),
+            },
+            None => JudgedItem { id: a.id.clone(), judgement: Judgement::Unchecked, evidence: "no verdict returned".into() },
+        })
+        .collect();
+    Ok(EvalVerdict { items })
 }
 
 fn tool_schema(name: &str, description: &str, with_content: bool) -> serde_json::Value {
@@ -330,23 +678,6 @@ fn text_of(value: &serde_json::Value) -> Result<String, FabrError> {
         }
     }
     if out.is_empty() { Err(FabrError::Remote("anthropic returned no text".into())) } else { Ok(out) }
-}
-
-fn tool_calls_of(value: &serde_json::Value) -> Result<Vec<ToolCall>, FabrError> {
-    let mut calls = Vec::new();
-    let blocks =
-        value.get("content").and_then(|c| c.as_array()).ok_or_else(|| FabrError::Remote("anthropic response has no content".into()))?;
-    for block in blocks {
-        if block.get("type").and_then(|t| t.as_str()) != Some("tool_use") {
-            continue;
-        }
-        let name = block.get("name").and_then(|n| n.as_str()).unwrap_or("").to_string();
-        let input = block.get("input").cloned().unwrap_or(serde_json::Value::Null);
-        let path = input.get("path").and_then(|p| p.as_str()).unwrap_or("").to_string();
-        let content = input.get("content").and_then(|c| c.as_str()).map(str::to_string);
-        calls.push(ToolCall { name, path, content });
-    }
-    Ok(calls)
 }
 
 #[derive(Deserialize)]

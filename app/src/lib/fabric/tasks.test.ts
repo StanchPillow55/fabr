@@ -340,8 +340,8 @@ describe('node card rows', () => {
     expect(three).toContain('card__head');
     expect(three).toContain('card__row--counts');
     expect(three).toContain('card__row--bars');
-    expect(three.match(/role="progressbar"/g)?.length).toBe(4);
-    expect(three).toContain('+2');
+    expect(three.match(/role="progressbar"/g)?.length).toBe(1);
+    expect(three).toContain('+5');
     expect(card(mk(true), stub(0), '05-running', 0)).not.toContain('card__row--bars');
     const plain = card(mk(false), stub(3), '05-running', 3);
     expect(plain).not.toContain('card__row');

@@ -16,13 +16,13 @@
     "phase": "failed"
   },
   {
-    "name": "failed and suspended stays failed",
+    "name": "failed and suspended is suspended",
     "front_matter": {
       "state": "failed",
       "suspended": true
     },
     "now": "2026-10-25T12:00",
-    "phase": "failed"
+    "phase": "suspended"
   },
   {
     "name": "succeeded and paused stays done",

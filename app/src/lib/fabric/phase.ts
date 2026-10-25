@@ -9,6 +9,7 @@ export const PHASE_LABEL: Record<Phase, string> = {
 };
 
 export const isOpen = (p: Phase): boolean => p !== 'done' && p !== 'failed';
+export const canShelve = (p: Phase): boolean => p !== 'done';
 export const isActive = (p: Phase): boolean => p === 'working' || p === 'needs_harness' || p === 'needs_you' || p === 'paused';
 
 type PhaseInput = Pick<TaskRecord, 'state' | 'suspended' | 'suspend_until' | 'paused' | 'waiting' | 'needs' | 'question' | 'approval'>;
@@ -17,8 +18,8 @@ const minute = (now: Date | string): string => (now instanceof Date ? clockMinut
 
 export function phaseOf(r: PhaseInput, now: Date | string): Phase {
   if (r.state === 'succeeded') return 'done';
-  if (r.state === 'failed') return 'failed';
   if (r.suspended && (!r.suspend_until || r.suspend_until > minute(now))) return 'suspended';
+  if (r.state === 'failed') return 'failed';
   if (r.state === 'reminder') return 'todo';
   if (r.paused) return 'paused';
   if (r.needs != null && r.needs !== '') return 'needs_harness';

@@ -249,9 +249,11 @@ pub(crate) fn gui_record(disk: &TaskRecord, incoming: &TaskRecord) -> Result<Tas
         return Err(FabrError::BadRequest("task is frozen once execution starts".into()));
     }
     let mut rec = incoming.clone();
-    if matches!(disk.state, State::Succeeded | State::Failed) {
+    if matches!(disk.state, State::Succeeded) {
         rec.suspended = disk.suspended;
         rec.suspend_until = disk.suspend_until.clone();
+    }
+    if matches!(disk.state, State::Succeeded | State::Failed) {
         rec.requests.pause = disk.requests.pause;
         rec.requests.resume = disk.requests.resume;
         rec.requests.complete = disk.requests.complete;

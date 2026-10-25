@@ -13,6 +13,8 @@ pub fn run_once(ws: &Workspace, source: &str, node_path: &str, fabric_space: &Pa
     let settings = load_agent_settings(fabric_space)?;
     let mut ctl = Ctl::new(fabric_space, settings.heartbeat_interval_s);
     ctl.check_timeout_s = settings.check_timeout_s;
+    ctl.execute_max_turns = settings.execute_max_turns;
+    ctl.evaluate_max_reads = settings.evaluate_max_reads;
     let node_dir = ws.local_path(&NodeRef { source: source.to_string(), path: node_path.to_string() })?;
     let root = ws.local_path(&NodeRef { source: source.to_string(), path: String::new() })?;
     let node = load_node(&LocalFs::new(root), source, node_path);

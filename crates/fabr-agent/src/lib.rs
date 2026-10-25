@@ -13,7 +13,10 @@ pub mod verify;
 
 pub use caps::Harness;
 pub use lifecycle::{Ctl, advance_with, approval_allows_execute, registry_path, task_path_key};
-pub use model::{AnthropicModel, CallObserver, DefineDraft, Model, ModelCall, PlanDraft, PlanInput, ScriptedModel, ToolCall};
+pub use model::{
+    AnthropicModel, Block, CallObserver, DefineDraft, EvalVerdict, EvaluateInput, ExecuteInput, ExecuteTurn, JudgedItem, Judgement,
+    Message, Model, ModelCall, PlanDraft, PlanInput, ScriptedModel, ScriptedTurn, ToolCall, ToolUse, TurnOutcome,
+};
 pub use run::run_once;
 pub use settings::{AgentSettings, load_agent_settings};
 pub use verify::spawn_allowed;

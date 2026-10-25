@@ -12,7 +12,7 @@
   import { BACKEND_LABEL } from './backend';
   import { backendSilent, canComplete, canPauseResume, canRedo, COMPLETE_PENDING, isRedoKey, pendingRequests, requestFor, type RequestKey } from './requests';
   import { editStart, isEditable, provenance, REDO_LABEL, REDO_PENDING, type FieldsEdit, type Section } from './sections';
-  import { isOpen, phaseOf } from './phase';
+  import { canShelve, isOpen, phaseOf } from './phase';
   import { suspendLabel } from './stage';
   import StateRibbon from './StateRibbon.svelte';
   import { minuteOf } from '../model';
@@ -45,7 +45,7 @@
   const flipping = $derived(record.requests.pause ? 'pause' : record.requests.resume ? 'resume' : null);
   const mayComplete = $derived(canComplete(record, phase));
   const shelved = $derived(phase === 'suspended');
-  const mayShelve = $derived(isOpen(phase));
+  const mayShelve = $derived(canShelve(phase));
   let picking = $state(false);
   let mode = $state<'none' | 'date' | 'time'>('none');
   let day = $state('');

@@ -1,12 +1,12 @@
 use crate::board::{Activity, Board, Extras};
 use crate::caps::{Harness, requires_of};
 use crate::link::{list_records, load_record, update_record};
-use crate::model::{Model, PlanInput};
+use crate::model::{Block, EvaluateInput, ExecuteInput, Judgement, Message, Model, PlanInput, TurnOutcome};
 use crate::now_utc;
 use crate::state::{append_log, clean_message, is_terminal, pending_tail, question_open, stage_label, state_name, suspended_now};
 use crate::store::mutate;
 use crate::tools;
-use crate::verify::{self, CheckOutcome};
+use crate::verify;
 use fabr_core::FabrError;
 use fabr_core::taskrec::{
     Approval, Assertion, Author, Check, PlanMeta, Question, RedoStage, State, Step, TaskRecord, Verdict, VerdictItem, approval_digest,
@@ -18,11 +18,13 @@ use std::time::Duration;
 
 pub const MAX_STAGE_ERRORS: u32 = 3;
 pub const SUPPORTED_TOOLS: [&str; 3] = ["read_file", "write_file", "list_dir"];
-const TOOL_LINE_PREFIXES: [&str; 3] = ["read_file ", "write_file ", "list_dir "];
+const TOOL_LINE_PREFIXES: [&str; 6] = ["read_file ", "write_file ", "list_dir ", "turn ", "tool failed", "asked "];
 
 pub struct Ctl {
     pub board: Arc<Board>,
     pub check_timeout_s: u64,
+    pub execute_max_turns: u32,
+    pub evaluate_max_reads: usize,
     pub harness: Harness,
 }
 
@@ -31,12 +33,20 @@ impl Ctl {
         Ctl {
             board: Board::new(space, heartbeat_interval_s, None),
             check_timeout_s: verify::DEFAULT_CHECK_TIMEOUT_S,
+            execute_max_turns: crate::settings::DEFAULT_EXECUTE_MAX_TURNS,
+            evaluate_max_reads: crate::settings::DEFAULT_EVALUATE_MAX_READS,
             harness: Harness::standard(),
         }
     }
 
     pub fn with_board(board: Arc<Board>, check_timeout_s: u64) -> Ctl {
-        Ctl { board, check_timeout_s, harness: Harness::standard() }
+        Ctl {
+            board,
+            check_timeout_s,
+            execute_max_turns: crate::settings::DEFAULT_EXECUTE_MAX_TURNS,
+            evaluate_max_reads: crate::settings::DEFAULT_EVALUATE_MAX_READS,
+            harness: Harness::standard(),
+        }
     }
 }
 
@@ -71,9 +81,6 @@ pub fn validate_plan(meta: &PlanMeta) -> Result<(), FabrError> {
         if !SUPPORTED_TOOLS.contains(&tool.as_str()) {
             return Err(FabrError::BadRequest(format!("unsupported tool {tool}")));
         }
-    }
-    if meta.checks.is_empty() {
-        return Err(FabrError::BadRequest("plan has no checks".into()));
     }
     for check in &meta.checks {
         verify::validate_check(check)?;
@@ -306,7 +313,7 @@ fn step_once(node_dir: &Path, record_path: &Path, ctl: &Ctl, model: &impl Model,
                 }
             }
             match rec.step {
-                Some(Step::Evaluate) => finish_checks(node_dir, record_path, ctl, &mut rec, &mut base),
+                Some(Step::Evaluate) => finish_checks(node_dir, record_path, ctl, &mut rec, &mut base, model),
                 Some(Step::Learn | Step::Notify) => tail_step(node_dir, record_path, ctl, &mut rec, &mut base),
                 _ => execute_stage(node_dir, record_path, ctl, &mut rec, &mut base, model),
             }
@@ -555,7 +562,11 @@ fn define_stage(
         || (!success_human && draft.success.trim().is_empty())
         || (!keep_assertions && draft.assertions.is_empty())
     {
-        return Err(FabrError::BadRequest("spec is incomplete".into()));
+        return Err(FabrError::BadRequest(if draft.assertions.is_empty() && !keep_assertions {
+            "define returned no assertions; 1 to 3 are required".into()
+        } else {
+            "spec is incomplete".into()
+        }));
     }
     if !spec_human {
         rec.spec = draft.spec;
@@ -566,6 +577,7 @@ fn define_stage(
         rec.by.success = Some(Author::Agent);
     }
     if !keep_assertions {
+        check_assertion_count(&draft.assertions)?;
         rec.assertions = draft.assertions.into_iter().map(|a| Assertion { id: a.id, text: a.text }).collect();
     }
     let mut requested: Vec<String> = Vec::new();
@@ -604,6 +616,7 @@ fn plan_stage(
             title: &rec.title,
             spec: &rec.spec,
             success: &rec.success,
+            context: &rec.context,
             refusal_note: note.as_deref(),
             answers: &answers,
             allowed: &allowed,
@@ -616,13 +629,17 @@ fn plan_stage(
         Some(meta) => (meta, None),
         None => {
             let mut draft = ask(None)?;
+            check_assertion_count(&draft.assertions)?;
             let mut meta = meta_of(&draft, human_plan)?;
+            ground_checks(node_dir, &mut meta, &draft.plan, &mut rec.log);
             if let Err(e) = validate_plan(&meta) {
                 let rejection =
                     format!("{}; allowed tools: {}; allowed checks: {}", e.message(), allowed.tools.join(", "), allowed.checks.join(", "));
                 append_log(&mut rec.log, "plan", &format!("retry after rejection: {}", clean_message(&e.message(), 200)));
                 draft = ask(Some(&rejection))?;
+                check_assertion_count(&draft.assertions)?;
                 meta = meta_of(&draft, human_plan)?;
+                ground_checks(node_dir, &mut meta, &draft.plan, &mut rec.log);
             }
             (meta, Some(draft))
         }
@@ -666,8 +683,15 @@ fn plan_stage(
     Ok(())
 }
 
+fn check_assertion_count(list: &[crate::model::DraftAssertion]) -> Result<(), FabrError> {
+    match list.len() {
+        0..=3 => Ok(()),
+        n => Err(FabrError::BadRequest(format!("the model returned {n} assertions; 1 to 3 are allowed"))),
+    }
+}
+
 fn meta_of(draft: &crate::model::PlanDraft, plan_kept: bool) -> Result<PlanMeta, FabrError> {
-    if (!plan_kept && draft.plan.trim().is_empty()) || draft.checks.is_empty() {
+    if !plan_kept && draft.plan.trim().is_empty() {
         return Err(FabrError::BadRequest("plan is incomplete".into()));
     }
     Ok(PlanMeta {
@@ -679,6 +703,63 @@ fn meta_of(draft: &crate::model::PlanDraft, plan_kept: bool) -> Result<PlanMeta,
     })
 }
 
+fn cancel_now(record_path: &Path, ctl: &Ctl, rec: &mut TaskRecord, base: &mut TaskRecord) -> Result<(), FabrError> {
+    rec.requests.cancel = false;
+    rec.state = State::Failed;
+    rec.step = None;
+    rec.waiting = false;
+    rec.verdict = None;
+    append_log(&mut rec.log, "execute", "cancelled by user");
+    persist(record_path, rec, base)?;
+    forget(ctl, rec, record_path);
+    Ok(())
+}
+
+fn must_stop(rec: &TaskRecord) -> bool {
+    rec.requests.complete || rec.requests.pause || rec.paused || suspended_now(rec)
+}
+
+fn allowed_tools(rec: &TaskRecord) -> Vec<String> {
+    let mut tools = vec!["read_file".to_string(), "list_dir".to_string()];
+    if rec.plan_meta.as_ref().is_none_or(|m| m.tools.iter().any(|t| t == "write_file")) {
+        tools.push("write_file".into());
+    }
+    tools
+}
+
+fn execute_system(node_dir: &Path, rec: &TaskRecord, allowed: &[String]) -> String {
+    let mut out = format!(
+        "You are carrying out one task inside a single folder, using tools. Stay inside the folder. Allowed tools: {}.\n\
+         Look before you act: list and read what exists, then make the change, then read it back to confirm. \
+         Payment is never filled; stop and hand over. If something required is missing, call ask_user. \
+         When the work is done, reply with a short plain summary and no tool call.\n\n",
+        allowed.join(", ")
+    );
+    out.push_str(&format!(
+        "Task: {}\n\nSpec:\n{}\n\nPlan:\n{}\n\nAssertions that will be judged afterwards:\n",
+        rec.title, rec.spec, rec.plan
+    ));
+    for a in &rec.assertions {
+        out.push_str(&format!("{}: {}\n", a.id, a.text));
+    }
+    out.push('\n');
+    out.push_str(&gather_bundle(node_dir));
+    out
+}
+
+fn execute_opening(prior_log: &str, answers: &str) -> String {
+    let lines: Vec<&str> = prior_log.lines().filter(|l| l.contains(" execute: ")).collect();
+    let tail = lines[lines.len().saturating_sub(30)..].join("\n");
+    let mut out = String::from("Begin. The folder is described in the system prompt as it is now.");
+    if !tail.is_empty() {
+        out.push_str(&format!("\n\nEarlier progress on this task (log tail):\n{tail}"));
+    }
+    if !answers.trim().is_empty() {
+        out.push_str(&format!("\n\nThe user's answers so far:{answers}"));
+    }
+    out
+}
+
 fn execute_stage(
     node_dir: &Path,
     record_path: &Path,
@@ -688,30 +769,97 @@ fn execute_stage(
     model: &impl Model,
 ) -> Result<(), FabrError> {
     if rec.requests.cancel {
-        rec.requests.cancel = false;
-        rec.state = State::Failed;
-        rec.step = None;
-        rec.waiting = false;
-        rec.verdict = None;
-        append_log(&mut rec.log, "execute", "cancelled by user");
-        persist(record_path, rec, base)?;
-        forget(ctl, rec, record_path);
+        return cancel_now(record_path, ctl, rec, base);
+    }
+    if must_stop(rec) || (rec.waiting && question_open(rec)) {
         return Ok(());
     }
-    mark(ctl, node_dir, record_path, rec, Activity::Model);
-    let calls = model.execute(&rec.title, &rec.spec, &rec.plan)?;
-    for call in calls {
-        if call.name == "write_file" && log_has_write(&rec.log, &call.path) {
-            continue;
+    if rec.question.as_ref().is_some_and(|q| q.answer.is_some())
+        && let Some(q) = rec.question.take()
+    {
+        rec.answers.push(q);
+        rec.waiting = false;
+    }
+    let prior_log = rec.log.clone();
+    let allowed = allowed_tools(rec);
+    let system = execute_system(node_dir, rec, &allowed);
+    let mut messages = vec![Message::user(vec![Block::Text(execute_opening(&prior_log, &answers_text(rec)))])];
+    let mut finished = false;
+    for turn in 1..=ctl.execute_max_turns {
+        mark(ctl, node_dir, record_path, rec, Activity::Model);
+        let out = model.execute_turn(&ExecuteInput { system: &system, tools: &allowed }, &mut messages)?;
+        append_log(&mut rec.log, "execute", &format!("turn {turn}"));
+        match out.outcome {
+            TurnOutcome::Done(_) => {
+                persist(record_path, rec, base)?;
+                finished = true;
+                break;
+            }
+            TurnOutcome::Ask(text) => {
+                let id = next_question_id(rec);
+                rec.question = Some(Question {
+                    id: id.clone(),
+                    kind: "open".into(),
+                    text,
+                    options: None,
+                    prior: None,
+                    fields: None,
+                    asked_at: Some(now_utc()),
+                    answer: None,
+                });
+                rec.waiting = true;
+                append_log(&mut rec.log, "execute", &format!("asked {id}"));
+                persist(record_path, rec, base)?;
+                mark(ctl, node_dir, record_path, rec, Activity::Parked);
+                return Ok(());
+            }
+            TurnOutcome::Tools(uses) => {
+                let mut results = Vec::new();
+                for u in uses {
+                    mark(ctl, node_dir, record_path, rec, Activity::Tool);
+                    let call = &u.call;
+                    let skip = call.name == "write_file" && log_has_write(&prior_log, &call.path);
+                    let allowed_here = allowed.contains(&call.name);
+                    let (content, is_error) = if skip {
+                        ("skipped: this file was already written earlier in the task".to_string(), false)
+                    } else if !allowed_here {
+                        append_log(&mut rec.log, "execute", &format!("tool failed: {} not allowed", call.name));
+                        (format!("tool {} is not allowed", call.name), true)
+                    } else {
+                        match tools::run(node_dir, &call.name, &call.path, call.content.as_deref()) {
+                            Ok((line, result)) => {
+                                append_log(&mut rec.log, "execute", &line);
+                                (result, false)
+                            }
+                            Err(e) => {
+                                let msg = clean_message(&e.message(), 160);
+                                append_log(&mut rec.log, "execute", &format!("tool failed: {} {}: {msg}", call.name, call.path));
+                                (e.message(), true)
+                            }
+                        }
+                    };
+                    persist(record_path, rec, base)?;
+                    mark(ctl, node_dir, record_path, rec, Activity::Tool);
+                    results.push(Block::ToolResult { id: u.id, content, is_error });
+                    if rec.requests.cancel || must_stop(rec) {
+                        return Ok(());
+                    }
+                }
+                messages.push(Message::user(results));
+            }
         }
-        mark(ctl, node_dir, record_path, rec, Activity::Tool);
-        let message = apply_tool(node_dir, &call)?;
-        append_log(&mut rec.log, "execute", &message);
         persist(record_path, rec, base)?;
-        mark(ctl, node_dir, record_path, rec, Activity::Tool);
         if rec.requests.cancel {
+            return cancel_now(record_path, ctl, rec, base);
+        }
+        if must_stop(rec) {
             return Ok(());
         }
+    }
+    if !finished {
+        append_log(&mut rec.log, "execute", "turn cap reached");
+        persist(record_path, rec, base)?;
+        return Err(FabrError::BadRequest(format!("turn cap reached ({} turns)", ctl.execute_max_turns)));
     }
     rec.step = Some(Step::Evaluate);
     rec.verdict = None;
@@ -721,13 +869,55 @@ fn execute_stage(
     Ok(())
 }
 
-fn finish_checks(node_dir: &Path, record_path: &Path, ctl: &Ctl, rec: &mut TaskRecord, base: &mut TaskRecord) -> Result<(), FabrError> {
+fn finish_checks(
+    node_dir: &Path,
+    record_path: &Path,
+    ctl: &Ctl,
+    rec: &mut TaskRecord,
+    base: &mut TaskRecord,
+    model: &impl Model,
+) -> Result<(), FabrError> {
     let checks = rec.plan_meta.as_ref().map(|m| m.checks.clone()).unwrap_or_default();
     mark(ctl, node_dir, record_path, rec, Activity::Check);
     let outcomes = verify::run_checks(node_dir, &checks, Duration::from_secs(ctl.check_timeout_s))?;
-    let items = verdict_items(node_dir, rec, &outcomes);
-    let checks_pass = !outcomes.is_empty() && outcomes.iter().all(|o| o.pass);
-    let pass = checks_pass && items.iter().all(|item| item.pass);
+    let (items, pass) = if rec.assertions.is_empty() {
+        let items: Vec<VerdictItem> = outcomes
+            .iter()
+            .enumerate()
+            .map(|(i, o)| VerdictItem { id: format!("c{}", i + 1), pass: o.pass, evidence: o.evidence.clone() })
+            .collect();
+        let pass = !items.is_empty() && items.iter().all(|i| i.pass);
+        (items, pass)
+    } else {
+        mark(ctl, node_dir, record_path, rec, Activity::Model);
+        let lines: Vec<&str> = rec.log.lines().filter(|l| l.contains(" execute: ")).collect();
+        let log = lines[lines.len().saturating_sub(80)..].join("\n");
+        let judged = model.evaluate(&EvaluateInput {
+            title: &rec.title,
+            assertions: &rec.assertions,
+            log: &log,
+            checks: &outcomes,
+            node_dir,
+            max_reads: ctl.evaluate_max_reads,
+        })?;
+        let items: Vec<VerdictItem> = rec
+            .assertions
+            .iter()
+            .map(|a| match judged.items.iter().find(|i| i.id == a.id) {
+                Some(i) => VerdictItem {
+                    id: a.id.clone(),
+                    pass: i.judgement == Judgement::Pass,
+                    evidence: match i.judgement {
+                        Judgement::Unchecked => format!("unchecked: {}", i.evidence),
+                        _ => i.evidence.clone(),
+                    },
+                },
+                None => VerdictItem { id: a.id.clone(), pass: false, evidence: "unchecked: no verdict returned".into() },
+            })
+            .collect();
+        let pass = items.iter().all(|i| i.pass);
+        (items, pass)
+    };
     rec.verdict = Some(Verdict { result: if pass { "pass" } else { "fail" }.into(), at: now_utc(), items });
     rec.state = if pass { State::Succeeded } else { State::Failed };
     rec.step = Some(Step::Learn);
@@ -738,58 +928,22 @@ fn finish_checks(node_dir: &Path, record_path: &Path, ctl: &Ctl, rec: &mut TaskR
     Ok(())
 }
 
-fn verdict_items(node_dir: &Path, rec: &TaskRecord, outcomes: &[CheckOutcome]) -> Vec<VerdictItem> {
-    if rec.assertions.is_empty() {
-        return outcomes
-            .iter()
-            .enumerate()
-            .map(|(i, outcome)| VerdictItem { id: format!("c{}", i + 1), pass: outcome.pass, evidence: outcome.evidence.clone() })
-            .collect();
-    }
-    rec.assertions
-        .iter()
-        .enumerate()
-        .map(|(i, assertion)| {
-            let (pass, evidence) = assertion_evidence(node_dir, &assertion.text, outcomes.get(i));
-            VerdictItem { id: assertion.id.clone(), pass, evidence }
+fn ground_checks(node_dir: &Path, meta: &mut PlanMeta, plan: &str, log: &mut String) {
+    let created = |file: &str| {
+        plan.lines().any(|l| {
+            let l = l.to_ascii_lowercase();
+            l.contains(&file.to_ascii_lowercase())
+                && ["create", "write", "add", "new", "save", "make", "generate", "append"].iter().any(|v| l.contains(v))
         })
-        .collect()
-}
-
-fn assertion_evidence(node_dir: &Path, text: &str, outcome: Option<&CheckOutcome>) -> (bool, String) {
-    if let Some((file, needle)) = text.split_once(" contains ") {
-        let file = file.trim();
-        let needle = needle.trim();
-        return match tools::read_file(node_dir, file) {
-            Ok(body) => {
-                let pass = body.contains(needle);
-                (pass, format!("read {file}: {pass}"))
-            }
-            Err(e) => (false, e.message()),
-        };
-    }
-    match outcome {
-        Some(outcome) => (outcome.pass, outcome.evidence.clone()),
-        None => (false, "no evidence".into()),
-    }
-}
-
-fn apply_tool(node_dir: &Path, call: &crate::model::ToolCall) -> Result<String, FabrError> {
-    match call.name.as_str() {
-        "read_file" => {
-            let text = tools::read_file(node_dir, &call.path)?;
-            Ok(format!("read_file {} ({} bytes)", call.path, text.len()))
+    };
+    meta.checks.retain(|c| {
+        let files = verify::file_args(c);
+        let unknown = !files.is_empty() && files.iter().all(|f| !node_dir.join(f).exists() && !created(f));
+        if unknown {
+            append_log(log, "plan", &format!("dropped check {} {}: unknown file", c.cmd, c.args.join(" ")));
         }
-        "write_file" => {
-            tools::write_file(node_dir, &call.path, call.content.as_deref().unwrap_or(""))?;
-            Ok(format!("write_file {}", call.path))
-        }
-        "list_dir" => {
-            let names = tools::list_dir(node_dir, &call.path)?;
-            Ok(format!("list_dir {} ({})", call.path, names.len()))
-        }
-        other => Err(FabrError::BadRequest(format!("unknown tool {other}"))),
-    }
+        !unknown
+    });
 }
 
 fn log_has_write(log: &str, path: &str) -> bool {

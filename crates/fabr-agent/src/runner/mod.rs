@@ -117,6 +117,7 @@ impl Runner {
         let board = Board::new(&space, gate.heartbeat_interval_s, Some(calls.clone()));
         let mut ctl = Ctl::with_board(board.clone(), check_timeout_s(&space));
         ctl.harness = crate::caps::load(ctx)?;
+        (ctl.execute_max_turns, ctl.evaluate_max_reads) = crate::settings::limits(&space);
         Ok(Runner {
             events: Events::new(&space),
             space,

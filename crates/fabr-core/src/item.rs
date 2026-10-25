@@ -95,8 +95,8 @@ impl Phase {
     pub fn of(rec: &impl Phased, now: &str) -> Phase {
         match rec.state() {
             State::Succeeded => Phase::Done,
-            State::Failed => Phase::Failed,
             _ if rec.suspended_at(now) => Phase::Suspended,
+            State::Failed => Phase::Failed,
             State::Reminder => Phase::Todo,
             _ if rec.is_paused() => Phase::Paused,
             _ if rec.needs().is_some() => Phase::NeedsHarness,
