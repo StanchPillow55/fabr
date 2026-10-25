@@ -1,6 +1,7 @@
 use crate::model::{CallObserver, ModelCall};
 use crate::now_utc;
 use fabr_core::redact::redact;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 
 #[derive(Clone, Default)]
@@ -37,11 +38,22 @@ pub struct CallLog {
     sink: Sink,
     fingerprint: String,
     state: Mutex<(String, f64)>,
+    /// Whether the model-reachable signal has been emitted yet.
+    ///
+    /// The `_backend.yaml` heartbeat only proves a hosting process is alive; it
+    /// does not prove the configured model can actually be reached. The first
+    /// successful `ModelCall` observed after start is the first proof that the
+    /// key works and the model responds, so we emit one distinct "model
+    /// reachable" INFO line through the `Sink` exactly once. A model *error*
+    /// never reaches the observer — `AnthropicModel::post` returns before
+    /// invoking it — so the first-error path is surfaced separately via the
+    /// classified failure in `Runner::on_drive_error` (task 2.1).
+    reachable_seen: AtomicBool,
 }
 
 impl CallLog {
     pub fn new(sink: Sink, fingerprint: String) -> Arc<CallLog> {
-        Arc::new(CallLog { sink, fingerprint, state: Mutex::new((String::new(), 0.0)) })
+        Arc::new(CallLog { sink, fingerprint, state: Mutex::new((String::new(), 0.0)), reachable_seen: AtomicBool::new(false) })
     }
 
     pub fn begin(&self, record_id: &str) {
@@ -58,6 +70,12 @@ impl CallLog {
     }
 
     fn record(&self, call: &ModelCall) {
+        // The observer only fires on a successful `post`, so the first call we
+        // see is the first proof the model is reachable. Emit the readiness
+        // signal through the Sink exactly once, before the per-call line.
+        if !self.reachable_seen.swap(true, Ordering::SeqCst) {
+            self.sink.info(format!("model reachable: model={} key={}", call.model, self.fingerprint));
+        }
         let cost = match (call.input_tokens, call.output_tokens) {
             (Some(i), Some(o)) => Some(cost_usd(&call.model, i, o)),
             _ => None,

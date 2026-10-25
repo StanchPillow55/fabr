@@ -1,13 +1,15 @@
+mod backoff;
 mod calls;
 mod events;
 mod heartbeat;
 mod registry;
 mod signal;
 
+pub use backoff::{Retry, classify};
 pub use calls::{CallLog, Sink, cost_usd};
 pub use signal::install as install_signals;
 
-use crate::lifecycle::{advance, remove_registry, task_path_key, write_registry};
+use crate::lifecycle::{advance, claim_registry, remove_registry, task_path_key};
 use crate::model::AnthropicModel;
 use crate::now_utc;
 use chrono::Utc;
@@ -24,7 +26,30 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
-const RETRY_AFTER_TICKS: u32 = 6;
+/// Base backoff delay for a transient pipeline error, in Poll_Cycle ticks.
+///
+/// One tick is one `Heartbeat_Interval`, so the base delay equals the interval.
+const BACKOFF_BASE_TICKS: u32 = 1;
+
+/// Upper bound on the escalating backoff delay, in Poll_Cycle ticks.
+///
+/// Transient errors escalate `1, 2, 4, 8, ...` ticks and are clamped here so a
+/// long run of failures never stalls a record for more than this many cycles.
+const BACKOFF_MAX_TICKS: u32 = 32;
+
+/// Escalating, bounded delay (in ticks) for the `n`-th consecutive error.
+///
+/// `n == 1` yields the base; each further consecutive error doubles the delay
+/// up to [`BACKOFF_MAX_TICKS`]. Returns 0 for `n == 0` (no error run).
+fn backoff_delay(consecutive_errors: u32) -> u32 {
+    if consecutive_errors == 0 {
+        return 0;
+    }
+    let shift = consecutive_errors - 1;
+    // Saturate the doubling before multiplying to avoid overflow on long runs.
+    let factor = 1u32.checked_shl(shift.min(31)).unwrap_or(u32::MAX);
+    BACKOFF_BASE_TICKS.saturating_mul(factor).min(BACKOFF_MAX_TICKS)
+}
 
 #[derive(Debug, Clone)]
 pub struct Options {
@@ -82,6 +107,8 @@ pub struct Runner {
     emitted: HashSet<String>,
     baselined: bool,
     backoff: HashMap<PathBuf, u32>,
+    errors: HashMap<PathBuf, u32>,
+    terminal_seen: HashMap<PathBuf, String>,
     stuck_seen: HashSet<String>,
     bad_records: HashSet<PathBuf>,
 }
@@ -109,23 +136,72 @@ impl Runner {
             emitted: HashSet::new(),
             baselined: false,
             backoff: HashMap::new(),
+            errors: HashMap::new(),
+            terminal_seen: HashMap::new(),
             stuck_seen: HashSet::new(),
             bad_records: HashSet::new(),
         })
     }
 
     pub fn start(&mut self) -> Result<(), FabrError> {
+        // Log the ABSOLUTE default_folder so the startup line is diagnosable
+        // regardless of the process's current working directory (Requirement
+        // 8.1). `canonicalize` also resolves symlinks; fall back to a plain
+        // absolute path, then the raw value, if the folder cannot be resolved.
+        let root_abs = absolute_path(&self.root);
         self.sink.info(format!(
             "agent starting: default_folder={} model={} key={} interval={}s",
-            self.root.display(),
+            root_abs.display(),
             self.gate_model,
             self.fingerprint,
             self.opts.interval_s
         ));
+        // The worker writes presence (registry + heartbeat) to `self.space`,
+        // which the GUI reads via the same `home`. If the two disagree (e.g.
+        // `FABR_HOME` set differently for the GUI vs the worker), the GUI looks
+        // for presence in a different directory than the worker writes and
+        // reports "not connected" with no obvious cause. Make that loud rather
+        // than silent (Requirement 8.1 diagnosability). This is a WARN, never a
+        // panic: a mismatch is a misconfiguration, not a reason to crash.
+        let env_space = Ctx::from_env().space();
+        if self.space != env_space {
+            self.sink.warn(format!(
+                "fabric space mismatch: the worker writes presence to {} but Ctx::from_env() resolves {}; \
+                 the GUI will read the latter, so it may report \"not connected\" — check FABR_HOME",
+                self.space.display(),
+                env_space.display()
+            ));
+        }
         self.clean_stale();
+        self.warn_out_of_root();
         let hb = heartbeat::Heartbeat::new(&self.space, self.opts.interval_s.clamp(1, 10));
         self.beating = Some(heartbeat::Beating::spawn(hb)?);
         Ok(())
+    }
+
+    /// Warn once per record whose canonical path escapes the search root.
+    ///
+    /// `default_folder` is a search root: every discovered record is expected to
+    /// live beneath it. A symlink or canonicalization surprise can place a
+    /// record's real path outside the canonical root, which means the worker is
+    /// driving a task the user did not expect under that folder. Surface each
+    /// offending record once (deduped via `bad_records`) so the escape is
+    /// diagnosable (Requirement 8.3). Comparisons use canonical paths on both
+    /// sides; records that cannot be canonicalized are left for `load` to report.
+    fn warn_out_of_root(&mut self) {
+        let Ok(root) = self.root.canonicalize() else { return };
+        for path in self.records() {
+            let Ok(canon) = path.canonicalize() else { continue };
+            if !canon.starts_with(&root) && self.bad_records.insert(path.clone()) {
+                self.sink.warn(format!(
+                    "record {} resolves to {}, outside the default folder {}; skipping would be safer — \
+                     check for a symlink escaping the search root",
+                    path.display(),
+                    canon.display(),
+                    root.display()
+                ));
+            }
+        }
     }
 
     pub fn run(&mut self, stop: &AtomicBool) -> Result<(), FabrError> {
@@ -300,22 +376,22 @@ impl Runner {
             {
                 self.sink.warn(format!("could not record cost on {}: {}", rec.id, e.message()));
             }
-            if let Err(e) = r {
-                self.sink.warn(format!(
-                    "{} stopped at {}: {}; retrying in {RETRY_AFTER_TICKS} ticks",
-                    rec.id,
-                    step_text(&rec),
-                    e.message()
-                ));
-                self.backoff.insert(path.to_path_buf(), RETRY_AFTER_TICKS);
+            match r {
+                Ok(()) => self.on_drive_success(path),
+                Err(e) => self.on_drive_error(path, &rec, &e),
             }
         }
         let Some(rec) = self.load(path) else { return };
         let key = task_path_key(path);
         if rec.state == State::InProgress {
-            let live_entry = registry::list(&self.space).iter().any(|e| e.task_path == key);
-            if !live_entry && let Err(e) = write_registry(&self.space, &node_dir, path, &rec, self.opts.interval_s) {
-                self.sink.warn(format!("registry write failed for {}: {}", rec.id, e.message()));
+            // Ensure a claim exists for an in-progress record. `claim_registry`
+            // is the atomic acquisition: it creates the entry if absent, keeps
+            // refreshing one we already own, takes over a stale one, and
+            // declines (without touching it) when another live host owns it.
+            match claim_registry(&self.space, &node_dir, path, &rec, self.opts.interval_s) {
+                Ok(true) => {}
+                Ok(false) => self.sink.info(format!("another process holds the active run for {}", rec.id)),
+                Err(e) => self.sink.warn(format!("registry claim failed for {}: {}", rec.id, e.message())),
             }
         } else {
             remove_registry(&self.space, &rec.id, &key);
@@ -323,6 +399,60 @@ impl Runner {
         for (k, kind, detail) in event_keys(path, &rec) {
             if self.emitted.insert(k) {
                 self.emit(kind, &key, &detail);
+            }
+        }
+    }
+
+    /// Clear the error run for a record after a successful pipeline invocation.
+    ///
+    /// Resets the consecutive-error count and drops any pending backoff countdown
+    /// so the next eligible cycle drives the record again at the base interval
+    /// (Requirement 7.3). A later failure that re-surfaces a terminal cause is
+    /// logged afresh, so the suppression entry is cleared too.
+    fn on_drive_success(&mut self, path: &Path) {
+        self.errors.remove(path);
+        self.backoff.remove(path);
+        self.terminal_seen.remove(path);
+    }
+
+    /// React to a failed pipeline invocation per the failure classification.
+    ///
+    /// Transient (`Backoff`): grow the consecutive-error count and schedule an
+    /// escalating, bounded delay before the next invocation (Requirement 7.2).
+    /// Terminal: stop retrying that cause — do not schedule a countdown — and
+    /// surface it once per distinct cause, suppressing duplicates until the
+    /// cause value changes (Requirements 7.5, 7.6, 8.3). The affected record's
+    /// persisted state is left untouched either way (Requirement 7.5).
+    fn on_drive_error(&mut self, path: &Path, rec: &TaskRecord, err: &FabrError) {
+        match classify(err) {
+            Retry::Backoff => {
+                self.terminal_seen.remove(path);
+                let n = self.errors.entry(path.to_path_buf()).or_insert(0);
+                *n += 1;
+                let delay = backoff_delay(*n);
+                self.sink.warn(format!(
+                    "{} stopped at {}: {}; retrying in {delay} tick(s) (error #{n})",
+                    rec.id,
+                    step_text(rec),
+                    err.message()
+                ));
+                self.backoff.insert(path.to_path_buf(), delay);
+            }
+            Retry::Terminal => {
+                // Stop retrying this cause: clear any pending countdown and error
+                // run so a later, different cause starts fresh.
+                self.backoff.remove(path);
+                self.errors.remove(path);
+                let cause = err.message().to_string();
+                if self.terminal_seen.get(path) != Some(&cause) {
+                    self.terminal_seen.insert(path.to_path_buf(), cause);
+                    self.sink.warn(format!(
+                        "{} stopped at {}: {}; terminal failure, not retrying until corrected",
+                        rec.id,
+                        step_text(rec),
+                        err.message()
+                    ));
+                }
             }
         }
     }
@@ -477,6 +607,17 @@ fn parked(rec: &TaskRecord) -> bool {
         return true;
     }
     rec.state == State::Defined && !matches!(rec.approval.as_ref().map(|a| a.status.as_str()), Some("approved" | "refused"))
+}
+
+/// Resolve a path to an absolute form for logging.
+///
+/// Prefer `canonicalize` (absolute + symlinks resolved); if that fails (e.g.
+/// the path does not exist yet), fall back to `std::path::absolute` which makes
+/// a relative path absolute against the current directory without touching the
+/// filesystem; if even that fails, return the path unchanged so logging never
+/// loses information.
+fn absolute_path(path: &Path) -> PathBuf {
+    path.canonicalize().or_else(|_| std::path::absolute(path)).unwrap_or_else(|_| path.to_path_buf())
 }
 
 fn node_dir_of(record: &Path) -> PathBuf {

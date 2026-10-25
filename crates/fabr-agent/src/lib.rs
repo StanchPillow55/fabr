@@ -7,7 +7,7 @@ pub mod settings;
 pub mod tools;
 pub mod verify;
 
-pub use lifecycle::{approval_allows_execute, registry_path, task_path_key};
+pub use lifecycle::{approval_allows_execute, claim_registry, registry_path, task_path_key};
 pub use link::delegate;
 pub use model::{AnthropicModel, CallObserver, DefineDraft, Model, ModelCall, PlanDraft, ScriptedModel, ToolCall};
 pub use run::run_once;

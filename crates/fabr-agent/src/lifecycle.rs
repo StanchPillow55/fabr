@@ -131,6 +131,13 @@ pub fn advance(
                 log::info!("node already has an in_progress task");
                 return Ok(());
             }
+            // Atomically acquire the per-task claim before mutating the record.
+            // A loser (another live host already owns the task) backs off here
+            // and leaves both the winner's entry and the record untouched.
+            if !claim_registry(fabric_space, node_dir, record_path, &rec, heartbeat_interval_s)? {
+                log::info!("another process holds the active run for {}", rec.id);
+                return Ok(());
+            }
             rec.state = State::InProgress;
             rec.step = Some(Step::Execute);
             rec.waiting = false;
@@ -321,6 +328,23 @@ fn execute_stage(
         remove_registry(fabric_space, &rec.id, &task_path_key(record_path));
         return Ok(());
     }
+    // Non-idempotent replay guard. The persisted log is the only record of what
+    // the prior host actually did. If we are resuming into Execute and the log
+    // shows a tool was already applied (more than `started`) but never reached
+    // `tools finished`, the prior pass was interrupted mid-execute and its
+    // outcome is uncertain. Re-invoking the model and re-applying tools is only
+    // safe when every applied action is idempotent (a `write_file`, which the
+    // `log_has_write` skip below replays to the same content) AND the plan is
+    // reversible. Otherwise — an irreversible plan, or any non-`write_file`
+    // action already applied — we must not auto-replay; route to Evaluate so the
+    // checks run and surface a verdict / needs-human instead.
+    if execute_interrupted(&rec.log) && !safe_to_replay(rec) {
+        rec.step = Some(Step::Evaluate);
+        rec.verdict = None;
+        append_log(&mut rec.log, "execute", "interrupted execute with uncertain outcome; routing to evaluate instead of replaying");
+        persist(record_path, rec, expected)?;
+        return Ok(());
+    }
     let calls = model.execute(&rec.title, &rec.spec, &rec.plan)?;
     let mut expected = expected.to_string();
     for call in calls {
@@ -421,6 +445,55 @@ fn log_has_write(log: &str, path: &str) -> bool {
     log.lines().any(|line| line.contains(&needle))
 }
 
+/// Whether the persisted log shows an Execute that was started and applied at
+/// least one tool but never reached `tools finished` — i.e. an interrupted
+/// mid-execute whose outcome is uncertain. Lines like `execute: started` and
+/// `execute: cancelled by user` do not count as an applied tool.
+fn execute_interrupted(log: &str) -> bool {
+    let mut applied_tool = false;
+    let mut finished = false;
+    for line in log.lines() {
+        let Some((_, action)) = line.split_once("execute:") else {
+            continue;
+        };
+        let action = action.trim();
+        if action == "tools finished" {
+            finished = true;
+        } else if is_tool_action(action) {
+            applied_tool = true;
+        }
+    }
+    applied_tool && !finished
+}
+
+/// Whether an action logged under `execute:` represents a tool that mutated or
+/// read the workspace (as opposed to bookkeeping lines like `started`).
+fn is_tool_action(action: &str) -> bool {
+    action.starts_with("write_file ") || action.starts_with("read_file ") || action.starts_with("list_dir ")
+}
+
+/// Whether an interrupted execute is safe to replay. Replay is only safe when
+/// the plan is reversible AND every tool already applied in the log is an
+/// idempotent `write_file` (replayed to the same content via `log_has_write`).
+/// An irreversible plan, or any non-`write_file` action already applied, is
+/// never auto-replayed.
+fn safe_to_replay(rec: &TaskRecord) -> bool {
+    let reversible = rec.plan_meta.as_ref().and_then(|m| m.reversibility.as_deref()) != Some("irreversible");
+    if !reversible {
+        return false;
+    }
+    for line in rec.log.lines() {
+        let Some((_, action)) = line.split_once("execute:") else {
+            continue;
+        };
+        let action = action.trim();
+        if is_tool_action(action) && !action.starts_with("write_file ") {
+            return false;
+        }
+    }
+    true
+}
+
 fn other_running(node_dir: &Path, current: &Path) -> Result<bool, FabrError> {
     let current = task_path_key(current);
     Ok(list_records(node_dir)?.into_iter().any(|(path, rec)| rec.state == State::InProgress && task_path_key(&path) != current))
@@ -489,6 +562,14 @@ fn state_name(state: State) -> &'static str {
     }
 }
 
+/// Overwrite (or create) this process's registry entry for `rec`, atomically.
+///
+/// This is the **owner-refresh** path: the caller already holds the claim for
+/// the task (acquired via [`claim_registry`]) and is refreshing its own entry
+/// as execution progresses. It unconditionally replaces whatever is on disk,
+/// so callers that must respect another host's live claim MUST go through
+/// [`claim_registry`] first. The body is written to a sibling temp file and
+/// renamed into place so a concurrent reader never observes a torn write.
 pub fn write_registry(
     fabric_space: &Path,
     node_dir: &Path,
@@ -501,12 +582,93 @@ pub fn write_registry(
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
+    let started = read_started(&path);
+    let body = registry_body(&task_path, node_dir, rec, heartbeat_interval_s, started);
+    write_registry_atomic(&path, &body)
+}
+
+/// Try to atomically acquire the registry claim for `rec`, returning whether
+/// this process won it.
+///
+/// Exactly one process can win the first acquisition: the entry file is created
+/// with exclusive-create semantics (`create_new`), so a racing host that also
+/// sees "no live entry" will fail the create and re-read to settle the race.
+///
+/// The claim is granted (returns `Ok(true)`) when any of these hold:
+/// - the entry does not exist and we create it first, or
+/// - the entry already records our own pid (we are reclaiming / refreshing), or
+/// - the entry is stale (no heartbeat within 3× the interval) and we take it over.
+///
+/// The claim is declined (returns `Ok(false)`) when a live entry owned by
+/// another process already exists; in that case this function does not touch
+/// the winner's entry or the task record.
+pub fn claim_registry(
+    fabric_space: &Path,
+    node_dir: &Path,
+    record_path: &Path,
+    rec: &TaskRecord,
+    heartbeat_interval_s: u64,
+) -> Result<bool, FabrError> {
+    let task_path = task_path_key(record_path);
+    let path = registry_path(fabric_space, &rec.id, &task_path);
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let body = registry_body(&task_path, node_dir, rec, heartbeat_interval_s, None);
+    // Fast path: no entry on disk, so win the claim by creating it exclusively.
+    match std::fs::OpenOptions::new().write(true).create_new(true).open(&path) {
+        Ok(mut f) => {
+            use std::io::Write as _;
+            return f.write_all(body.as_bytes()).map(|()| true).map_err(|e| FabrError::Io(format!("{}: {e}", path.display())));
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {}
+        Err(e) => return Err(FabrError::Io(format!("{}: {e}", path.display()))),
+    }
+    // An entry already exists. We may still proceed if it is ours or stale;
+    // otherwise another live host owns it and we decline without touching it.
+    if claim_is_available(&path, heartbeat_interval_s) {
+        let started = read_started(&path);
+        let body = registry_body(&task_path, node_dir, rec, heartbeat_interval_s, started);
+        write_registry_atomic(&path, &body)?;
+        return Ok(true);
+    }
+    Ok(false)
+}
+
+/// Whether an existing registry entry at `path` may be taken over by us: true
+/// when it records our own pid or when it is stale (age beyond 3× interval).
+fn claim_is_available(path: &Path, heartbeat_interval_s: u64) -> bool {
+    let Ok(text) = std::fs::read_to_string(path) else {
+        // Unreadable entry (or vanished between the create attempt and now):
+        // treat as available so a transient read error does not wedge a task.
+        return true;
+    };
+    let Ok(doc) = serde_yaml::from_str::<serde_yaml::Value>(&text) else {
+        return true;
+    };
+    let ours = std::process::id() as u64;
+    if doc.get("pid").and_then(|v| v.as_u64()) == Some(ours) {
+        return true;
+    }
+    let interval = doc.get("heartbeat_interval_s").and_then(|v| v.as_i64()).filter(|n| *n > 0).unwrap_or(heartbeat_interval_s as i64);
+    let heartbeat_at = doc
+        .get("heartbeat_at")
+        .and_then(|v| v.as_str())
+        .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
+        .map(|t| t.with_timezone(&chrono::Utc));
+    match heartbeat_at {
+        Some(at) => (chrono::Utc::now() - at).num_seconds() > 3 * interval,
+        None => true,
+    }
+}
+
+fn registry_body(task_path: &str, node_dir: &Path, rec: &TaskRecord, heartbeat_interval_s: u64, started: Option<String>) -> String {
     let now = now_utc();
-    let started = read_started(&path).unwrap_or_else(|| now.clone());
+    let started = started.unwrap_or_else(|| now.clone());
     let folder = node_dir.canonicalize().unwrap_or_else(|_| node_dir.to_path_buf());
     let step = rec.step.map(step_name);
     let mut body = String::new();
-    let _ = writeln!(body, "task_path: {}", yaml_quote(&task_path));
+    let _ = writeln!(body, "task_path: {}", yaml_quote(task_path));
     let _ = writeln!(body, "task_id: {}", yaml_quote(&rec.id));
     let _ = writeln!(body, "folder: {}", yaml_quote(&folder.to_string_lossy()));
     match step {
@@ -530,7 +692,16 @@ pub fn write_registry(
     }
     let _ = writeln!(body, "question: {}", question_yaml(rec));
     let _ = writeln!(body, "pid: {}", std::process::id());
-    std::fs::write(&path, body).map_err(|e| FabrError::Io(format!("{}: {e}", path.display())))
+    body
+}
+
+/// Write `body` to `path` via a sibling temp file and an atomic rename so a
+/// concurrent reader never sees a partially written entry.
+fn write_registry_atomic(path: &Path, body: &str) -> Result<(), FabrError> {
+    let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    let tmp = path.with_file_name(format!(".{name}.{}.tmp", std::process::id()));
+    std::fs::write(&tmp, body).map_err(|e| FabrError::Io(format!("{}: {e}", tmp.display())))?;
+    std::fs::rename(&tmp, path).map_err(|e| FabrError::Io(format!("{}: {e}", path.display())))
 }
 
 fn question_yaml(rec: &TaskRecord) -> String {
