@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { countsFor, folderName, folderOf, groupByFolder, type Entry } from './folder';
+import { countsFor, nodeFolder, folderName, folderOf, groupByFolder, type Entry } from './folder';
 import { parseRecord } from './parse';
 import { FixtureSource } from './source';
 
@@ -39,5 +39,22 @@ describe('groupByFolder and countsFor', () => {
     }
     expect(countsFor(folders.get('09-redelegated-pair')!)).toMatchObject({ byColumn: { task: 1, done: 1 } });
     expect(countsFor(entries).waiting).toBe(entries.filter((e) => e.record.waiting).length);
+  });
+});
+
+describe('nodeFolder', () => {
+  const at = (root: string, path: string, home: string | null) => nodeFolder({ host: null, root }, path, home);
+  it('expands ~ and ~/x with the home and trims slashes', () => {
+    expect(at('~', 'a', '/home/me')).toBe('/home/me/a');
+    expect(at('~/x', '/a/', '/home/me/')).toBe('/home/me/x/a');
+    expect(at('~/x/', '', '/home/me')).toBe('/home/me/x');
+    expect(at('/srv/p//', 'a', null)).toBe('/srv/p/a');
+    expect(at('/', '', null)).toBe('/');
+  });
+  it('is null for ~ without a home and for remote or missing sources', () => {
+    expect(at('~', 'a', null)).toBeNull();
+    expect(at('~/x', '', null)).toBeNull();
+    expect(nodeFolder({ host: 'h', root: '/x' }, 'a', '/home/me')).toBeNull();
+    expect(nodeFolder(undefined, 'a')).toBeNull();
   });
 });

@@ -199,11 +199,34 @@ describe('Tasks view is gone', () => {
     expect(toolbar).not.toMatch(/onfabric|>Tasks</);
     expect(read('../viewstate.ts')).not.toMatch(/'g'|Open Tasks/);
   });
-  it('Panel and NodeCard use the fabric components', () => {
-    expect(read('../panel/Panel.svelte')).toContain('TaskSection');
+  it('the Panel carries no task section and the App mounts the task sheet once', () => {
+    expect(read('../panel/Panel.svelte')).not.toMatch(/TaskSection|AddTask|RemoteItems/);
+    expect(app).toContain('TaskSheet');
     expect(read('../tree/NodeCard.svelte')).toContain('TaskStrip');
     expect(toolbar).toContain('NoticesBadge');
     expect(toolbar).toContain('AgentsBadge');
     expect(app).toContain('AgentsScreen');
+  });
+});
+
+describe('heldFor', () => {
+  it('finds a record by id when the folder key misses, by node path, then by unique id', async () => {
+    const f = await realPathStore();
+    const h = f.tasksFor('/home/me/proj')[0];
+    expect(f.heldFor('/home/me/proj', 'x', h.record.id)).toBe(h);
+    expect(f.heldFor(null, 'proj', h.record.id)).toBe(h);
+    expect(f.heldFor('/nope', '', h.record.id)).toBe(h);
+    expect(f.heldFor(null, '', 'no-such-id')).toBeUndefined();
+    f.records = [...f.records, { ...h, path: '/home/me/other/.fabric-space/tasks/dup.md' }];
+    expect(f.heldFor(null, 'proj', h.record.id)).toBe(h);
+    expect(f.heldFor(null, '', h.record.id)).toBeUndefined();
+  });
+  it('opens read-only only when asked', async () => {
+    const f = await realPathStore();
+    const h = f.tasksFor('/home/me/proj')[0];
+    f.open(h.path, true);
+    expect(f.openReadonly).toBe(true);
+    f.open(h.path);
+    expect(f.openReadonly).toBe(false);
   });
 });

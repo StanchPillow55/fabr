@@ -33,7 +33,7 @@ describe('FixtureSource.createRecord', () => {
     const s = new FixtureSource();
     const { path } = await s.createRecord('/a', { title: 'Pay rent', due: '2026-11-01', context: 'ctx', success: 'paid' });
     const r = parseRecord(await s.readRecord(path));
-    expect(r).toMatchObject({ state: 'reminder', title: 'Pay rent', due: '2026-11-01', waiting: false, requests: { delegate: false, cancel: false, redelegate: false } });
+    expect(r).toMatchObject({ state: 'reminder', title: 'Pay rent', due: '2026-11-01', waiting: false, requests: { delegate: false, cancel: false, redelegate: false, pause: false, resume: false } });
     expect(r.sections).toMatchObject({ context: 'ctx', spec: '', success: 'paid', plan: '' });
   });
 });
@@ -45,20 +45,20 @@ describe('FabricStore.createTask', () => {
     const h = await f.createTask('/home/me/p', { title: 'Call the bank' });
     expect(f.tasksFor('/home/me/p')).toHaveLength(1);
     expect(h.record.state).toBe('reminder');
-    expect(h.record.requests).toEqual({ delegate: false, cancel: false, redelegate: false });
+    expect(h.record.requests).toEqual({ delegate: false, cancel: false, redelegate: false, pause: false, resume: false });
   });
   it('generate leaves only requests.delegate set', async () => {
     const f = new FabricStore(new FixtureSource());
     await f.load();
     const h = await f.createAndDelegate('/home/me/p', { title: 'Call the bank' });
-    expect(h.record.requests).toEqual({ delegate: true, cancel: false, redelegate: false });
+    expect(h.record.requests).toEqual({ delegate: true, cancel: false, redelegate: false, pause: false, resume: false });
     expect(h.record).toMatchObject({ state: 'reminder', step: null, waiting: false, question: null });
     expect(f.tasksFor('/home/me/p')[0].record.requests.delegate).toBe(true);
   });
 });
 
 describe('add task UI', () => {
-  it('the Panel shows the Add task line for a local node', async () => {
+  it('the Panel has the Hide row and no task section or Add task line', async () => {
     const n = (path: string, o: Partial<Node> = {}): Node => ({
       source: 'local', path, name: path || 'root', managed: true, meta: {}, items: [], warnings: [], version: 'v', via: null, children: [], ...o,
     });
@@ -71,11 +71,11 @@ describe('add task UI', () => {
     const store = new Store(api);
     await store.load();
     store.openPanel('local:work');
-    const fabric = new FabricStore(new FixtureSource());
-    const { body } = render(Panel, { props: { store, fabric } });
-    expect(body).toContain('placeholder="Add task"');
-    expect(body).toContain('data-testid="add-task"');
-    expect(body).not.toContain('New task');
+    const { body } = render(Panel, { props: { store } });
+    expect(body).toContain('Hide');
+    expect(body).not.toContain('Add task');
+    expect(body).not.toContain('data-testid="task-section"');
+    expect(body).not.toContain('data-testid="remote-tasks"');
   });
   it('the New task sheet has the title, due, time, priority and three text fields and both actions', () => {
     const { body } = render(NewTaskSheet, { props: { title: 'Call the bank', onsave: () => {}, ongenerate: () => {}, oncancel: () => {} } });

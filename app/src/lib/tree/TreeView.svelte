@@ -242,6 +242,7 @@
             pending={store.tree?.pending ?? []}
             onsource={(sk) => store.openPanel(sk)}
             onurl={(u) => store.openUrl(u)}
+            onsettings={() => store.openNodeSettings(k)}
             {fabric}
             remote={!!store.sourceOf(d.node.source)?.host}
             folder={fabric ? fabric.folderFor(store.sourceOf(d.node.source), d.node.path) : null}

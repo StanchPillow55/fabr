@@ -40,6 +40,7 @@ export const COMMANDS = {
   importTodos: op<[req: ImportTodosReq], ImportTodosRes>({ req: self }),
   fabricStamp: op<[req: FabricStampReq], Stamp>({ req: self }),
   fabricSettingsRead: op<[], FabricSettingsRead>({}),
+  fabricHome: op<[], string>({}),
   fabricSettingsWrite: op<[settings: FabricSettings], FabricSettingsRead>({ req: (settings) => ({ settings }) }),
   fabricSecretsWrite: op<[req: FabricSecretsWriteReq], FabricSecretsStatus>({ req: self }),
   fabricSecretsStatus: op<[], FabricSecretsStatus>({}),

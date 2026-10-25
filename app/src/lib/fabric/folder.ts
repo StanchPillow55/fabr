@@ -52,15 +52,14 @@ export function stepLabel(r: TaskRecord): string | null {
   return r.step && (r.state === 'task' || r.state === 'defined' || r.state === 'in_progress') ? r.step : null;
 }
 
-// Absolute folder of a local node, or null for remote sources and the virtual root.
 export function nodeFolder(source: { host: string | null; root: string } | undefined, path: string, home: string | null = null): string | null {
   if (!source || source.host) return null;
-  let root = source.root;
+  let root = source.root.trim().replace(/\/+$/, '');
   if (root === '~' || root.startsWith('~/')) {
-    if (!home) return null;
-    root = home + root.slice(1);
+    const h = home?.replace(/\/+$/, '');
+    if (!h) return null;
+    root = h + root.slice(1);
   }
-  root = root.replace(/\/+$/, '');
   const rel = path.replace(/^\/+|\/+$/g, '');
   return rel ? `${root}/${rel}` : root || '/';
 }

@@ -3,7 +3,7 @@ import { render } from 'svelte/server';
 import { parseRegistryEntry, type RegistryEntry } from './agents';
 import { newRecord } from './source';
 import StageBar from './StageBar.svelte';
-import { GATES, STAGES, activityOf, aliveOf, ariaText, buildAgents, finishedView, groupOf, mostAdvanced, sortAgents, stageOf, usageLine, viewOf, waitingOf } from './stage';
+import { GATES, GROUPS, STAGES, effectiveSuspended, leadOf, statusOf, activityOf, aliveOf, ariaText, buildAgents, finishedView, groupOf, mostAdvanced, sortAgents, stageOf, usageLine, viewOf, waitingOf } from './stage';
 import type { Question, TaskRecord } from './types';
 
 const NOW = '2026-10-25T09:00:00Z';
@@ -26,7 +26,7 @@ describe('stageOf, table A', () => {
     expect(GATES).toEqual(['define', 'approve']);
   });
   it('1 delegate: a reminder with the delegate request', () => {
-    expect(stageOf(rec({ requests: { delegate: true, cancel: false, redelegate: false } }))).toBe('delegate');
+    expect(stageOf(rec({ requests: { delegate: true, cancel: false, redelegate: false, pause: false, resume: false } }))).toBe('delegate');
     expect(stageOf(rec())).toBeNull();
   });
   it('2 gather: task with step gather or null', () => {
@@ -212,5 +212,41 @@ describe('StageBar', () => {
     expect(f).toContain('sbar--bad');
     expect(f).toContain('failed in evaluate');
     expect(f).not.toContain('sbar__seg--pulse');
+  });
+});
+
+describe('pause and suspend', () => {
+  const held = (record: TaskRecord) => ({ path: '/x/.fabric-space/tasks/2026-10-25-t.md', record });
+  it('effectiveSuspended honours the until time', () => {
+    const r = { suspended: true, suspend_until: null as string | null };
+    expect(effectiveSuspended(r, NOW)).toBe(true);
+    expect(effectiveSuspended({ ...r, suspend_until: '2026-10-26' }, NOW)).toBe(true);
+    expect(effectiveSuspended({ ...r, suspend_until: '2026-10-25' }, NOW)).toBe(false);
+    expect(effectiveSuspended({ ...r, suspend_until: '2026-10-24T08:00' }, NOW)).toBe(false);
+    expect(effectiveSuspended({ suspended: false, suspend_until: '2099-01-01' }, NOW)).toBe(false);
+  });
+  it('a paused entry keeps its stage and is live while the heartbeat is fresh', () => {
+    const r = rec({ state: 'in_progress', step: 'execute', paused: true });
+    const e = entry({ activity: 'paused' });
+    expect(stageOf(r, e)).toBe('execute');
+    expect(aliveOf(r, e, 'connected', NOW)).toBe('live');
+    expect(aliveOf(r, entry({ activity: 'paused', heartbeat_at: '2026-10-25T08:00:00Z' }), 'connected', NOW)).toBe('dead');
+    const v = viewOf(held(r), e, 'connected', NOW)!;
+    expect([v.activity, groupOf(v), statusOf(v, NOW)]).toEqual(['paused', 'paused', 'Paused']);
+    expect(render(StageBar, { props: { view: v, mode: 'full', now: NOW } }).body).not.toContain('sbar__seg--pulse');
+  });
+  it('lists Paused between Needs you and Dead; a paused agent leads only when nothing else runs', () => {
+    expect(GROUPS.slice(0, 3)).toEqual(['needs-you', 'paused', 'dead']);
+    const paused = viewOf(held(rec({ state: 'in_progress', step: 'evaluate', paused: true })), entry({ activity: 'paused' }), 'connected', NOW)!;
+    const running = viewOf(held(rec({ state: 'task', step: 'plan' })), entry({ step: 'plan' }), 'connected', NOW)!;
+    expect(leadOf([paused, running])).toBe(running);
+    expect(leadOf([paused])).toBe(paused);
+  });
+  it('a suspended task has no agent view and a grey bar', () => {
+    const r = rec({ state: 'in_progress', step: 'execute', suspended: true, suspend_until: '2026-10-30' });
+    expect(buildAgents([held(r)], [], 'connected', NOW).size).toBe(0);
+    const v = viewOf(held(r), null, 'connected', NOW)!;
+    expect(statusOf(v, NOW)).toBe('Suspended until 2026-10-30');
+    expect(render(StageBar, { props: { view: v, mode: 'full', now: NOW } }).body).toContain('sbar--off');
   });
 });

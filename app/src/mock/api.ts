@@ -216,6 +216,7 @@ export function createMockApi(opts: MockOpts = {}): Api {
     },
     async importTodos() { throw new ApiError(501, 'import_todos is not available in the browser'); },
     async fabricStamp() { return { stamp: await fabric.stamp() }; },
+    async fabricHome() { return '/home/mock'; },
     async fabricSettingsRead() { await wait(); return { exists: fabSettingsExist, settings: clone(fabSettings) }; },
     async fabricSettingsWrite(s) { await wait(); fabSettings = clone(s); fabSettingsExist = true; return { exists: true, settings: clone(fabSettings) }; },
     async fabricSecretsWrite(req) {

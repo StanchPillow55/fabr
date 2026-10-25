@@ -1,4 +1,5 @@
 use crate::now_utc;
+use fabr_core::item::now_minute;
 use fabr_core::taskrec::{State, Step, TaskRecord};
 use std::fmt::Write as _;
 
@@ -61,6 +62,18 @@ pub fn parked(rec: &TaskRecord) -> bool {
         return true;
     }
     rec.state == State::Defined && !matches!(approval_status(rec), "approved" | "refused")
+}
+
+pub fn suspended_now(rec: &TaskRecord) -> bool {
+    rec.suspended && rec.suspend_until.as_deref().is_none_or(|u| u > now_minute().as_str())
+}
+
+pub fn suspend_expired(rec: &TaskRecord) -> bool {
+    rec.suspended && rec.suspend_until.as_deref().is_some_and(|u| u <= now_minute().as_str())
+}
+
+pub fn driven(rec: &TaskRecord) -> bool {
+    matches!(rec.state, State::Task | State::Defined | State::InProgress) && rec.step.is_some()
 }
 
 pub fn waiting_on(rec: &TaskRecord) -> Option<&'static str> {

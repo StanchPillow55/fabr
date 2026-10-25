@@ -1,6 +1,6 @@
 import { parseYaml } from './yaml';
 
-export type Activity = 'model' | 'tool' | 'check' | 'parked' | 'retry' | 'queued';
+export type Activity = 'model' | 'tool' | 'check' | 'parked' | 'retry' | 'queued' | 'paused';
 export type Waiting = 'question' | 'approval';
 
 export interface StageUsage { calls: number; input_tokens: number; output_tokens: number; usd: number }
@@ -26,7 +26,7 @@ export interface RegistryEntry {
   usage?: Record<string, StageUsage>;
 }
 
-const ACTIVITIES: readonly string[] = ['model', 'tool', 'check', 'parked', 'retry', 'queued'];
+const ACTIVITIES: readonly string[] = ['model', 'tool', 'check', 'parked', 'retry', 'queued', 'paused'];
 const num = (v: unknown): number => (typeof v === 'number' && Number.isFinite(v) ? v : 0);
 
 function parseUsage(v: unknown): Record<string, StageUsage> | undefined {

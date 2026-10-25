@@ -6,8 +6,8 @@
 
   const status = $derived(statusOf(view, now));
   const down = $derived(view.alive === 'dead' || view.alive === 'backend-down');
-  const pulse = $derived(!view.finished && view.alive === 'live' && !view.waiting && (view.activity === 'model' || view.activity === 'tool' || view.activity === 'check'));
-  const tone = $derived(view.finished === 'failed' ? 'bad' : view.alive === 'dead' ? 'bad' : view.alive === 'backend-down' ? 'off' : view.waiting ? 'wait' : view.activity === 'retry' ? 'retry' : 'ok');
+  const pulse = $derived(!view.finished && !view.suspended && view.alive === 'live' && !view.waiting && (view.activity === 'model' || view.activity === 'tool' || view.activity === 'check'));
+  const tone = $derived(view.suspended ? 'off' : view.activity === 'paused' && view.alive === 'live' ? 'paused' : view.finished === 'failed' ? 'bad' : view.alive === 'dead' ? 'bad' : view.alive === 'backend-down' ? 'off' : view.waiting ? 'wait' : view.activity === 'retry' ? 'retry' : 'ok');
 
   function seg(i: number): string {
     if (view.finished === 'succeeded') return 'done';
@@ -38,6 +38,7 @@
   .sbar--wait { --seg: var(--orange); }
   .sbar--bad { --seg: var(--red); }
   .sbar--off { --seg: var(--label-3); }
+  .sbar--paused { --seg: var(--label-2); }
   .sbar--down { opacity: 0.7; }
   .sbar__row { display: flex; align-items: center; gap: 2px; list-style: none; margin: 0; padding: 0; }
   .sbar__seg { flex: 1; min-width: 0; height: 4px; border-radius: var(--radius-pill); background: var(--fill-2); text-align: center; }
@@ -56,6 +57,7 @@
   .sbar__seg--cur .sbar__lab { color: var(--on-tint); font-weight: 600; }
   .sbar--retry .sbar__seg--cur .sbar__lab { color: var(--label); }
   .sbar__line { display: flex; flex-wrap: wrap; gap: 4px 12px; margin: 6px 0 0; font-size: var(--fs-12); color: var(--label-2); }
+  .sbar--paused .sbar__status { color: var(--label-2); }
   .sbar--wait .sbar__status { color: var(--orange); }
   .sbar--bad .sbar__status { color: var(--red); }
   .sbar--retry .sbar__status { color: var(--orange); }

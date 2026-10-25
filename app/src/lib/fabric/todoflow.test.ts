@@ -4,10 +4,13 @@ import type { Api } from '../api/index';
 import type { Item, Node, Tree } from '../api/types';
 import { boxModel } from '../model';
 import NodeCard from '../tree/NodeCard.svelte';
+import NodeSettingsSheet from '../settings/NodeSettingsSheet.svelte';
+import { readFileSync } from 'node:fs';
 import Panel from '../panel/Panel.svelte';
 import { Store } from '../store.svelte';
 import { AddFlow } from './addflow.svelte';
 import { applyDone, canMarkDone, submitDone } from './done';
+import { folderOf } from './folder';
 import { parseRecord } from './parse';
 import { FixtureSource, guardState } from './source';
 import { serializeRecord } from './serialize';
@@ -64,7 +67,7 @@ describe('AddFlow', () => {
     flow.ask();
     await flow.finish({ title: 'Pay rent', due: '2026-11-01T09:30', pri: 2, context: 'ctx' }, false);
     const [h] = fabric.tasksFor(FOLDER);
-    expect(h.record).toMatchObject({ state: 'reminder', title: 'Pay rent', due: '2026-11-01T09:30', pri: 2, schema: 3 });
+    expect(h.record).toMatchObject({ state: 'reminder', title: 'Pay rent', due: '2026-11-01T09:30', pri: 2, schema: 4 });
     expect(h.record.requests.delegate).toBe(false);
     expect(h.text).toMatch(/^pri: 2$/m);
     expect(flow.sheet).toBe(false);
@@ -110,7 +113,7 @@ describe('mark done', () => {
     await fabric.markDone(h.path);
     expect(writes).toHaveBeenCalledTimes(1);
     const sent = parseRecord(writes.mock.calls[0][1]);
-    expect(sent).toMatchObject({ state: 'succeeded', title: 'Pay rent', pri: 3, schema: 3 });
+    expect(sent).toMatchObject({ state: 'succeeded', title: 'Pay rent', pri: 3, schema: 4 });
     expect(sent.sections.log).toBe('');
     const after = fabric.tasksFor(FOLDER)[0].record;
     expect(after.state).toBe('succeeded');
@@ -190,7 +193,7 @@ const node = (path: string, o: Partial<Node> = {}): Node => ({
 });
 
 describe('remote and local nodes', () => {
-  async function panelFor(host: string | null) {
+  async function storeFor(host: string | null) {
     const work = node('work', { items: [item({ id: 'a', title: 'Reply to vendor', status: 'todo', pri: 1 }), item({ id: 'b', title: 'Migrate auth', status: 'wip' })] });
     const tree: Tree = {
       root: { ...node('', { managed: false, source: '' }), children: [node('', { children: [work] })] },
@@ -199,27 +202,55 @@ describe('remote and local nodes', () => {
     };
     const store = new Store({ getTree: vi.fn(async () => tree), getStamp: vi.fn(async () => ({ stamp: 's' })) } as unknown as Api);
     await store.load();
-    store.openPanel('local:work');
-    const { fabric } = await fresh();
-    return render(Panel, { props: { store, fabric } }).body;
+    return store;
   }
 
-  it('a remote node lists its items read-only; add is disabled with a one-line note and there is no tick', async () => {
-    const body = await panelFor('lab.local');
-    expect(body).toContain('data-testid="remote-tasks"');
-    expect(body).toContain('Reply to vendor');
-    expect(body).toContain('Migrate auth');
-    expect(body).toMatch(/<input[^>]*aria-label="Add task"[^>]*disabled/);
-    expect(body).toContain('Remote nodes list their tasks read-only');
-    expect(body).not.toContain('mark-done');
-    expect(body).not.toContain('Make task');
+  it('the Panel lists no tasks for a remote or a local node', async () => {
+    for (const host of ['lab.local', null]) {
+      const store = await storeFor(host);
+      store.openPanel('local:work');
+      const body = render(Panel, { props: { store } }).body;
+      expect(body).not.toContain('Reply to vendor');
+      expect(body).not.toContain('remote-tasks');
+    }
   });
 
-  it('a local node shows the task section path instead and an enabled add field', async () => {
-    const body = await panelFor(null);
-    expect(body).not.toContain('data-testid="remote-tasks"');
-    expect(body).not.toMatch(/<input[^>]*aria-label="Add task"[^>]*disabled/);
-    expect(body).toContain('data-testid="add-task"');
+  it('the node settings sheet shows the name, the Hide row and the meta editor for a managed node', async () => {
+    const store = await storeFor(null);
+    store.openNodeSettings('local:work');
+    const body = render(NodeSettingsSheet, { props: { store } }).body;
+    expect(body).toContain('Node settings');
+    expect(body).toContain('work');
+    expect(body).toContain('>Hide<');
+    expect(body).toContain('Identity');
+    expect(body).toContain('Remove node');
+    expect(store.panel).toBeNull();
+  });
+
+  it('the virtual root settings list its sources instead of meta', async () => {
+    const store = await storeFor(null);
+    store.openNodeSettings(':');
+    const body = render(NodeSettingsSheet, { props: { store } }).body;
+    expect(body).toContain('Sources');
+    expect(body).not.toContain('Identity');
+  });
+
+  it('a card gear button opens settings through a propagation-stopping handler', async () => {
+    const n = node('work');
+    const body = card(n, { onsettings() {} });
+    expect(body).toContain('title="Node settings"');
+    expect(card(n)).not.toContain('Node settings');
+    const src = readFileSync(new URL('../tree/NodeCard.svelte', import.meta.url), 'utf8');
+    expect(src).toContain('onclick={stop(onsettings)}');
+    expect(src).not.toMatch(/function openItem[^}]*onopen\(\)/);
+  });
+
+  it('a remote card row with no loaded record is aria-disabled with the remote title', async () => {
+    const { fabric } = await fresh();
+    const n = node('work', { items: [item({ id: 'zz', title: 'Verify restore' })] });
+    const body = card(n, { fabric, folder: null, remote: true });
+    expect(body).toContain('aria-disabled="true"');
+    expect(body).toContain('Remote task: open on its machine');
   });
 
   function card(n: Node, extra: Record<string, unknown> = {}) {
@@ -261,5 +292,28 @@ describe('remote and local nodes', () => {
     const body = card(n, { fabric, folder: FOLDER });
     expect(body.match(/aria-label="Mark [^"]* done"/g)).toEqual(['aria-label="Mark Pay rent done"']);
     expect(body).toContain('>active<');
+  });
+});
+
+describe('pause and suspend through the store', () => {
+  it('Pause writes requests.pause only; Resume needs a paused record', async () => {
+    const { source, fabric } = await fresh();
+    const run = fabric.records.find((h) => h.record.state === 'in_progress')!;
+    await fabric.pause(run.path);
+    const after = parseRecord(await source.readRecord(run.path));
+    expect(after.requests).toEqual({ ...run.record.requests, pause: true });
+    expect({ ...after, updated_at: '', requests: run.record.requests }).toEqual({ ...run.record, schema: 4, updated_at: '' });
+    await expect(fabric.resume(run.path)).rejects.toThrow(/paused/);
+  });
+  it('Suspend writes suspended and suspend_until, Unsuspend clears them; a paused flip is refused', async () => {
+    const { source, fabric } = await fresh();
+    const todo = fabric.records.find((h) => h.record.state === 'reminder')!;
+    await fabric.suspend(todo.path, '2099-01-01');
+    expect(parseRecord(await source.readRecord(todo.path))).toMatchObject({ state: 'reminder', suspended: true, suspend_until: '2099-01-01' });
+    expect(fabric.countsFor(folderOf(todo.path)).suspended).toBe(1);
+    await fabric.unsuspend(todo.path);
+    expect(parseRecord(await source.readRecord(todo.path))).toMatchObject({ suspended: false, suspend_until: null });
+    const text = await source.readRecord(todo.path);
+    await expect(source.writeRecord(todo.path, serializeRecord({ ...parseRecord(text), paused: true }), parseRecord(text).updated_at)).rejects.toThrow(/400/);
   });
 });

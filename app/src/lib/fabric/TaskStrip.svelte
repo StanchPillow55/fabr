@@ -1,17 +1,18 @@
 <script lang="ts">
   import StageBar from './StageBar.svelte';
-  import { mostAdvanced, statusOf } from './stage';
+  import { leadOf, statusOf } from './stage';
   import type { FabricStore } from './tasks.svelte';
 
   let { fabric, folder }: { fabric: FabricStore; folder: string | null } = $props();
 
   const c = $derived(fabric.countsFor(folder));
-  const active = $derived(fabric.agentsFor(folder).filter((v) => v.activity !== 'parked'));
-  const lead = $derived(mostAdvanced(active));
+  const active = $derived(fabric.agentsFor(folder).filter((v) => v.activity !== 'parked' && v.activity !== 'paused' && !v.suspended));
+  const lead = $derived(leadOf(fabric.agentsFor(folder)));
   const shown = $derived(
     [
       { id: 'todo', label: 'Todo (reminders)', n: c.byColumn.reminder },
       { id: 'active', label: 'Active tasks', n: c.byColumn.task + c.byColumn.defined + c.byColumn.in_progress },
+      { id: 'suspended', label: 'Suspended', n: c.suspended },
       { id: 'done', label: 'Succeeded or failed', n: c.byColumn.done },
     ].filter((x) => x.n > 0),
   );

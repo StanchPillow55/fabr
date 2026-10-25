@@ -48,7 +48,7 @@ export function shownCounts(root: Node, f: ItemFilter): Pick<Rollup, 'todo' | 'w
   const r = { todo: 0, wip: 0, overdue: 0 };
   (function walk(n: Node) {
     for (const i of n.items) {
-      if (!passes(i, f)) continue;
+      if (!passes(i, f) || (i.suspended && i.status !== 'done')) continue;
       if (i.status === 'todo') r.todo++;
       else if (i.status === 'wip') r.wip++;
       if (isOverdue(i, f.today, f.now)) r.overdue++;

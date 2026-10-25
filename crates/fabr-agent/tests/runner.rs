@@ -651,3 +651,145 @@ fn events_missed_while_the_runner_was_down_are_emitted_once_after_restart() {
     again.shutdown(true);
     assert_eq!(events(&e).len(), ev.len(), "a second restart must not repeat events");
 }
+
+fn to_awaiting_approval(e: &Env, r: &mut Runner, title: &str) -> PathBuf {
+    let path = new_record(e, title);
+    edit(&path, |rec| rec.requests.delegate = true);
+    r.tick();
+    let rec = load(&path);
+    assert_eq!((rec.state, rec.step), (State::Defined, Some(Step::Approve)));
+    path
+}
+
+fn approve(path: &Path) {
+    edit(path, |rec| {
+        let a = rec.approval.as_mut().unwrap();
+        a.status = "approved".into();
+        a.by = Some("gui".into());
+    });
+}
+
+#[test]
+fn pause_keeps_the_step_and_the_registry_says_paused_until_resume() {
+    let fake = Fake::new(0);
+    let e = ready(&fake);
+    let (mut r, _) = runner(&e);
+    r.start().unwrap();
+    let path = to_awaiting_approval(&e, &mut r, "pause me");
+    let calls = fake.calls();
+    edit(&path, |rec| rec.requests.pause = true);
+    r.tick();
+    let rec = load(&path);
+    assert!(rec.paused && !rec.requests.pause && rec.waiting);
+    assert!(rec.log.contains("approve: paused by user"), "{}", rec.log);
+    let doc = registry_doc(&e);
+    assert_eq!(
+        (doc["activity"].as_str(), doc["waiting"].as_str(), doc["step"].as_str()),
+        (Some("paused"), Some("approval"), Some("approve"))
+    );
+    approve(&path);
+    r.tick();
+    r.tick();
+    assert_eq!((load(&path).state, fake.calls()), (State::Defined, calls));
+    r.shutdown(true);
+    let (mut again, _) = runner(&e);
+    again.start().unwrap();
+    again.tick();
+    assert_eq!(registry_doc(&e)["activity"].as_str(), Some("paused"));
+    edit(&path, |rec| rec.requests.resume = true);
+    again.tick();
+    let rec = load(&path);
+    assert!(!rec.paused && !rec.requests.resume);
+    assert!(rec.log.contains("approve: resumed by user"), "{}", rec.log);
+    assert_ne!(rec.state, State::Defined);
+    again.shutdown(true);
+}
+
+#[test]
+fn resume_without_pause_and_pause_on_a_reminder_are_ignored() {
+    let fake = Fake::new(0);
+    let e = ready(&fake);
+    let path = new_record(&e, "idle");
+    edit(&path, |rec| {
+        rec.requests.pause = true;
+        rec.requests.resume = true;
+    });
+    let (mut r, _) = runner(&e);
+    r.start().unwrap();
+    r.tick();
+    let rec = load(&path);
+    assert!(!rec.paused && !rec.requests.pause && !rec.requests.resume);
+    assert!(rec.log.contains("ignored request pause in state reminder") && rec.log.contains("ignored request resume in state reminder"));
+    r.shutdown(true);
+}
+
+#[test]
+fn suspend_removes_the_entry_logs_once_and_skips_the_record() {
+    let fake = Fake::new(0);
+    let e = ready(&fake);
+    let (mut r, _) = runner(&e);
+    r.start().unwrap();
+    let reminder = new_record(&e, "shelved reminder");
+    edit(&reminder, |rec| {
+        rec.requests.delegate = true;
+        rec.suspended = true;
+    });
+    let path = to_awaiting_approval(&e, &mut r, "shelve me");
+    assert_eq!(registry_files(&e).len(), 1);
+    assert_eq!(load(&reminder).state, State::Reminder);
+    edit(&path, |rec| rec.suspended = true);
+    approve(&path);
+    for _ in 0..3 {
+        r.tick();
+    }
+    let rec = load(&path);
+    assert_eq!(rec.state, State::Defined);
+    assert_eq!(rec.log.matches("approve: suspended").count(), 1, "{}", rec.log);
+    assert!(registry_files(&e).is_empty());
+    let shelved = load(&reminder);
+    assert!(shelved.state == State::Reminder && shelved.requests.delegate);
+    r.shutdown(true);
+}
+
+#[test]
+fn a_passed_suspend_until_clears_itself_and_driving_resumes() {
+    let fake = Fake::new(0);
+    let e = ready(&fake);
+    let (mut r, _) = runner(&e);
+    r.start().unwrap();
+    let path = to_awaiting_approval(&e, &mut r, "back soon");
+    edit(&path, |rec| {
+        rec.suspended = true;
+        rec.suspend_until = Some("2999-01-01".into());
+    });
+    r.tick();
+    assert!(registry_files(&e).is_empty());
+    edit(&path, |rec| rec.suspend_until = Some("2000-01-01T00:00".into()));
+    r.tick();
+    let rec = load(&path);
+    assert!(!rec.suspended && rec.suspend_until.is_none());
+    assert!(rec.log.contains(" unsuspended: timer"), "{}", rec.log);
+    assert_eq!(registry_files(&e).len(), 1);
+    r.shutdown(true);
+}
+
+#[test]
+fn a_paused_task_does_not_block_the_next_one_in_the_folder() {
+    let fake = Fake::new(0);
+    let e = ready(&fake);
+    let blocker = new_record(&e, "paused job");
+    edit(&blocker, |rec| {
+        rec.state = State::InProgress;
+        rec.step = Some(Step::Execute);
+        rec.paused = true;
+    });
+    let (mut r, _) = runner(&e);
+    r.start().unwrap();
+    let next = to_awaiting_approval(&e, &mut r, "next job");
+    approve(&next);
+    r.tick();
+    assert_ne!(load(&next).state, State::Defined);
+    let b = load(&blocker);
+    assert!(b.paused && b.state == State::InProgress);
+    r.shutdown(true);
+}

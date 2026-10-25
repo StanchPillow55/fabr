@@ -10,11 +10,13 @@
   import { splitContext } from './parse';
   import QuestionPanel from './QuestionPanel.svelte';
   import { BACKEND_LABEL } from './backend';
-  import { backendSilent, pendingRequests, requestFor, type RequestKey } from './requests';
+  import { backendSilent, canPauseResume, pendingRequests, requestFor, type RequestKey } from './requests';
+  import { effectiveSuspended, suspendLabel } from './stage';
+  import { canSuspend } from './suspend';
   import StateRibbon from './StateRibbon.svelte';
   import type { TaskRecord } from './types';
 
-  let { record, name, backLabel = 'Records', agent, onback, onanswer, onapprove, onrequest, now = new Date(), onreload }: {
+  let { record, name, backLabel = 'Records', agent, onback, onanswer, onapprove, onrequest, onsuspend, onunsuspend, now = new Date(), onreload, readonly = false }: {
     record: TaskRecord;
     name: string;
     backLabel?: string;
@@ -23,14 +25,40 @@
     onanswer?: (a: AnswerInput) => Promise<void>;
     onapprove?: (d: ApprovalDecision) => Promise<void>;
     onrequest?: (key: RequestKey) => Promise<void>;
+    onsuspend?: (until: string | null) => Promise<void>;
+    onunsuspend?: () => Promise<void>;
     now?: Date | string;
     onreload?: () => Promise<void> | void;
+    readonly?: boolean;
   } = $props();
 
-  const labels: Record<RequestKey, string> = { delegate: 'Delegate', cancel: 'Cancel', redelegate: 'Re-delegate' };
+  const labels: Record<RequestKey, string> = { delegate: 'Delegate', cancel: 'Cancel', redelegate: 'Re-delegate', pause: 'Pause', resume: 'Resume' };
   const wanted = $derived(requestFor(record.state));
   const canAsk = $derived(wanted !== null && !record.requests[wanted] && !(wanted === 'redelegate' && record.links.redelegated_to));
-  const queued = $derived(pendingRequests(record));
+  const queued = $derived(pendingRequests(record).filter((k) => k !== 'pause' && k !== 'resume'));
+  const flip = $derived(canPauseResume(record));
+  const flipping = $derived(record.requests.pause ? 'pause' : record.requests.resume ? 'resume' : null);
+  const shelved = $derived(effectiveSuspended(record, now));
+  const mayShelve = $derived(canSuspend(record));
+  let picking = $state(false);
+  let mode = $state<'none' | 'date' | 'time'>('none');
+  let day = $state('');
+  let clock = $state('');
+  const until = $derived(mode === 'none' ? null : mode === 'date' || !clock ? day : `${day}T${clock}`);
+  async function shelve() {
+    busy = true;
+    reqError = null;
+    try { await onsuspend?.(until); picking = false; mode = 'none'; day = ''; clock = ''; }
+    catch (e) { reqError = (e as Error).message; }
+    finally { busy = false; }
+  }
+  async function unshelve() {
+    busy = true;
+    reqError = null;
+    try { await onunsuspend?.(); }
+    catch (e) { reqError = (e as Error).message; }
+    finally { busy = false; }
+  }
   const silent = $derived(backendSilent(record, now));
   let busy = $state(false);
   let reqError = $state<string | null>(null);
@@ -66,14 +94,36 @@
 
     {#if agent}{@render agent()}{/if}
 
-    {#if canAsk || queued.length}
+    {#if !readonly && (canAsk || queued.length || flip || flipping || shelved || mayShelve)}
       <div class="req">
         {#if canAsk && wanted}
           <Button variant={wanted === 'cancel' ? 'danger' : 'primary'} disabled={busy} onclick={() => ask(wanted)}>{labels[wanted]}</Button>
         {/if}
+        {#if flip}<Button variant="tint" disabled={busy} data-testid="pause-resume" onclick={() => ask(flip)}>{labels[flip]}</Button>{/if}
+        {#if flipping}<span class="req__queued">{flipping} requested</span>{/if}
+        {#if shelved}
+          <span class="req__queued">{suspendLabel(record)}</span>
+          <Button variant="tint" disabled={busy} data-testid="unsuspend" onclick={unshelve}>Unsuspend</Button>
+        {:else if mayShelve && !picking}
+          <Button variant="tint" disabled={busy} data-testid="suspend" onclick={() => (picking = true)}>Suspend…</Button>
+        {/if}
         {#each queued as k (k)}<span class="req__queued">{labels[k]}: queued</span>{/each}
         {#if silent}<span class="req__silent">{BACKEND_LABEL.absent}</span>{/if}
         {#if reqError}<span class="req__err">{reqError}</span>{/if}
+      </div>
+    {/if}
+
+    {#if !readonly && picking && !shelved}
+      <div class="req" data-testid="suspend-picker">
+        <select bind:value={mode} aria-label="Suspend until">
+          <option value="none">No end time</option>
+          <option value="date">Until a date</option>
+          <option value="time">Until a date and time</option>
+        </select>
+        {#if mode !== 'none'}<input type="date" bind:value={day} aria-label="Until date" />{/if}
+        {#if mode === 'time'}<input type="time" bind:value={clock} aria-label="Until time" />{/if}
+        <Button variant="primary" disabled={busy || (mode !== 'none' && !day)} data-testid="suspend-confirm" onclick={shelve}>Suspend</Button>
+        <Button variant="plain" disabled={busy} onclick={() => (picking = false)}>Close</Button>
       </div>
     {/if}
 
@@ -102,7 +152,7 @@
       </div>
     </Group>
 
-    {#if q}
+    {#if q && !readonly}
       <QuestionPanel question={q} onsubmit={onanswer} {onreload} />
     {/if}
 
@@ -130,7 +180,7 @@
       </div>
     </Group>
 
-    {#if ap}
+    {#if ap && !readonly}
       <ApprovalPanel approval={ap} grants={record.grants} planMeta={pm} plan={s.plan} assertions={record.assertions} onsubmit={onapprove} {onreload} />
     {:else}
       <Group header="Grants">

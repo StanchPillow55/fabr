@@ -79,7 +79,7 @@ describe('tree', () => {
   });
   it('rollup', () => {
     const r = rollup(root, TODAY);
-    expect(r).toEqual({ todo: 2, wip: 1, done: 1, overdue: 1, next: '2026-10-01', nodes: 2 });
+    expect(r).toEqual({ todo: 2, wip: 1, done: 1, suspended: 0, overdue: 1, next: '2026-10-01', nodes: 2 });
   });
   it('computeForceOpen opens ancestors of matches', () => {
     const fo = computeForceOpen(indexTree(root), 'needle');
@@ -503,5 +503,15 @@ describe('priority 0 means none', () => {
   it('sorts after 1..3 in compareItems and in the pri column', () => {
     const items = [it_({ id: 'a', title: 'a', pri: 0 }), it_({ id: 'b', title: 'b', pri: 3 }), it_({ id: 'c', title: 'c', pri: 1 })];
     expect([...items].sort(compareItems).map((i) => i.id)).toEqual(['c', 'b', 'a']);
+  });
+});
+
+describe('suspended items', () => {
+  const sus = it_({ title: 'later', status: 'wip', due: '2026-10-01', suspended: true });
+  const n = node('a', { items: [it_({ title: 'now' }), sus] });
+  it('leave the todo, active and overdue counts and never nag', () => {
+    expect(rollup(n, TODAY)).toMatchObject({ todo: 1, wip: 0, suspended: 1, overdue: 0, next: null });
+    expect(isOverdue(sus, TODAY)).toBe(false);
+    expect(passes(sus, { today: TODAY, filter: 'open', hideDone: false })).toBe(false);
   });
 });

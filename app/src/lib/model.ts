@@ -53,7 +53,7 @@ export function nowFor(today: string, now?: string): string {
 }
 
 export function isOverdue(item: Item, today: string, now?: string): boolean {
-  if (item.status === 'done' || !item.due) return false;
+  if (item.status === 'done' || item.suspended || !item.due) return false;
   return item.due.length > 10 ? item.due < nowFor(today, now) : item.due < today;
 }
 
@@ -73,7 +73,7 @@ export function compareDue(a: string | null, b: string | null): number {
 }
 
 export function dueClass(item: Item, today: string, now?: string): '' | 'overdue' | 'soon' {
-  if (!item.due || item.status === 'done') return '';
+  if (!item.due || item.status === 'done' || item.suspended) return '';
   if (isOverdue(item, today, now)) return 'overdue';
   return dayDiff(item.due, today) <= 3 ? 'soon' : '';
 }
@@ -95,8 +95,8 @@ export function dueLabel(item: Item, today: string, full = false): string {
 export function passes(item: Item, f: ItemFilter): boolean {
   if (f.hideDone && item.status === 'done') return false;
   switch (f.filter) {
-    case 'open': return item.status !== 'done';
-    case 'wip': return item.status === 'wip';
+    case 'open': return item.status !== 'done' && !item.suspended;
+    case 'wip': return item.status === 'wip' && !item.suspended;
     case 'overdue': return isOverdue(item, f.today, f.now);
     default: return true;
   }
@@ -106,15 +106,17 @@ export interface Rollup {
   todo: number;
   wip: number;
   done: number;
+  suspended: number;
   overdue: number;
   next: string | null;
   nodes: number;
 }
 
 export function rollup(n: Node, today: string, now?: string): Rollup {
-  const r: Rollup = { todo: 0, wip: 0, done: 0, overdue: 0, next: null, nodes: 0 };
+  const r: Rollup = { todo: 0, wip: 0, done: 0, suspended: 0, overdue: 0, next: null, nodes: 0 };
   (function walk(k: Node) {
     for (const i of k.items) {
+      if (i.suspended && i.status !== 'done') { r.suspended++; continue; }
       r[i.status]++;
       if (isOverdue(i, today, now)) r.overdue++;
       if (i.status !== 'done' && i.due && (!r.next || compareDue(i.due, r.next) < 0)) r.next = i.due;
@@ -266,8 +268,9 @@ export function sourceLines(root: Node, sources: Source[], errors: SourceError[]
 }
 
 export function compareItems(a: Item, b: Item): number {
-  const da = a.status === 'done' ? 1 : 0;
-  const db = b.status === 'done' ? 1 : 0;
+  const rank = (i: Item) => (i.suspended && i.status !== 'done' ? 2 : i.status === 'done' ? 1 : 0);
+  const da = rank(a);
+  const db = rank(b);
   if (da !== db) return da - db;
   const pa = a.pri || 99;
   const pb = b.pri || 99;

@@ -386,7 +386,7 @@ fn ten_fixtures_one_stage_matches_fabric_updated_at() {
         let text = std::fs::read_to_string(&fixture).unwrap();
         let original = taskrec::parse(&text).unwrap_or_else(|e| panic!("{}: {}", fixture.display(), e.message()));
         assert!(text.starts_with("---\nschema: 2\n"), "{}", fixture.display());
-        assert_eq!((original.schema, original.pri), (3, 0), "{}", fixture.display());
+        assert_eq!((original.schema, original.pri), (4, 0), "{}", fixture.display());
         assert!(original.source.is_none(), "{}", fixture.display());
         assert_eq!(fabric::updated_at(&text), original.updated_at, "{}", fixture.display());
 
@@ -838,4 +838,76 @@ fn define_sets_the_requested_grants() {
     let rec = load(&record_path(&root));
     assert_eq!(rec.grants.requested, vec!["address.zip".to_string(), "name.first".to_string()]);
     assert!(rec.grants.granted.is_empty());
+}
+
+fn entry(fabric: &Path, path: &Path) -> Option<serde_yaml::Value> {
+    let key = fabr_agent::task_path_key(path);
+    let file = fabr_agent::registry_path(fabric, &load(path).id, &key);
+    serde_yaml::from_str(&std::fs::read_to_string(file).ok()?).ok()
+}
+
+fn assert_mirrors(fabric: &Path, path: &Path, tick: &str) {
+    let rec = load(path);
+    let got = entry(fabric, path).unwrap_or_else(|| panic!("{tick}: no registry entry"));
+    let text = |k: &str| got[k].as_str().map(str::to_string);
+    assert_eq!(text("state").as_deref(), Some(fabr_agent::state::state_name(rec.state)), "{tick}");
+    assert_eq!(text("step").as_deref(), rec.step.map(fabr_agent::state::step_name), "{tick}");
+    assert_eq!(text("waiting").as_deref(), fabr_agent::state::waiting_on(&rec), "{tick}");
+    assert!(text("activity").is_some(), "{tick}: activity missing");
+}
+
+#[test]
+fn registry_entry_mirrors_the_record_from_gather_to_notify_and_cancel_removes_it() {
+    let (_tmp, fabric, ws) = setup();
+    let root = ws.local_path(&NodeRef { source: "local".into(), path: String::new() }).unwrap();
+    let mut plan = draft("1. look", &["list_dir"], ("test", &["-d", "."]));
+    plan.assertions[0].text = "the folder exists".into();
+    let model = ScriptedModel::with_question(plan, "Which filename?");
+    let path = save_one(&ws, "observe me");
+    let tick = |name: &str| {
+        advance(&root, &path, &fabric, 10, &model).unwrap();
+        name.to_string()
+    };
+    let t = tick("delegate");
+    assert_eq!(load(&path).step, Some(Step::Gather), "{t}");
+    for name in ["gather", "define-question"] {
+        let t = tick(name);
+        assert_mirrors(&fabric, &path, &t);
+    }
+    assert_eq!(entry(&fabric, &path).unwrap()["waiting"].as_str(), Some("question"));
+    edit(&path, |r| {
+        r.question.as_mut().unwrap().answer =
+            Some(taskrec::Answer { value: Some("greet.txt".into()), replacement: None, granted: None, by: Some("gui".into()), at: None });
+    });
+    for name in ["define-answered", "plan"] {
+        let t = tick(name);
+        assert_mirrors(&fabric, &path, &t);
+    }
+    assert_eq!(entry(&fabric, &path).unwrap()["waiting"].as_str(), Some("approval"));
+    approve(&path);
+    for name in ["approved", "execute", "evaluate", "learn"] {
+        let t = tick(name);
+        assert_mirrors(&fabric, &path, &t);
+    }
+    tick("notify");
+    let done = load(&path);
+    assert_eq!((done.state, done.step), (State::Succeeded, None));
+    assert!(entry(&fabric, &path).is_none());
+
+    let model = ScriptedModel::new(greet_plan(), vec![write_call()]);
+    let second = open_reminder(&root, "cancel me").unwrap();
+    edit(&second, |r| r.requests.delegate = true);
+    for _ in 0..4 {
+        advance(&root, &second, &fabric, 10, &model).unwrap();
+    }
+    approve(&second);
+    advance(&root, &second, &fabric, 10, &model).unwrap();
+    assert_eq!(load(&second).step, Some(Step::Execute));
+    assert_mirrors(&fabric, &second, "before cancel");
+    edit(&second, |r| r.requests.cancel = true);
+    advance(&root, &second, &fabric, 10, &model).unwrap();
+    let rec = load(&second);
+    assert_eq!(rec.state, State::Failed);
+    assert!(rec.log.contains("execute: cancelled by user"));
+    assert!(entry(&fabric, &second).is_none());
 }

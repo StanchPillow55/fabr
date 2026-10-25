@@ -8,6 +8,7 @@ export interface Item {
   due: string | null;
   title: string;
   pri: Pri;
+  suspended?: boolean;
 }
 
 export type MetaValue = string | number | boolean;

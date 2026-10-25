@@ -14,7 +14,9 @@ use crate::lifecycle::{Ctl, advance_with, task_path_key, trailing_error};
 use crate::model::AnthropicModel;
 use crate::now_utc;
 use crate::settings::check_timeout_s;
-use crate::state::{append_log, clean_message, is_terminal, parked, pending_tail, stage_label, state_name};
+use crate::state::{
+    append_log, clean_message, driven, is_terminal, parked, pending_tail, stage_label, state_name, suspend_expired, suspended_now,
+};
 use crate::store::mutate;
 use chrono::Utc;
 use events::Events;
@@ -100,6 +102,8 @@ pub struct Runner {
     event_cutoff: Option<String>,
     stuck_seen: HashSet<String>,
     bad_records: HashSet<PathBuf>,
+    suspended_seen: HashSet<PathBuf>,
+    known: HashSet<PathBuf>,
 }
 
 impl Runner {
@@ -132,6 +136,8 @@ impl Runner {
             event_cutoff: None,
             stuck_seen: HashSet::new(),
             bad_records: HashSet::new(),
+            suspended_seen: HashSet::new(),
+            known: HashSet::new(),
         })
     }
 
@@ -291,8 +297,14 @@ impl Runner {
             self.board.remove(&rec.id, &task);
             return;
         }
+        if suspended_now(rec) {
+            self.board.remove(&rec.id, &task);
+            return;
+        }
         let extras = extras.unwrap_or_else(|| {
-            if parked(rec) {
+            if rec.paused {
+                Extras::doing(Activity::Paused)
+            } else if parked(rec) {
                 Extras::doing(Activity::Parked)
             } else if rec.state == State::Defined {
                 Extras::doing(Activity::Queued)
@@ -306,17 +318,14 @@ impl Runner {
     }
 
     fn process(&mut self, path: &Path) {
-        let Some(mut rec) = self.load(path) else { return };
+        let Some(rec) = self.load(path) else { return };
         let node_dir = node_dir_of(path);
 
-        let mut changed = false;
         if rec.requests.cancel {
-            changed = true;
             let r = if rec.state == State::InProgress { self.cancel(path) } else { self.ignore(path, "cancel", rec.state) };
             self.note_err("cancel", path, r.err());
         }
         if rec.requests.redelegate {
-            changed = true;
             if rec.state == State::Failed {
                 let r = self.redelegate(path, &rec, &node_dir);
                 self.note_err("redelegate", path, r.err());
@@ -326,16 +335,10 @@ impl Runner {
             }
         }
         if rec.requests.delegate && rec.state != State::Reminder {
-            changed = true;
             let r = self.ignore(path, "delegate", rec.state);
             self.note_err("delegate", path, r.err());
         }
-        if changed {
-            match self.load(path) {
-                Some(r) => rec = r,
-                None => return,
-            }
-        }
+        let Some(mut rec) = self.control(path) else { return };
         let live = matches!(rec.state, State::Task | State::Defined | State::InProgress);
         if live && rec.question.as_ref().is_some_and(|q| q.answer.is_some()) {
             match fold_answer(path) {
@@ -350,11 +353,13 @@ impl Runner {
                 None => return,
             }
         }
-        let drive_it = match rec.state {
-            State::Reminder => rec.requests.delegate,
-            State::Task | State::Defined | State::InProgress => true,
-            State::Succeeded | State::Failed => pending_tail(&rec),
-        };
+        let drive_it = !rec.paused
+            && !suspended_now(&rec)
+            && match rec.state {
+                State::Reminder => rec.requests.delegate,
+                State::Task | State::Defined | State::InProgress => true,
+                State::Succeeded | State::Failed => pending_tail(&rec),
+            };
         let mut extras = None;
         if drive_it {
             if let Some((left, message)) = self.retry_hold(&rec) {
@@ -383,7 +388,7 @@ impl Runner {
                 }
             }
         }
-        let Some(rec) = self.load(path) else { return };
+        let Some(rec) = (if drive_it { self.control(path) } else { self.load(path) }) else { return };
         self.sync(path, &node_dir, &rec, extras);
         let task = task_path_key(path);
         for ev in event_keys(path, &rec) {
@@ -391,6 +396,71 @@ impl Runner {
                 self.emit(ev.kind, &task, &ev.detail);
             }
         }
+    }
+
+    fn control(&mut self, path: &Path) -> Option<TaskRecord> {
+        let mut rec = self.load(path)?;
+        if suspend_expired(&rec) {
+            let r = mutate(path, |r| {
+                r.suspended = false;
+                r.suspend_until = None;
+                append_log(&mut r.log, "unsuspended", "timer");
+            });
+            self.note_err("unsuspend", path, r.err());
+            self.suspended_seen.remove(path);
+            rec = self.load(path)?;
+        }
+        let is_driven = driven(&rec);
+        if rec.requests.resume {
+            let r = if rec.paused && is_driven {
+                mutate(path, |r| {
+                    let label = stage_label(r);
+                    r.paused = false;
+                    r.requests.resume = false;
+                    append_log(&mut r.log, label, "resumed by user");
+                })
+                .map(|_| ())
+            } else {
+                self.ignore(path, "resume", rec.state)
+            };
+            self.note_err("resume", path, r.err());
+            rec = self.load(path)?;
+        }
+        if rec.requests.pause {
+            let r = if is_driven && !rec.paused {
+                mutate(path, |r| {
+                    let label = stage_label(r);
+                    r.paused = true;
+                    r.requests.pause = false;
+                    append_log(&mut r.log, label, "paused by user");
+                })
+                .map(|_| ())
+            } else if is_driven {
+                mutate(path, |r| r.requests.pause = false).map(|_| ())
+            } else {
+                self.ignore(path, "pause", rec.state)
+            };
+            self.note_err("pause", path, r.err());
+            rec = self.load(path)?;
+        }
+        if suspended_now(&rec) {
+            if is_driven {
+                self.board.remove(&rec.id, &task_path_key(path));
+                let first_sight = !self.known.contains(path);
+                if self.suspended_seen.insert(path.to_path_buf()) && !(first_sight && last_marker_suspended(&rec.log)) {
+                    let r = mutate(path, |r| {
+                        let label = stage_label(r);
+                        append_log(&mut r.log, label, "suspended");
+                    });
+                    self.note_err("suspend", path, r.err());
+                    rec = self.load(path)?;
+                }
+            }
+        } else {
+            self.suspended_seen.remove(path);
+        }
+        self.known.insert(path.to_path_buf());
+        Some(rec)
     }
 
     fn note_err(&self, what: &str, path: &Path, err: Option<FabrError>) {
@@ -406,7 +476,7 @@ impl Runner {
             if is_terminal(&rec) && !pending_tail(&rec) {
                 break;
             }
-            if parked(&rec) {
+            if parked(&rec) || rec.paused || rec.requests.pause || suspended_now(&rec) {
                 break;
             }
             advance_with(node_dir, path, &self.ctl, &self.model)?;
@@ -427,6 +497,7 @@ impl Runner {
             r.state = State::Failed;
             r.step = None;
             r.waiting = false;
+            r.paused = false;
             r.verdict = None;
             append_log(&mut r.log, "execute", "cancelled by user");
         })?;
@@ -441,6 +512,8 @@ impl Runner {
             match key {
                 "cancel" => r.requests.cancel = false,
                 "delegate" => r.requests.delegate = false,
+                "pause" => r.requests.pause = false,
+                "resume" => r.requests.resume = false,
                 _ => r.requests.redelegate = false,
             }
             append_log(&mut r.log, "notify", &msg);
@@ -467,9 +540,12 @@ impl Runner {
                     state: State::Reminder,
                     step: None,
                     waiting: false,
+                    paused: false,
+                    suspended: false,
+                    suspend_until: None,
                     created_at: now.clone(),
                     updated_at: now,
-                    requests: Requests { delegate: true, cancel: false, redelegate: false },
+                    requests: Requests { delegate: true, cancel: false, redelegate: false, pause: false, resume: false },
                     question: None,
                     answers: Vec::new(),
                     grants: Grants { requested: Vec::new(), granted: Vec::new() },
@@ -500,6 +576,18 @@ impl Runner {
         self.process(&new_path);
         Ok(())
     }
+}
+
+fn last_marker_suspended(log: &str) -> bool {
+    for line in log.lines().rev() {
+        let Some((_, rest)) = line.strip_prefix("- ").and_then(|b| b.split_once(' ')) else { continue };
+        match rest.split_once(": ") {
+            Some(("unsuspended", "timer")) => return false,
+            Some((label, "suspended")) if label != "unsuspended" => return true,
+            _ => {}
+        }
+    }
+    false
 }
 
 fn fold_answer(path: &Path) -> Result<(), FabrError> {

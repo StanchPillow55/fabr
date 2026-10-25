@@ -17,6 +17,7 @@ pub enum Activity {
     Parked,
     Retry,
     Queued,
+    Paused,
 }
 
 impl Activity {
@@ -28,6 +29,7 @@ impl Activity {
             Activity::Parked => "parked",
             Activity::Retry => "retry",
             Activity::Queued => "queued",
+            Activity::Paused => "paused",
         }
     }
 }

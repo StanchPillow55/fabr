@@ -1,7 +1,6 @@
 <script lang="ts">
   import { onMount, tick } from 'svelte';
   import { createApi } from './lib/api/index';
-  import { nodeKey } from './lib/model';
   import { needsOnboarding } from './lib/addnodes';
   import AddNodesSheet from './lib/settings/AddNodesSheet.svelte';
   import Onboarding from './lib/Onboarding.svelte';
@@ -9,6 +8,8 @@
   import Notice from './lib/Notice.svelte';
   import Panel from './lib/panel/Panel.svelte';
   import SettingsSheet from './lib/settings/SettingsSheet.svelte';
+  import NodeSettingsSheet from './lib/settings/NodeSettingsSheet.svelte';
+  import TaskSheet from './lib/fabric/TaskSheet.svelte';
   import { Store } from './lib/store.svelte';
   import SetupWizard from './lib/setup/SetupWizard.svelte';
   import { shouldShowSetup } from './lib/setup/gate';
@@ -98,7 +99,6 @@
     noticeError = null;
     noticesOpen = false;
     agentsOpen = false;
-    store!.openPanel(nodeKey(node));
     fabric!.open(held.path);
   }
 
@@ -120,7 +120,7 @@
   }
 
   function onkeydown(e: KeyboardEvent) {
-    if (!store || store.sheetOpen || store.addNodesFor || helpOpen || noticesOpen || agentsOpen || fabric?.openPath) return;
+    if (!store || store.sheetOpen || store.nodeSettings || store.addNodesFor || helpOpen || noticesOpen || agentsOpen || fabric?.openPath) return;
     const t = e.target as HTMLElement;
     const typing = !!t.matches?.('input, select, textarea, [contenteditable]');
     if (typing) {
@@ -170,11 +170,13 @@
         </div>
       {/if}
     </main>
-    <Panel {store} {fabric} />
+    <Panel {store} />
   </div>
   <SettingsSheet {store} />
+  <NodeSettingsSheet {store} />
   <AddNodesSheet {store} />
   {#if fabric}
+    <TaskSheet {fabric} />
     <Sheet open={noticesOpen} title="Notices" onclose={() => (noticesOpen = false)}>
       <NoticesList events={fabric.events} readPosition={fabric.readPosition} titleFor={fabric.titleFor} onopen={openNotice} onmarkallread={() => fabric?.markAllRead()} />
       {#if noticeError}<p class="gate-note" role="alert">{noticeError}</p>{/if}

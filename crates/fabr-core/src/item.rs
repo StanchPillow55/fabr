@@ -41,6 +41,8 @@ pub struct Item {
     pub due: Option<String>,
     #[serde(default)]
     pub pri: u8,
+    #[serde(default)]
+    pub suspended: bool,
 }
 
 #[derive(Deserialize)]
@@ -52,18 +54,27 @@ struct Front {
     #[serde(default)]
     pri: u8,
     state: State,
+    #[serde(default)]
+    suspended: bool,
+    #[serde(default)]
+    suspend_until: Option<String>,
 }
 
 pub fn item_from_record(text: &str) -> Option<Item> {
     let rest = text.strip_prefix("---")?;
     let yaml = &rest[..rest.find("\n---")?];
     let f: Front = serde_yaml::from_str(yaml).ok()?;
-    Some(Item { id: f.id, title: f.title, status: Status::of(f.state), due: f.due, pri: f.pri.min(3) })
+    let suspended = f.suspended && f.suspend_until.as_deref().is_none_or(|u| u > now_minute().as_str());
+    Some(Item { id: f.id, title: f.title, status: Status::of(f.state), due: f.due, pri: f.pri.min(3), suspended })
 }
 
 pub fn sort_items(items: &mut [Item]) {
     items.sort_by(|a, b| {
-        due_sort_key(a.due.as_deref()).cmp(&due_sort_key(b.due.as_deref())).then(b.pri.cmp(&a.pri)).then_with(|| a.title.cmp(&b.title))
+        a.suspended
+            .cmp(&b.suspended)
+            .then_with(|| due_sort_key(a.due.as_deref()).cmp(&due_sort_key(b.due.as_deref())))
+            .then(b.pri.cmp(&a.pri))
+            .then_with(|| a.title.cmp(&b.title))
     });
 }
 
@@ -124,7 +135,14 @@ mod tests {
         let item = item_from_record(&record("a-b", "Pay rent", "2026-10-28T09:30", 2, "reminder")).unwrap();
         assert_eq!(
             item,
-            Item { id: "a-b".into(), title: "Pay rent".into(), status: Status::Todo, due: Some("2026-10-28T09:30".into()), pri: 2 }
+            Item {
+                id: "a-b".into(),
+                title: "Pay rent".into(),
+                status: Status::Todo,
+                due: Some("2026-10-28T09:30".into()),
+                pri: 2,
+                suspended: false
+            }
         );
         assert!(item_from_record("no front matter").is_none());
         assert!(item_from_record("---\nid: x\n").is_none());
@@ -132,8 +150,14 @@ mod tests {
 
     #[test]
     fn items_sort_by_due_then_priority_then_title() {
-        let mk =
-            |t: &str, due: Option<&str>, pri| Item { id: t.into(), title: t.into(), status: Status::Todo, due: due.map(Into::into), pri };
+        let mk = |t: &str, due: Option<&str>, pri| Item {
+            id: t.into(),
+            title: t.into(),
+            status: Status::Todo,
+            due: due.map(Into::into),
+            pri,
+            suspended: false,
+        };
         let mut v = vec![
             mk("none", None, 3),
             mk("b", Some("2026-10-28"), 0),
@@ -145,6 +169,27 @@ mod tests {
         sort_items(&mut v);
         let order: Vec<_> = v.iter().map(|i| i.title.as_str()).collect();
         assert_eq!(order, ["early", "timed", "hi", "a", "b", "none"]);
+    }
+
+    #[test]
+    fn suspended_projects_with_and_without_until_and_sorts_last() {
+        let rec = |extra: &str| item_from_record(&format!("---\nschema: 4\nid: a\ntitle: t\nstate: task\n{extra}---\n")).unwrap();
+        assert!(!rec("").suspended);
+        assert!(rec("suspended: true\n").suspended);
+        assert!(rec("suspended: true\nsuspend_until: 2999-01-01\n").suspended);
+        assert!(!rec("suspended: true\nsuspend_until: 2000-01-01T00:00\n").suspended);
+        assert!(!rec("suspended: false\nsuspend_until: 2999-01-01\n").suspended);
+        let mk = |t: &str, due: Option<&str>, suspended| Item {
+            id: t.into(),
+            title: t.into(),
+            status: Status::Todo,
+            due: due.map(Into::into),
+            pri: 0,
+            suspended,
+        };
+        let mut v = vec![mk("s", Some("2026-01-01"), true), mk("n", None, false)];
+        sort_items(&mut v);
+        assert_eq!(v[0].title, "n");
     }
 
     #[test]

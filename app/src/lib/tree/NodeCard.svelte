@@ -31,13 +31,14 @@
     pending?: string[];
     onsource?: (key: Key) => void;
     onurl?: (url: string) => void;
+    onsettings?: () => void;
     fabric?: FabricStore | null;
     folder?: string | null;
     remote?: boolean;
   }
   let {
     node, tally, model, selected, match, dim, ontoggle, onmore, onopen, onfocus, today = '', source = null, accent = null,
-    sources = [], errors = [], pending = [], onsource, onurl, fabric = null, folder = null, remote = false,
+    sources = [], errors = [], pending = [], onsource, onurl, onsettings, fabric = null, folder = null, remote = false,
   }: Props = $props();
 
   const hidden = $derived(isHidden(node));
@@ -51,11 +52,11 @@
   const REMOTE_NOTE = 'Remote node: read-only';
   const expandedMore = $derived(model.shown.length > MAX_ROWS);
 
-  const held = (item: Item) => (fabric && folder ? fabric.tasksFor(folder).find((h) => h.record.id === item.id) : undefined);
+  const REMOTE_TITLE = 'Remote task: open on its machine';
+  const held = (item: Item) => fabric?.heldFor(folder, node.path, item.id);
   function openItem(item: Item) {
     const h = held(item);
-    onopen();
-    if (h && fabric) fabric.open(h.path);
+    if (h && fabric) fabric.open(h.path, remote);
   }
   async function markDone(h: Held) {
     try {
@@ -112,6 +113,11 @@
     {/if}
     {#if fabric && folder}<TaskStrip {fabric} {folder} />{/if}
     {#if aside}<span class="card__kind">{aside}</span>{/if}
+    {#if onsettings}
+      <button type="button" class="chev card__gear" title="Node settings" aria-label="Node settings" onclick={stop(onsettings)} ondblclick={(e) => e.stopPropagation()}>
+        <Icon name="gear" size={12} />
+      </button>
+    {/if}
   </div>
 
   {#if counts}
@@ -140,12 +146,13 @@
       {/if}
       {#each model.shown as item}
         {@const h = held(item)}
-        <li class="row row--{item.status}">
+        {@const dead = remote && !h}
+        <li class="row row--{item.status}" class:row--suspended={item.suspended && item.status !== 'done'}>
           <Pill status={item.status} />
-          <button type="button" class="row__title row__link" title={item.title} onclick={stop(() => openItem(item))} ondblclick={(e) => e.stopPropagation()}>{item.title}</button>
+          <button type="button" class="row__title row__link" title={dead ? REMOTE_TITLE : item.title} aria-disabled={dead || undefined} onclick={stop(() => openItem(item))} ondblclick={(e) => e.stopPropagation()}>{item.title}</button>
           <Priority pri={item.pri} />
           <DueBadge {item} {today} />
-          {#if h && canMarkDone(h.record)}
+          {#if h && !remote && canMarkDone(h.record)}
             <button type="button" class="row__tick" title="Mark done" aria-label="Mark {item.title} done" onclick={stop(() => markDone(h))} ondblclick={(e) => e.stopPropagation()}><Icon name="check" size={12} /></button>
           {/if}
         </li>
@@ -165,7 +172,7 @@
   {/if}
 
   {#if roll}
-    <div class="card__rollup" title="This node and {roll.nodes} below; {roll.done} done">
+    <div class="card__rollup" title="This node and {roll.nodes} below; {roll.done} done{roll.suspended ? `, ${roll.suspended} suspended` : ''}">
       <span><b>{roll.todo}</b> todo</span>
       <span><b>{roll.wip}</b> active</span>
       <span><b>{roll.done}</b> done</span>

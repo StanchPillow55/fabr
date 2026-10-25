@@ -1,5 +1,6 @@
 import { formatDuration, isDead, type Activity, type RegistryEntry, type StageUsage, type Waiting } from './agents';
 import type { BackendState } from './backend';
+import { clockMinute } from '../model';
 import { folderOf } from './folder';
 import type { TaskRecord } from './types';
 import { entryMap } from './view';
@@ -29,6 +30,8 @@ export interface AgentView {
   lastError: string | null;
   retryInS: number | null;
   finished: 'succeeded' | 'failed' | null;
+  suspended: boolean;
+  suspendUntil: string | null;
   entry: RegistryEntry | null;
 }
 
@@ -43,6 +46,16 @@ function failedIn(record: TaskRecord): Stage {
     if (isStage(s) && s !== 'delegate' && s !== 'learn' && s !== 'notify') return s;
   }
   return 'evaluate';
+}
+
+export function effectiveSuspended(r: Pick<TaskRecord, 'suspended' | 'suspend_until'>, now: Date | string = new Date()): boolean {
+  if (!r.suspended) return false;
+  if (!r.suspend_until) return true;
+  return r.suspend_until > (now instanceof Date ? clockMinute(now) : now.length > 16 ? clockMinute(new Date(now)) : now);
+}
+
+export function suspendLabel(r: Pick<TaskRecord, 'suspend_until'>): string {
+  return r.suspend_until ? `Suspended until ${r.suspend_until.replace('T', ' ')}` : 'Suspended';
 }
 
 export function isFinished(record: TaskRecord): boolean {
@@ -76,6 +89,7 @@ export function waitingOf(record: TaskRecord, entry?: RegistryEntry | null): Wai
 
 export function activityOf(record: TaskRecord, entry?: RegistryEntry | null): Activity {
   if (entry?.activity) return entry.activity;
+  if (record.paused && (record.state === 'task' || record.state === 'defined' || record.state === 'in_progress')) return 'paused';
   if (waitingOf(record, entry)) return 'parked';
   if (record.state === 'defined' && record.approval?.status === 'approved') return 'queued';
   return record.state === 'in_progress' && entry ? 'tool' : 'model';
@@ -118,6 +132,8 @@ export function viewOf(held: Held, entry: RegistryEntry | null, backend: Backend
     lastError: entry?.last_error ?? null,
     retryInS: entry?.activity === 'retry' && typeof entry.retry_in_s === 'number' ? entry.retry_in_s : null,
     finished,
+    suspended: effectiveSuspended(r, now),
+    suspendUntil: r.suspend_until,
     entry,
   };
 }
@@ -126,30 +142,40 @@ export function buildAgents(records: Held[], entries: RegistryEntry[], backend: 
   const byRecord = entryMap(records, entries);
   const out = new Map<string, AgentView>();
   for (const h of records) {
-    if (isFinished(h.record)) continue;
+    if (isFinished(h.record) || effectiveSuspended(h.record, now)) continue;
     const v = viewOf(h, byRecord.get(h.path) ?? null, backend, now);
     if (v) out.set(h.path, v);
   }
   return out;
 }
 
+export function suspendedView(held: Held, backend: BackendState, now: Date | string = new Date()): AgentView | null {
+  return effectiveSuspended(held.record, now) ? viewOf(held, null, backend, now) : null;
+}
+
 export function finishedView(held: Held): AgentView | null {
   return isFinished(held.record) ? viewOf(held, null, 'absent') : null;
 }
 
-export type AgentGroup = 'needs-you' | 'dead' | 'running' | 'queued';
-export const GROUPS: readonly AgentGroup[] = ['needs-you', 'dead', 'running', 'queued'];
-export const GROUP_LABEL: Record<AgentGroup, string> = { 'needs-you': 'Needs you', dead: 'Dead', running: 'Running', queued: 'Queued' };
+export type AgentGroup = 'needs-you' | 'paused' | 'dead' | 'running' | 'queued';
+export const GROUPS: readonly AgentGroup[] = ['needs-you', 'paused', 'dead', 'running', 'queued'];
+export const GROUP_LABEL: Record<AgentGroup, string> = { 'needs-you': 'Needs you', paused: 'Paused', dead: 'Dead', running: 'Running', queued: 'Queued' };
 
 export function groupOf(v: AgentView): AgentGroup {
   if (v.waiting) return 'needs-you';
   if (v.alive === 'dead') return 'dead';
+  if (v.activity === 'paused') return 'paused';
   return v.activity === 'queued' ? 'queued' : 'running';
 }
 
 export function sortAgents(list: AgentView[]): AgentView[] {
   const order = (v: AgentView) => GROUPS.indexOf(groupOf(v));
   return [...list].sort((a, b) => order(a) - order(b) || Date.parse(a.since) - Date.parse(b.since));
+}
+
+export function leadOf(list: AgentView[]): AgentView | null {
+  const live = list.filter((v) => !v.suspended && v.activity !== 'paused' && v.activity !== 'parked');
+  return mostAdvanced(live) ?? mostAdvanced(list.filter((v) => !v.suspended && v.activity === 'paused'));
 }
 
 export function sinceSeconds(v: AgentView, now: Date | string): number {
@@ -171,9 +197,11 @@ export function usageLine(v: AgentView): string {
 }
 
 export function statusOf(v: AgentView, now: Date | string = new Date()): string {
+  if (v.suspended) return v.suspendUntil ? `Suspended until ${v.suspendUntil.replace('T', ' ')}` : 'Suspended';
   if (v.finished) return v.finished === 'failed' ? `failed in ${v.stage}` : 'finished';
   if (v.alive === 'dead' && v.entry) return `Dead ${formatDuration(Math.max(0, (new Date(now).getTime() - Date.parse(v.entry.heartbeat_at)) / 1000))}`;
   if (v.alive === 'backend-down') return 'Backend not responding';
+  if (v.activity === 'paused') return 'Paused';
   if (v.waiting) return 'needs you';
   if (v.activity === 'retry') return v.retryInS === null ? 'retrying' : `retry in ${v.retryInS}s`;
   if (v.activity === 'queued') return 'queued';

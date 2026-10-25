@@ -5,19 +5,19 @@ export const STEPS = ['gather', 'define', 'plan', 'approve', 'execute', 'evaluat
 export type Step = (typeof STEPS)[number];
 
 export const FIELDS = [
-  'schema', 'id', 'source', 'title', 'due', 'pri', 'state', 'step', 'waiting', 'created_at', 'updated_at', 'requests',
+  'schema', 'id', 'source', 'title', 'due', 'pri', 'state', 'step', 'waiting', 'paused', 'suspended', 'suspend_until', 'created_at', 'updated_at', 'requests',
   'question', 'answers', 'grants', 'plan_meta', 'assertions', 'approval', 'verdict', 'cost_usd', 'links',
 ] as const;
 
-export const SCHEMA = 3;
-export const OPTIONAL_FIELDS: readonly string[] = ['pri'];
+export const SCHEMA = 4;
+export const OPTIONAL_FIELDS: readonly string[] = ['pri', 'paused', 'suspended', 'suspend_until'];
 
 export const SECTION_HEADINGS = ['Context', 'Spec', 'Success', 'Plan', 'Log'] as const;
 
 export type QuestionKind = 'open' | 'choice' | 'grant';
 export type Scope = 'task' | 'project' | 'always';
 
-export interface Requests { delegate: boolean; cancel: boolean; redelegate: boolean }
+export interface Requests { delegate: boolean; cancel: boolean; redelegate: boolean; pause: boolean; resume: boolean }
 
 export interface Answer {
   value: string | null;
@@ -77,6 +77,9 @@ export interface FrontMatter {
   state: State;
   step: Step | null;
   waiting: boolean;
+  paused: boolean;
+  suspended: boolean;
+  suspend_until: string | null;
   created_at: string;
   updated_at: string;
   requests: Requests;

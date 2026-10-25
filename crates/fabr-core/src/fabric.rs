@@ -221,11 +221,26 @@ fn gui_record(disk: &TaskRecord, incoming: &TaskRecord) -> Result<TaskRecord, Fa
     if incoming.step != disk.step {
         return Err(FabrError::BadRequest("the gui does not write step".into()));
     }
+    if let Some(until) = &incoming.suspend_until
+        && !taskrec::valid_due(until)
+    {
+        return Err(FabrError::BadRequest(format!("suspend_until must be YYYY-MM-DD or YYYY-MM-DDTHH:MM, got {until:?}")));
+    }
+    if incoming.paused != disk.paused {
+        return Err(FabrError::BadRequest("the gui does not write paused".into()));
+    }
     let mut rec = incoming.clone();
+    if matches!(disk.state, State::Succeeded | State::Failed) {
+        rec.suspended = disk.suspended;
+        rec.suspend_until = disk.suspend_until.clone();
+        rec.requests.pause = disk.requests.pause;
+        rec.requests.resume = disk.requests.resume;
+    }
     rec.schema = disk.schema;
     rec.id = disk.id.clone();
     rec.source = disk.source.clone();
     rec.waiting = disk.waiting;
+    rec.paused = disk.paused;
     rec.created_at = disk.created_at.clone();
     rec.answers = disk.answers.clone();
     rec.grants.requested = disk.grants.requested.clone();
@@ -393,7 +408,7 @@ pub fn create_in(req: &FabricCreateReq, user_home: &Path) -> Result<FabricCreate
             continue;
         }
         let text = format!(
-            "---\nschema: 3\nid: {id}\nsource: null\ntitle: {}\ndue: {}\npri: {pri}\nstate: reminder\nstep: null\nwaiting: false\ncreated_at: {stamp}\nupdated_at: {stamp}\nrequests: {{delegate: false, cancel: false, redelegate: false}}\nquestion: null\nanswers: []\ngrants: {{requested: [], granted: []}}\nplan_meta: null\nassertions: []\napproval: null\nverdict: null\ncost_usd: 0\nlinks: {{redelegated_from: null, redelegated_to: null}}\n---\n## Context\n{}## Spec\n{}## Success\n{}## Plan\n## Log\n",
+            "---\nschema: 4\nid: {id}\nsource: null\ntitle: {}\ndue: {}\npri: {pri}\nstate: reminder\nstep: null\nwaiting: false\npaused: false\nsuspended: false\nsuspend_until: null\ncreated_at: {stamp}\nupdated_at: {stamp}\nrequests: {{delegate: false, cancel: false, redelegate: false, pause: false, resume: false}}\nquestion: null\nanswers: []\ngrants: {{requested: [], granted: []}}\nplan_meta: null\nassertions: []\napproval: null\nverdict: null\ncost_usd: 0\nlinks: {{redelegated_from: null, redelegated_to: null}}\n---\n## Context\n{}## Spec\n{}## Success\n{}## Plan\n## Log\n",
             yaml_title(title),
             due.unwrap_or("null"),
             section_text(&req.context),
@@ -556,6 +571,28 @@ mod tests {
             write(&FabricWriteReq { path: path.clone(), text: taskrec::render(&incoming), expected_updated_at: "T1".into() }).unwrap_err();
         assert!(err.message().contains("state"));
         assert_eq!(taskrec::parse(&std::fs::read_to_string(&path).unwrap()).unwrap().state, taskrec::State::Reminder);
+    }
+
+    #[test]
+    fn gui_sets_suspension_and_cannot_set_paused() {
+        let (_d, root, _) = tree();
+        let path = format!("{root}/.fabric-space/tasks/a.md");
+        let put = |r: &taskrec::TaskRecord, at: &str| {
+            write(&FabricWriteReq { path: path.clone(), text: taskrec::render(r), expected_updated_at: at.into() })
+        };
+        let mut incoming = taskrec::parse(&rec("T1")).unwrap();
+        incoming.suspended = true;
+        incoming.suspend_until = Some("2999-01-01T09:30".into());
+        incoming.requests.pause = true;
+        put(&incoming, "T1").unwrap();
+        let disk = taskrec::parse(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        assert!(disk.suspended && disk.requests.pause && disk.suspend_until.as_deref() == Some("2999-01-01T09:30"));
+        let mut bad = disk.clone();
+        bad.suspend_until = Some("tomorrow".into());
+        assert!(put(&bad, &disk.updated_at).unwrap_err().message().contains("suspend_until"));
+        let mut bad = disk.clone();
+        bad.paused = true;
+        assert!(put(&bad, &disk.updated_at).unwrap_err().message().contains("paused"));
     }
 
     #[test]
@@ -733,11 +770,14 @@ mod tests {
         };
         let r = create_in(&req, d.path()).unwrap();
         let text = read(&FabricReadReq { path: r.path.clone() }).unwrap().text;
-        assert!(text.starts_with("---\nschema: 3\n"));
+        assert!(text.starts_with("---\nschema: 4\n"));
         assert_eq!(updated_at(&text).len(), 20);
         assert!(text.contains(&format!("id: {}\n", r.id)));
         assert!(text.contains("title: \"order: \\\"filament\\\"\"\ndue: null\npri: 0\nstate: reminder\nstep: null\nwaiting: false\n"));
-        assert!(text.contains("created_at: ") && text.contains("requests: {delegate: false, cancel: false, redelegate: false}\n"));
+        assert!(
+            text.contains("created_at: ")
+                && text.contains("requests: {delegate: false, cancel: false, redelegate: false, pause: false, resume: false}\n")
+        );
         assert!(text.contains(
             "grants: {requested: [], granted: []}\nplan_meta: null\nassertions: []\napproval: null\nverdict: null\ncost_usd: 0\n"
         ));
@@ -796,7 +836,7 @@ mod tests {
         let req = FabricCreateReq { due: Some("2026-10-28T09:30".into()), pri: Some(3), ..create_req(d.path(), "call the bank") };
         let made = create_in(&req, d.path()).unwrap();
         let rec = taskrec::parse(&read(&FabricReadReq { path: made.path }).unwrap().text).unwrap();
-        assert_eq!((rec.schema, rec.pri, rec.due.as_deref(), rec.state), (3, 3, Some("2026-10-28T09:30"), State::Reminder));
+        assert_eq!((rec.schema, rec.pri, rec.due.as_deref(), rec.state), (4, 3, Some("2026-10-28T09:30"), State::Reminder));
         for bad in ["2026-10-28T25:00", "2026-10-28T9:30", "2026-10-28 09:30"] {
             let r = create_in(&FabricCreateReq { due: Some(bad.into()), ..create_req(d.path(), "x") }, d.path());
             assert!(matches!(r, Err(FabrError::BadRequest(_))), "{bad}");

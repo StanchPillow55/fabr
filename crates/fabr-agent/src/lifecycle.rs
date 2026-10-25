@@ -2,7 +2,7 @@ use crate::board::{Activity, Board, Extras};
 use crate::link::{list_records, load_record, update_record};
 use crate::model::Model;
 use crate::now_utc;
-use crate::state::{append_log, clean_message, is_terminal, pending_tail, question_open, stage_label, state_name};
+use crate::state::{append_log, clean_message, is_terminal, pending_tail, question_open, stage_label, state_name, suspended_now};
 use crate::store::mutate;
 use crate::tools;
 use crate::verify::{self, CheckOutcome};
@@ -199,6 +199,9 @@ fn step_once(node_dir: &Path, record_path: &Path, ctl: &Ctl, model: &impl Model,
     let mut base = rec.clone();
     if is_terminal(&rec) && !pending_tail(&rec) {
         forget(ctl, &rec, record_path);
+        return Ok(());
+    }
+    if rec.paused || suspended_now(&rec) {
         return Ok(());
     }
     if rec.requests.redelegate {
@@ -616,7 +619,9 @@ fn log_has_write(log: &str, path: &str) -> bool {
 
 fn other_running(node_dir: &Path, current: &Path) -> Result<bool, FabrError> {
     let current = task_path_key(current);
-    Ok(list_records(node_dir)?.into_iter().any(|(path, rec)| rec.state == State::InProgress && task_path_key(&path) != current))
+    Ok(list_records(node_dir)?
+        .into_iter()
+        .any(|(path, rec)| rec.state == State::InProgress && !rec.paused && !suspended_now(&rec) && task_path_key(&path) != current))
 }
 
 fn ignore_request(path: &Path, rec: &mut TaskRecord, base: &mut TaskRecord, key: &str) -> Result<(), FabrError> {

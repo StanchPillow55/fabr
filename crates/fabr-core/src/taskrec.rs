@@ -83,6 +83,10 @@ pub struct Requests {
     pub delegate: bool,
     pub cancel: bool,
     pub redelegate: bool,
+    #[serde(default)]
+    pub pause: bool,
+    #[serde(default)]
+    pub resume: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -234,6 +238,12 @@ pub struct FrontMatter {
     #[serde(default)]
     pub waiting: bool,
     #[serde(default)]
+    pub paused: bool,
+    #[serde(default)]
+    pub suspended: bool,
+    #[serde(default)]
+    pub suspend_until: Option<String>,
+    #[serde(default)]
     pub source: Option<TaskSource>,
     #[serde(default)]
     pub created_at: String,
@@ -269,6 +279,9 @@ pub struct TaskRecord {
     pub state: State,
     pub step: Option<Step>,
     pub waiting: bool,
+    pub paused: bool,
+    pub suspended: bool,
+    pub suspend_until: Option<String>,
     pub created_at: String,
     pub updated_at: String,
     pub requests: Requests,
@@ -288,7 +301,7 @@ pub struct TaskRecord {
     pub log: String,
 }
 
-pub const SCHEMA: i64 = 3;
+pub const SCHEMA: i64 = 4;
 
 pub fn valid_due(s: &str) -> bool {
     match s.len() {
@@ -306,7 +319,7 @@ pub fn parse(text: &str) -> Result<TaskRecord, FabrError> {
     let yaml = &rest[..end];
     let body = rest[end + 4..].strip_prefix('\n').unwrap_or(&rest[end + 4..]);
     let fm: FrontMatter = serde_yaml::from_str(yaml).map_err(|e| FabrError::Unprocessable(format!("front matter: {e}")))?;
-    if !matches!(fm.schema, 2 | 3) {
+    if !matches!(fm.schema, 2..=4) {
         return Err(FabrError::Unprocessable(format!("unsupported record schema {}", fm.schema)));
     }
     if fm.pri > 3 {
@@ -323,6 +336,9 @@ pub fn parse(text: &str) -> Result<TaskRecord, FabrError> {
         state: fm.state,
         step: fm.step,
         waiting: fm.waiting,
+        paused: fm.paused,
+        suspended: fm.suspended,
+        suspend_until: fm.suspend_until,
         created_at: fm.created_at,
         updated_at: fm.updated_at,
         requests: fm.requests,
@@ -375,6 +391,9 @@ pub fn render(rec: &TaskRecord) -> String {
         state: rec.state,
         step: rec.step,
         waiting: rec.waiting,
+        paused: rec.paused,
+        suspended: rec.suspended,
+        suspend_until: rec.suspend_until.clone(),
         source: rec.source.clone(),
         created_at: rec.created_at.clone(),
         updated_at: rec.updated_at.clone(),
@@ -608,9 +627,9 @@ mod tests {
         for path in recs {
             let text = std::fs::read_to_string(&path).unwrap();
             let rec = parse(&text).unwrap_or_else(|e| panic!("{}: {}", path.display(), e.message()));
-            assert_eq!(rec.schema, 3, "{}", path.display());
+            assert_eq!(rec.schema, 4, "{}", path.display());
             assert_eq!(rec.pri, 0, "{}", path.display());
-            assert!(render(&rec).starts_with("---\nschema: 3\n"), "{}", path.display());
+            assert!(render(&rec).starts_with("---\nschema: 4\n"), "{}", path.display());
             assert!(!rec.id.is_empty(), "{}", path.display());
         }
     }
@@ -622,14 +641,19 @@ mod tests {
                 .unwrap();
         assert!(text.starts_with("---\nschema: 2\n"));
         let rec = parse(&text).unwrap();
-        assert_eq!((rec.schema, rec.pri), (3, 0));
+        assert_eq!((rec.schema, rec.pri), (4, 0));
+        assert!(!rec.paused && !rec.suspended && rec.suspend_until.is_none() && !rec.requests.pause && !rec.requests.resume);
         let out = render(&rec);
-        assert!(out.starts_with("---\nschema: 3\n") && out.contains("\npri: 0\n"));
+        assert!(
+            out.starts_with("---\nschema: 4\n")
+                && out.contains("\npri: 0\n")
+                && out.contains("\npaused: false\nsuspended: false\nsuspend_until: null\n")
+        );
         let mut rec = rec;
         rec.pri = 2;
         assert_eq!(parse(&render(&rec)).unwrap().pri, 2);
-        assert!(parse(&text.replacen("schema: 2", "schema: 4", 1)).is_err());
-        assert!(parse(&text.replacen("schema: 2\n", "schema: 3\npri: 4\n", 1)).is_err());
+        assert!(parse(&text.replacen("schema: 2", "schema: 5", 1)).is_err());
+        assert!(parse(&text.replacen("schema: 2\n", "schema: 4\npri: 4\n", 1)).is_err());
     }
 
     #[test]

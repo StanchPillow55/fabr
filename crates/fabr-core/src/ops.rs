@@ -83,6 +83,7 @@ ops! {
     import_todos Post true (ImportTodosReq) |_, r| json(fabric::import_todos(&r)?);
     fabric_stamp Post true (FabricStampReq) |_, r| json(Stamp { stamp: fabric::stamp(&r)? });
     fabric_settings_read Post true (Empty) |_, _| json(setup::settings_read(&Ctx::from_env())?);
+    fabric_home Post true (Empty) |_, _| json(Ctx::from_env().home.to_string_lossy().into_owned());
     fabric_settings_write Post true (SettingsWriteReq) |_, r| json(setup::settings_write(&Ctx::from_env(), r)?);
     fabric_secrets_write Post true (SecretsWriteReq) |_, r| json(setup::secrets_write(&Ctx::from_env(), r)?);
     fabric_secrets_status Post true (Empty) |_, _| json(setup::secrets_status(&Ctx::from_env()));

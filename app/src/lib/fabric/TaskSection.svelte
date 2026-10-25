@@ -3,22 +3,20 @@
   import Group from '../ui/Group.svelte';
   import Icon from '../ui/Icon.svelte';
   import Row from '../ui/Row.svelte';
-  import Sheet from '../ui/Sheet.svelte';
-  import AgentsScreen from './AgentsScreen.svelte';
-  import StageBar from './StageBar.svelte';
-  import { finishedView } from './stage';
+  import { effectiveSuspended, suspendLabel } from './stage';
   import { canMarkDone } from './done';
-  import { STATE_LABEL, folderName, folderOf, stepLabel } from './folder';
-  import RecordScreen from './RecordScreen.svelte';
+  import { STATE_LABEL, stepLabel } from './folder';
+  import TaskSheet from './TaskSheet.svelte';
   import type { FabricStore, Held } from './tasks.svelte';
 
   let { fabric, folder }: { fabric: FabricStore; folder: string } = $props();
 
   const list = $derived(fabric.tasksFor(folder));
-  const todo = $derived(list.filter((h) => h.record.state === 'reminder'));
-  const active = $derived(list.filter((h) => ['task', 'defined', 'in_progress'].includes(h.record.state)));
   const finished = $derived(list.filter((h) => h.record.state === 'succeeded' || h.record.state === 'failed'));
-  const open = $derived(fabric.openRecord && folderOf(fabric.openRecord.path) === folder ? fabric.openRecord : null);
+  const shelved = $derived(list.filter((h) => !finished.includes(h) && effectiveSuspended(h.record, fabric.now)));
+  const live = $derived(list.filter((h) => !finished.includes(h) && !shelved.includes(h)));
+  const todo = $derived(live.filter((h) => h.record.state === 'reminder'));
+  const active = $derived(live.filter((h) => ['task', 'defined', 'in_progress'].includes(h.record.state)));
 
   onMount(() => () => fabric.open(null));
 
@@ -40,7 +38,7 @@
     <Row
       label={r.title}
       sub={[r.due ? `due ${r.due.replace('T', ' ')}` : '', r.pri ? '!'.repeat(r.pri) : '', step ? `step: ${step}` : ''].filter(Boolean).join(' · ') || undefined}
-      value={[STATE_LABEL[r.state], r.waiting ? 'waiting' : '', live && live !== 'parked' ? 'running' : ''].filter(Boolean).join(' · ')}
+      value={[STATE_LABEL[r.state], effectiveSuspended(r, fabric.now) ? suspendLabel(r).toLowerCase() : '', r.paused ? 'paused' : '', r.waiting ? 'waiting' : '', live && live !== 'parked' ? 'running' : ''].filter(Boolean).join(' · ')}
       tone={r.waiting ? 'tint' : undefined}
       onclick={() => fabric.open(h.path)}
     />
@@ -59,6 +57,14 @@
         {#each active as h (h.path)}{@render line(h)}{/each}
       </Group>
     {/if}
+    {#if shelved.length}
+      <details class="taskdone" data-testid="task-suspended">
+        <summary class="taskdone__summary">Suspended <span class="section-title__count">{shelved.length}</span></summary>
+        <Group>
+          {#each shelved as h (h.path)}{@render line(h)}{/each}
+        </Group>
+      </details>
+    {/if}
     {#if finished.length}
       <details class="taskdone" data-testid="task-done">
         <summary class="taskdone__summary">Done <span class="section-title__count">{finished.length}</span></summary>
@@ -71,29 +77,4 @@
   </section>
 {/if}
 
-{#if open}
-  {@const h = open}
-  <Sheet open={true} title={h.record.title} width={720} onclose={() => fabric.open(null)}>
-    <RecordScreen
-      record={h.record}
-      name={folderName(folder)}
-      backLabel="Close"
-      now={fabric.now}
-      onback={() => fabric.open(null)}
-      onanswer={(a) => fabric.answer(h, a)}
-      onapprove={(d) => fabric.approve(h, d)}
-      onrequest={(k) => fabric.request(h, k)}
-      onreload={() => fabric.reload(h.path)}
-    >
-      {#snippet agent()}
-        {@const view = fabric.agents.get(h.path)}
-        {@const done = finishedView(h)}
-        {#if view}
-          <AgentsScreen agents={[view]} detail now={fabric.now} oncancel={(p) => fabric.cancelTask(p)} />
-        {:else if done}
-          <StageBar view={done} mode="full" now={fabric.now} />
-        {/if}
-      {/snippet}
-    </RecordScreen>
-  </Sheet>
-{/if}
+<TaskSheet {fabric} {folder} />

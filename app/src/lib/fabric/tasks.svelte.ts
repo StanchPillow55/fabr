@@ -9,20 +9,21 @@ import { COLUMNS, columnOf, folderName, folderOf, nodeFolder, type ColumnId, typ
 import { createFabricSource } from './live';
 import { parseRecord } from './parse';
 import { submitDone } from './done';
+import { submitSuspend, submitUnsuspend } from './suspend';
 import { submitRequest, type RequestKey } from './requests';
 import type { CreateFields, FabricSource } from './source';
-import { buildAgents, mostAdvanced, sortAgents, type AgentView } from './stage';
+import { buildAgents, effectiveSuspended, leadOf, sortAgents, type AgentView } from './stage';
 import { entryMap, findByTaskPath, loadRegistry } from './view';
 import { submitAnswer } from './write';
 import type { RegistryEntry } from './agents';
 
 export type Held = Entry & { text: string };
-export type FolderCounts = { byColumn: Record<ColumnId, number>; waiting: number; total: number };
+export type FolderCounts = { byColumn: Record<ColumnId, number>; waiting: number; total: number; suspended: number };
 
 const EMPTY: Held[] = [];
 
 function itemsSig(records: Held[]): string {
-  return records.map((h) => `${h.path}|${h.record.state}|${h.record.title}|${h.record.due ?? ''}|${h.record.pri}`).join('\n');
+  return records.map((h) => `${h.path}|${h.record.state}|${h.record.title}|${h.record.due ?? ''}|${h.record.pri}|${h.record.suspended}|${h.record.suspend_until ?? ''}`).join('\n');
 }
 
 export function localRoots(sources: Source[] | undefined): string[] {
@@ -40,6 +41,7 @@ export class FabricStore {
   errors = $state<string[]>([]);
   actionError = $state<string | null>(null);
   openPath = $state<string | null>(null);
+  openReadonly = $state(false);
   home = $state<string | null>(null);
   onItemsChange: (() => void) | null = null;
 
@@ -90,7 +92,7 @@ export class FabricStore {
         const settings = await api.fabricSettingsRead();
         this.#source = await createFabricSource(settings, treeRoots);
         if (isTauri()) this.home = (await (await import('@tauri-apps/api/path')).homeDir()).replace(/\/+$/, '');
-        else if (import.meta.env.VITE_MOCK === '1') this.home = '/home/mock';
+        else this.home = await api.fabricHome().then((h) => h.replace(/\/+$/, ''), () => null);
       }
     } catch (e) {
       this.errors = [(e as Error).message];
@@ -148,6 +150,21 @@ export class FabricStore {
     return nodeFolder(source, path, this.home);
   }
 
+  heldFor(folder: string | null, nodePath: string, id: string): Held | undefined {
+    const direct = this.tasksFor(folder).find((h) => h.record.id === id);
+    if (direct) return direct;
+    const same = this.records.filter((h) => h.record.id === id);
+    const rel = nodePath.replace(/^\/+|\/+$/g, '');
+    if (rel) {
+      const near = same.find((h) => {
+        const f = folderOf(h.path).replace(/\/+$/, '');
+        return f === rel || f.endsWith(`/${rel}`);
+      });
+      if (near) return near;
+    }
+    return same.length === 1 ? same[0] : undefined;
+  }
+
   tasksFor(folder: string | null): Held[] {
     return (folder && this.byFolder.get(folder)) || EMPTY;
   }
@@ -155,8 +172,9 @@ export class FabricStore {
   countsFor(folder: string | null): FolderCounts {
     const list = this.tasksFor(folder);
     const byColumn = Object.fromEntries(COLUMNS.map((c) => [c.id, 0])) as Record<ColumnId, number>;
-    for (const h of list) byColumn[columnOf(h.record.state)]++;
-    return { byColumn, waiting: list.filter((h) => h.record.waiting).length, total: list.length };
+    const shelved = list.filter((h) => effectiveSuspended(h.record, this.now));
+    for (const h of list) if (!shelved.includes(h)) byColumn[columnOf(h.record.state)]++;
+    return { byColumn, waiting: list.filter((h) => h.record.waiting && !shelved.includes(h)).length, total: list.length, suspended: shelved.length };
   }
 
   runningFor(folder: string | null): RegistryEntry | null {
@@ -172,7 +190,7 @@ export class FabricStore {
   }
 
   leadAgentFor(folder: string | null): AgentView | null {
-    return mostAdvanced(this.agentsFor(folder));
+    return leadOf(this.agentsFor(folder));
   }
 
   titleFor = (taskPath: string): string | undefined => findByTaskPath(this.records, taskPath)?.record.title;
@@ -181,8 +199,9 @@ export class FabricStore {
     return findByTaskPath(this.records, taskPath);
   }
 
-  open(path: string | null): void {
+  open(path: string | null, readonly = false): void {
     this.openPath = path;
+    this.openReadonly = path !== null && readonly;
     this.actionError = null;
   }
 
@@ -217,6 +236,37 @@ export class FabricStore {
     if (!h) throw new Error(`no loaded record for ${path}`);
     await submitDone(this.#source!, h.path, h.text);
     await this.#reread(h.path);
+    this.#itemsSig = itemsSig(this.records);
+    this.onItemsChange?.();
+  }
+
+  async #fresh(path: string): Promise<string> {
+    if (!this.records.some((x) => x.path === path)) throw new Error(`no loaded record for ${path}`);
+    return this.#source!.readRecord(path);
+  }
+
+  async pause(path: string): Promise<void> {
+    await submitRequest(this.#source!, path, await this.#fresh(path), 'pause');
+    await this.#reread(path);
+  }
+
+  async resume(path: string): Promise<void> {
+    await submitRequest(this.#source!, path, await this.#fresh(path), 'resume');
+    await this.#reread(path);
+  }
+
+  async suspend(path: string, until: string | null): Promise<void> {
+    await submitSuspend(this.#source!, path, await this.#fresh(path), until);
+    await this.#shelved(path);
+  }
+
+  async unsuspend(path: string): Promise<void> {
+    await submitUnsuspend(this.#source!, path, await this.#fresh(path));
+    await this.#shelved(path);
+  }
+
+  async #shelved(path: string): Promise<void> {
+    await this.#reread(path);
     this.#itemsSig = itemsSig(this.records);
     this.onItemsChange?.();
   }

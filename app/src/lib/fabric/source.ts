@@ -32,6 +32,7 @@ export function updatedAtOf(text: string): string {
 export function guardState(before: string, after: string, now: Date = new Date()): string {
   const a = parseRecord(before);
   const b = parseRecord(after);
+  if (a.paused !== b.paused) throw new Error('400: paused is owned by the pipeline');
   if (a.state === b.state) return after;
   if (a.state !== 'reminder' || b.state !== 'succeeded') throw new Error(`state may not change from ${a.state} to ${b.state}`);
   const log = [b.sections.log, `- ${isoNow(now)} done: marked done by hand`].filter(Boolean).join('\n');
@@ -48,8 +49,8 @@ export function taskSlug(title: string): string {
 export function newRecord(id: string, f: CreateFields, now: Date = new Date()): TaskRecord {
   const at = isoNow(now);
   return {
-    schema: SCHEMA, id, source: null, title: f.title.trim(), due: f.due || null, pri: f.pri ?? 0, state: 'reminder', step: null, waiting: false,
-    created_at: at, updated_at: at, requests: { delegate: false, cancel: false, redelegate: false },
+    schema: SCHEMA, id, source: null, title: f.title.trim(), due: f.due || null, pri: f.pri ?? 0, state: 'reminder', step: null, waiting: false, paused: false, suspended: false, suspend_until: null,
+    created_at: at, updated_at: at, requests: { delegate: false, cancel: false, redelegate: false, pause: false, resume: false },
     question: null, answers: [], grants: { requested: [], granted: [] }, plan_meta: null, assertions: [],
     approval: null, verdict: null, cost_usd: 0, links: { redelegated_from: null, redelegated_to: null },
     sections: { context: (f.context ?? '').trim(), spec: (f.spec ?? '').trim(), success: (f.success ?? '').trim(), plan: '', log: '', logEntries: [] },
