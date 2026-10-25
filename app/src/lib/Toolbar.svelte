@@ -8,12 +8,13 @@
   import Icon from './ui/Icon.svelte';
   import Segmented from './ui/Segmented.svelte';
 
-  let { store, onrescan, onexpand, oncollapse, onsearchenter }: {
+  let { store, onrescan, onexpand, oncollapse, onsearchenter, onfabric }: {
     store: Store;
     onrescan: () => void;
     onexpand: () => void;
     oncollapse: () => void;
     onsearchenter: () => void;
+    onfabric?: () => void;
   } = $props();
 
   let search = $state<HTMLInputElement>();
@@ -131,6 +132,7 @@
       />
       <kbd class="search__kbd" aria-hidden="true">/</kbd>
     </label>
+    {#if onfabric}<Button variant="tint" title="Tasks (g)" onclick={onfabric}>Tasks</Button>{/if}
     <Button variant="icon" title="Rescan (r)" aria-label="Rescan" onclick={onrescan}><Icon name="refresh" size={15} /></Button>
     <Button variant="icon" title="Settings" aria-label="Settings" onclick={() => (store.sheetOpen = true)}><Icon name="gear" size={17} /></Button>
   </div>

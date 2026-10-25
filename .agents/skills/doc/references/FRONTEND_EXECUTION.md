@@ -14,6 +14,7 @@ depend only on the steps above them. Everything is built against the fixtures fr
 5. Checkpoints with dev 2
 6. How we split the work
 7. Open with the owner
+8. Milestone M1: the shippable shell
 
 ## 1. Now: F0
 
@@ -39,6 +40,14 @@ Two gaps in spec version 1 came out of writing the fixtures and are proposed for
 - The approval row in section 9 says the Telegram Approve button writes `approval.*` but not what
   it writes to `grants.granted`. Proposed: every requested field at scope `task`; anything else
   goes through "Open in GUI".
+- Writes replace the whole record file by a temp file and rename. A reader should reopen the file
+  on each read rather than hold a handle, and should expect the mtime to jump.
+- The GUI shows a stale-write conflict and offers a reload instead of retrying once silently, so a
+  user's answer is never re-applied onto a record that changed under them.
+- A backend-presence signal: a heartbeat file at `~/.fabric-space/registry/_backend.yaml` with
+  `heartbeat_at`, so the GUI can show connected or not connected.
+- The events log is space-separated, so a task path with a space mis-parses. Proposed: fields
+  separated by a tab, or a rule that task paths contain no spaces.
 
 ## 2. F1, agentic execution
 
@@ -71,6 +80,10 @@ Build order and definition of done.
 
 F1 is done when the eight points above pass against the fixtures, and again against the first
 record that dev 2's orchestrator writes for real.
+
+Status 2026-10-25: all eight points verified against the fixtures and in serve mode, plus a
+fix-up for real-path folder grouping, wording and the notices read position. The check against
+dev 2's first real record is still open.
 
 ## 3. F2, setup
 
@@ -115,9 +128,33 @@ fixtures and the spec. Any change to a shared file goes through the spec first, 
 version number, never through a quick edit on one side.
 
 ## 7. Open with the owner
+8. Milestone M1: the shippable shell
 
 - Spec version 1.1 with the two gaps above, to agree with dev 2.
 
-- The stack and the visual direction. Both are outside this folder until the owner decides.
+- The visual direction. The stack was decided on 2026-10-24: the existing app, isolated module.
 - The demo task for fixture 4 and the exit test.
 - Whether F3 ships before or after dev 2's first end-to-end run.
+
+## 8. Milestone M1: the shippable shell
+
+The owner's first stopping point, named on 2026-10-24: the UI is wired, the API key and Telegram
+setup work for real, and no agent backend is integrated. The build ships with placeholders where
+the backend would be, so the setup can be tested end to end on a fresh machine.
+
+M1 is reached when all three blocks below are verified.
+
+| Block | What has to be true |
+|---|---|
+| F1 complete | every F1 step verified, V10 passed: screens, writes, live watching |
+| F2 with real checks | the six setup screens; the five checks from the spec's section 8 implemented in our own Rust core as the placeholder for dev 2's command, same subcommands and JSON shapes, so swapping in theirs later changes nothing in the screens |
+| Ship | a backend-presence placeholder so the GUI says "agent backend not connected" rather than showing flags that never clear; a desktop build that opens on setup on a fresh machine |
+
+What a user can do at M1: install, enter a real API key, pick a model, create and link a bot, see
+the fixture records on the board and tree, answer a question, approve a plan, and watch the
+request flags stay queued because nothing picks them up. F3 is not part of M1.
+
+Decisions M1 needed, both approved by the owner on 2026-10-24: one HTTP client crate for the Rust core, because the real
+checks call Anthropic and Telegram; and a backend-presence signal for spec version 1.1, proposed
+as a heartbeat file at `~/.fabric-space/registry/_backend.yaml`. Until dev 2 agrees, the
+placeholder treats a request flag uncleared for a minute as "no backend".

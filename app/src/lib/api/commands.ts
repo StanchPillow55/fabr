@@ -1,6 +1,7 @@
 import type {
   Tree, Stamp, Node, NodeRef, RemoveNodeReq, SaveTodoReq, SaveMetaReq, Source, TestResult, Settings, ListDirsReq, DirEntry,
-  InitChildrenReq, HostKey, TrustResult, PasswordState, InstallKeyReq, InstallKeyResult,
+  InitChildrenReq, FabricListReq, FabricListRes, FabricReadRes, FabricWriteReq, FabricWriteRes, FabricStampReq, HostKey, TrustResult, PasswordState, InstallKeyReq, InstallKeyResult,
+  FabricSettings, FabricSettingsRead, FabricSecretsWriteReq, FabricSecretsStatus, FabricCheckReq, FabricCheckResult,
 } from './types';
 
 export interface Command<A extends unknown[], R> {
@@ -33,6 +34,16 @@ export const COMMANDS = {
   trustHost: op<[host: string, lines: string[]], TrustResult>({ req: (host, lines) => ({ host, lines }) }),
   setSourcePassword: op<[source: string, password: string], PasswordState>({ req: (source, password) => ({ source, password }) }),
   hasSourcePassword: op<[source: string], PasswordState>({ req: (source) => ({ source }) }),
+  fabricList: op<[req: FabricListReq], FabricListRes>({ req: self }),
+  fabricRead: op<[path: string], FabricReadRes>({ req: (path) => ({ path }) }),
+  fabricWrite: op<[req: FabricWriteReq], FabricWriteRes>({ req: self }),
+  fabricStamp: op<[req: FabricStampReq], Stamp>({ req: self }),
+  fabricSettingsRead: op<[], FabricSettingsRead>({}),
+  fabricSettingsWrite: op<[settings: FabricSettings], FabricSettingsRead>({ req: (settings) => ({ settings }) }),
+  fabricSecretsWrite: op<[req: FabricSecretsWriteReq], FabricSecretsStatus>({ req: self }),
+  fabricSecretsStatus: op<[], FabricSecretsStatus>({}),
+  fabricCheck: op<[req: FabricCheckReq], FabricCheckResult>({ req: self }),
+  fabricTelegramLink: op<[timeout_s?: number], FabricCheckResult>({ req: (timeout_s) => ({ timeout_s }) }),
   installKey: op<[req: InstallKeyReq], InstallKeyResult>({ req: self }),
 };
 

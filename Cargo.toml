@@ -26,6 +26,7 @@ sha2 = "=0.10.9"
 base64 = "=0.22.1"
 clap = { version = "=4.6.7", features = ["derive"] }
 tiny_http = "=0.12.0"
+ureq = { version = "=2.12.1", default-features = false, features = ["tls", "json"] }
 include_dir = "=0.7.4"
 tauri = "=2.12.4"
 tauri-build = "=2.7.3"

@@ -1,7 +1,8 @@
 import type { Api } from '../lib/api/index';
 import {
-  ApiError, type Item, type Meta, type Node, type NodeRef, type Settings, type Source, type TestResult, type Tree, type DirEntry,
+  ApiError, type Item, type Meta, type Node, type NodeRef, type Settings, type Source, type TestResult, type Tree, type DirEntry, type FabricSettings, type FabricSecretsStatus,
 } from '../lib/api/types';
+import { FixtureSource } from '../lib/fabric/source';
 import { buildSample, isoDay, LAB, SAMPLE } from './sample';
 
 interface MockOpts {
@@ -21,6 +22,14 @@ export function createMockApi(opts: MockOpts = {}): Api {
     ...(multi ? [{ id: 'lab', name: 'Lab server', host: 'lab.local', root: '/srv/fabr', prune: null }] : []),
   ];
   let settings: Settings = { poll_ms: 2000, remote_poll_ms: 30000, search_depth: 6, full_rescan_ms: 30000, max_nodes: 10000, log_path: '/tmp/fabr/fabr.log' };
+  let fabSettings: FabricSettings = {
+    default_folder: '~/', model: 'claude-sonnet-5-5', telegram_user_id: null, auto_mode: false,
+    question_budget: 5, heartbeat_interval_s: 10, setup: { completed_steps: [], completed: false },
+  };
+  let fabSettingsExist = false;
+  const fabSecrets: FabricSecretsStatus = { anthropic_api_key: false, telegram_bot_token: false };
+  const fabric = new FixtureSource();
+  const FAB_EVENTS = '/fixtures/home/.fabric-space/events.log';
   let rev = 1;
   const specs: Record<string, typeof SAMPLE> = { local: SAMPLE, lab: LAB };
   const PLAIN_DIRS = ['docs', 'notes', 'projects', 'node_modules'];
@@ -195,6 +204,36 @@ export function createMockApi(opts: MockOpts = {}): Api {
       return { stored: !!password };
     },
     async hasSourcePassword(source) { await wait(); return { stored: passwords.has(source) }; },
+    async fabricList() {
+      const f = (r: { path: string }) => ({ path: r.path, mtime: 0 });
+      return { records: (await fabric.listRecords()).map(f), registry: (await fabric.listRegistry()).map(f), events: { path: FAB_EVENTS, mtime: 0 } };
+    },
+    async fabricRead(path) {
+      if (path === FAB_EVENTS) return { text: (await fabric.readEvents()).join('\n'), mtime: 0 };
+      const reg = (await fabric.listRegistry()).find((r) => r.path === path);
+      return { text: reg ? reg.text : await fabric.readRecord(path), mtime: 0 };
+    },
+    async fabricWrite(req) {
+      try { await fabric.writeRecord(req.path, req.text, req.expected_updated_at); } catch (e) { throw new ApiError(409, (e as Error).message); }
+      return { mtime: 0 };
+    },
+    async fabricStamp() { return { stamp: await fabric.stamp() }; },
+    async fabricSettingsRead() { await wait(); return { exists: fabSettingsExist, settings: clone(fabSettings) }; },
+    async fabricSettingsWrite(s) { await wait(); fabSettings = clone(s); fabSettingsExist = true; return { exists: true, settings: clone(fabSettings) }; },
+    async fabricSecretsWrite(req) {
+      await wait();
+      if (req.anthropic_api_key) fabSecrets.anthropic_api_key = true;
+      if (req.telegram_bot_token) fabSecrets.telegram_bot_token = true;
+      return { ...fabSecrets };
+    },
+    async fabricSecretsStatus() { await wait(); return { ...fabSecrets }; },
+    async fabricCheck(req) {
+      await wait();
+      if (req.kind === 'model') return { ok: true, reply: 'Hello from the mock.' };
+      if (req.kind === 'telegram_token') return { ok: true, bot_name: 'fabr_mock_bot' };
+      return { ok: true };
+    },
+    async fabricTelegramLink() { await wait(); return { ok: true, user_id: 123456789 }; },
     async installKey(req) {
       await wait();
       const host = req.host ?? sources.find((s) => s.id === req.source)?.host ?? '';

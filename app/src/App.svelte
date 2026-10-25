@@ -9,6 +9,7 @@
   import Panel from './lib/panel/Panel.svelte';
   import SettingsSheet from './lib/settings/SettingsSheet.svelte';
   import { Store } from './lib/store.svelte';
+  import FabricView from './lib/fabric/FabricView.svelte';
   import Toolbar from './lib/Toolbar.svelte';
   import Shortcuts from './lib/ui/Shortcuts.svelte';
   import { keyAction } from './lib/viewstate';
@@ -19,6 +20,7 @@
   let toolbar = $state<Toolbar>();
   let toolbarH = $state(0);
   let helpOpen = $state(false);
+  let fabricOpen = $state(false);
 
   onMount(() => {
     let s: Store | null = null;
@@ -66,6 +68,7 @@
       case 'rescan': rescan(); break;
       case 'fit': fit(); break;
       case 'search': e.preventDefault(); toolbar?.focusSearch(); break;
+      case 'fabric': fabricOpen = !fabricOpen; break;
       case 'help': e.preventDefault(); helpOpen = true; break;
       case 'escape': if (store.panel) store.closePanel(); break;
     }
@@ -78,10 +81,12 @@
   <div class="app" class:app--panel={!!store.panel}>
     <main class="app__main">
       <div class="app__bar" bind:clientHeight={toolbarH}>
-        <Toolbar bind:this={toolbar} {store} onrescan={rescan} onexpand={expandAll} oncollapse={collapseAll} onsearchenter={() => treeView?.nextMatch()} />
+        <Toolbar bind:this={toolbar} {store} onrescan={rescan} onexpand={expandAll} oncollapse={collapseAll} onsearchenter={() => treeView?.nextMatch()} onfabric={() => (fabricOpen = true)} />
       </div>
       <Notice {store} insetTop={toolbarH} />
-      {#if needsOnboarding(store.tree)}
+      {#if fabricOpen}
+        <FabricView onclose={() => (fabricOpen = false)} />
+      {:else if needsOnboarding(store.tree)}
         <Onboarding {store} />
       {:else if store.view === 'tree'}
         <TreeView bind:this={treeView} {store} insetTop={toolbarH} />
