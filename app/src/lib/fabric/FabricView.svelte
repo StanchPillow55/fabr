@@ -17,6 +17,7 @@
   import { parseRecord } from './parse';
   import RecordScreen from './RecordScreen.svelte';
   import { BACKEND_LABEL, backendState } from './backend';
+  import { createApi } from '../api/index';
   import { createFabricSource } from './live';
   import type { FabricSource } from './source';
   import TreeScreen from './TreeScreen.svelte';
@@ -114,7 +115,7 @@
         if (st !== last) { last = st; await load(); }
       } catch (e) { errors = [(e as Error).message]; }
     };
-    createFabricSource().then(
+    createApi().then((api) => api.fabricSettingsRead()).then((st) => createFabricSource(st)).then(
       (src) => {
         if (dead) return;
         source = src;

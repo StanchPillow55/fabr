@@ -9,6 +9,8 @@
   import Panel from './lib/panel/Panel.svelte';
   import SettingsSheet from './lib/settings/SettingsSheet.svelte';
   import { Store } from './lib/store.svelte';
+  import SetupWizard from './lib/setup/SetupWizard.svelte';
+  import { shouldShowSetup } from './lib/setup/gate';
   import FabricView from './lib/fabric/FabricView.svelte';
   import Toolbar from './lib/Toolbar.svelte';
   import Shortcuts from './lib/ui/Shortcuts.svelte';
@@ -21,10 +23,29 @@
   let toolbarH = $state(0);
   let helpOpen = $state(false);
   let fabricOpen = $state(false);
+  let setupOpen = $state(new URLSearchParams(location.search).has('setup'));
+  let gateReady = $state(false);
+
+  let gateApi: Awaited<ReturnType<typeof createApi>> | null = null;
+
+  async function checkGate(api: Awaited<ReturnType<typeof createApi>>) {
+    gateApi = api;
+    try { if (shouldShowSetup(await api.fabricSettingsRead())) setupOpen = true; }
+    catch { /* an older backend without settings keeps the todo views */ }
+    gateReady = true;
+  }
+
+  async function setupDone() {
+    try { if (gateApi && shouldShowSetup(await gateApi.fabricSettingsRead())) return; }
+    catch { /* fall through and open the tasks view */ }
+    setupOpen = false;
+    fabricOpen = true;
+  }
 
   onMount(() => {
     let s: Store | null = null;
-    createApi().then((api) => {
+    createApi().then(async (api) => {
+      await checkGate(api);
       s = new Store(api);
       store = s;
       s.start();
@@ -77,7 +98,9 @@
 
 <svelte:window {onkeydown} />
 
-{#if store}
+{#if gateReady && setupOpen}
+  <SetupWizard ondone={setupDone} />
+{:else if store}
   <div class="app" class:app--panel={!!store.panel}>
     <main class="app__main">
       <div class="app__bar" bind:clientHeight={toolbarH}>

@@ -200,12 +200,25 @@ pub fn bind(port: u16) -> std::io::Result<(Arc<Server>, u16)> {
     Ok((Arc::new(server), port))
 }
 
+pub fn is_long_op(url: &str) -> bool {
+    let path = url.split('?').next().unwrap_or("");
+    matches!(path, "/api/fabric_check" | "/api/fabric_telegram_link")
+}
+
 pub fn spawn_workers(server: Arc<Server>, ws: Arc<Workspace>, ui: Arc<Ui>, threads: usize) -> Vec<std::thread::JoinHandle<()>> {
     (0..threads)
         .map(|_| {
             let (server, ws, ui) = (server.clone(), ws.clone(), ui.clone());
             std::thread::spawn(move || {
                 for mut req in server.incoming_requests() {
+                    if is_long_op(req.url()) {
+                        let (ws, ui) = (ws.clone(), ui.clone());
+                        std::thread::spawn(move || {
+                            let resp = route(&ws, &ui, &mut req);
+                            let _ = req.respond(resp);
+                        });
+                        continue;
+                    }
                     let resp = route(&ws, &ui, &mut req);
                     let _ = req.respond(resp);
                 }
@@ -221,4 +234,17 @@ pub fn open_browser(url: &str) {
 
 pub fn ui_dir_ok(p: &Path) -> bool {
     p.join("index.html").is_file()
+}
+
+#[cfg(test)]
+mod long_op_tests {
+    use super::is_long_op;
+
+    #[test]
+    fn only_network_ops_get_their_own_thread() {
+        assert!(is_long_op("/api/fabric_check"));
+        assert!(is_long_op("/api/fabric_telegram_link?x=1"));
+        assert!(!is_long_op("/api/fabric_secrets_status"));
+        assert!(!is_long_op("/"));
+    }
 }

@@ -1,5 +1,6 @@
 import { createApi } from '../api/index';
 import { isTauri } from '../api/env';
+import type { FabricSettingsRead } from '../api/types';
 import { FixtureSource, type FabricSource } from './source';
 import { TauriSource } from './tauri-source';
 
@@ -7,20 +8,23 @@ export const FOLDERS_UNKNOWN_USER = 'Task folders are not set up yet. Finish set
 
 export interface LiveLocations { roots: string[]; home: string }
 
-export function pickLocations(env: { root?: string; home?: string }, homeDir: string | null): LiveLocations {
-  const home = env.home || homeDir || '';
-  const root = env.root || homeDir || '';
+export function pickLocations(env: { root?: string; home?: string }, homeDir: string | null, settings?: FabricSettingsRead | null): LiveLocations {
+  const folder = settings?.exists ? settings.settings.default_folder.replace(/\/+$/, '') : '';
+  const root = env.root || folder;
+  const home = env.home || homeDir || folder;
   if (!home || !root) {
-    if (import.meta.env.DEV) console.warn('fabric folders unknown: set VITE_FABRIC_ROOT and VITE_FABRIC_HOME, or run inside the desktop app');
+    if (import.meta.env.DEV) console.warn('fabric folders unknown: finish setup, or set VITE_FABRIC_ROOT and VITE_FABRIC_HOME');
     throw new Error(FOLDERS_UNKNOWN_USER);
   }
   return { roots: [root], home };
 }
 
-export async function createFabricSource(): Promise<FabricSource> {
+export async function createFabricSource(settings?: FabricSettingsRead | null): Promise<FabricSource> {
   if (!isTauri() && import.meta.env.VITE_MOCK === '1') return new FixtureSource();
   let homeDir: string | null = null;
   if (isTauri()) homeDir = (await (await import('@tauri-apps/api/path')).homeDir()).replace(/\/+$/, '');
-  const { roots, home } = pickLocations({ root: import.meta.env.VITE_FABRIC_ROOT, home: import.meta.env.VITE_FABRIC_HOME }, homeDir);
-  return new TauriSource(await createApi(), roots, home);
+  const api = await createApi();
+  const read = settings ?? (await api.fabricSettingsRead());
+  const { roots, home } = pickLocations({ root: import.meta.env.VITE_FABRIC_ROOT, home: import.meta.env.VITE_FABRIC_HOME }, homeDir, read);
+  return new TauriSource(api, roots, home);
 }

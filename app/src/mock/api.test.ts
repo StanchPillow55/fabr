@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { ApiError, type Node } from '../lib/api/types';
 import { COMMANDS } from '../lib/api/commands';
 import { createMockApi } from './api';
+import { markStep } from '../lib/setup/wizard';
 
 const count = (n: Node): number => 1 + n.children.reduce((a, c) => a + count(c), 0);
 const find = (n: Node, path: string): Node | undefined =>
@@ -43,5 +44,18 @@ describe('mock api', () => {
 
   it('implements exactly the COMMANDS operations', () => {
     expect(Object.keys(createMockApi({ latency: 0 })).sort()).toEqual(Object.keys(COMMANDS).sort());
+  });
+
+  it('completing all five setup steps flips setup.completed', async () => {
+    const api = createMockApi({ latency: 0 });
+    const first = await api.fabricSettingsRead();
+    expect([first.exists, first.settings.setup.completed]).toEqual([false, false]);
+    let cur = first.settings;
+    for (const step of ['folder', 'api_key', 'model', 'telegram_bot', 'telegram_link'] as const) {
+      cur = markStep(cur, step);
+      const r = await api.fabricSettingsWrite(cur);
+      expect(r.settings.setup.completed).toBe(step === 'telegram_link');
+    }
+    expect(await api.fabricSettingsRead()).toMatchObject({ exists: true, settings: { setup: { completed: true } } });
   });
 });

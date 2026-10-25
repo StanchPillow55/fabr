@@ -98,6 +98,10 @@ dev 2's first real record is still open.
 4. Swap the stub for dev 2's check command when it exists. Done: a real key and a real bot pass
    all five checks on a clean machine.
 
+Status 2026-10-25: items 1 to 3 verified end to end in serve mode against a fake server. Item 4
+waits for dev 2; until then our own core provides the checks. Two gate gaps (a failed settings
+read shows the todo views; a failed re-read opens tasks) are fixed in the M1 ship step.
+
 ## 4. F3, settings and privacy
 
 1. Rules and preferences editors, global and per folder. The prose file gets a textarea and the
