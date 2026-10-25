@@ -55,6 +55,7 @@ impl TarSnapshot {
                 _ => {}
             }
         }
+        let _ = std::io::copy(&mut ar.into_inner(), &mut std::io::sink());
         Ok((snap, false))
     }
 

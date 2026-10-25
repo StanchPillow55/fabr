@@ -235,7 +235,7 @@
             dim={d.node.managed && store.filter !== 'all' && !m.visible.length}
             ontoggle={() => store.toggleCollapse(k)}
             onmore={() => store.toggleMore(k)}
-            onopen={() => store.activate(k)}
+            onopen={() => (d.node.managed ? store.activate(k) : store.openNodeSettings(k))}
             onfocus={() => store.setFocus(k)}
             sources={store.tree?.sources ?? []}
             errors={store.tree?.errors ?? []}
