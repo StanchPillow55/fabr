@@ -49,7 +49,7 @@ pub fn list_tools(key: &str) -> Result<Vec<McpTool>, String> {
         "jsonrpc": "2.0",
         "id": 1,
         "method": "initialize",
-        "params": {"protocolVersion": "2024-11-05", "capabilities": {}, "clientInfo": {"name": "fabr", "version": "0.8.0"}}
+        "params": {"protocolVersion": "2024-11-05", "capabilities": {}, "clientInfo": {"name": "fabr", "version": "0.8.1"}}
     });
     let (_, init_body) = post(key, &init)?;
     let _ = init_body;
