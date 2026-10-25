@@ -1,10 +1,19 @@
 # The owner's input
 
 This is what the owner said in the founding conversation on 2026-10-24, in order. The wording
-is cleaned up and nothing is added or dropped. When a later document and this one disagree,
-this one states the intent and the other states the decision; raise the difference with the
-owner. The owner is the user of the product. "The user" below means the person who owns the
+is cleaned up and nothing is added or dropped. This file states the intent. A later document
+states the decision. When the two disagree, raise the difference with the owner. The owner is the user of the product. "The user" below means the person who owns the
 machine and the folders.
+
+## Contents
+
+1. The idea
+2. The learning layer and the monitoring view
+3. Lifecycle, focus, and the diagram
+4. The name
+5. Feature waves
+6. Initial setup
+7. Where this lives
 
 ## 1. The idea
 
@@ -21,10 +30,10 @@ worry about that part. A project that runs in parallel owns that infrastructure.
 Then the user either does the tasks themselves, or presses a button: delegate to AI. That is
 where the magic happens. AI iteration one defines the task specifically enough that there is
 enough knowledge to do it. That means massaging the existing information and asking the user
-when something is still missing. The agentic task definition has to be a deterministic flow:
-define the task, collect missing information, get the plan in place, get the user's approval
-(or run in auto mode), launch the execution agent, then run an evaluation agent that makes
-sure the result is up to the spec. Then we notify the user of success.
+when something is still missing. The agentic task definition has to be a deterministic flow.
+Define the task. Collect missing information. Get the plan in place. Get the user's approval,
+or run in auto mode. Launch the execution agent. Then run an evaluation agent that makes sure
+the result is up to the spec. Then we notify the user of success.
 
 On the agentic side, see code/maxdokukin/dot_agents. Each per-directory `.fabr-space/.agents`
 behaves as a directory-level agent knowledge point. There is also a `~/.fabr-space` at the
@@ -79,9 +88,9 @@ in progress, then task succeeded or failed. On the other point I think you are o
 for now.
 
 Build me an interactive architecture diagram to build the big picture, rendered in the
-browser, HTML perhaps. Focus: we are designing the architecture with all of these in mind, but
-realistically there are multiple features that come later and are currently just placeholders
-that shape the foundation. Our goal is to shape and pour the foundation concrete.
+browser, HTML perhaps. Focus: we are designing the architecture with all of these in mind.
+Realistically, multiple features come later and are currently just placeholders that shape
+the foundation. Our goal is to shape and pour the foundation concrete.
 
 ## 4. The name
 
@@ -97,14 +106,14 @@ it yet?
 ## 6. Initial setup
 
 Define the initial setup too. For now it is the default folder, the Anthropic API key and
-model (only Sonnet and Haiku are available), and the Telegram connection, which is step by
-step: it tells you one step at a time. Note it in wave 1 as onboarding.
+model, and the Telegram connection. Only Sonnet and Haiku are available as models. The
+Telegram connection is step by step: it tells you one step at a time. Note it in wave 1 as onboarding.
 
 ## 7. Where this lives
 
 Store all these formal decisions and plans locally in code/maxdokukin/fabr/.agents, through
 the xewe_doc skill. Keep all the details that are in the cloud artifact, because it is an
-excellent encapsulation of what we are building, but fetch it locally from the Claude cloud.
+excellent encapsulation of what we are building. Fetch it locally from the Claude cloud.
 Carry very detailed docs overall as well as plans for each wave. Reformat all the input I gave
 as the user input. This is the golden conversation that steers the product. Make it count.
 
