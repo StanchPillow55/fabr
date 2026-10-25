@@ -1,6 +1,6 @@
 <script lang="ts">
   import { untrack } from 'svelte';
-  import { AddFlow } from './addtask.svelte';
+  import { AddFlow } from './addflow.svelte';
   import NewTaskSheet from './NewTaskSheet.svelte';
   import type { FabricStore } from './tasks.svelte';
 

@@ -6,7 +6,7 @@ import { boxModel } from '../model';
 import NodeCard from '../tree/NodeCard.svelte';
 import Panel from '../panel/Panel.svelte';
 import { Store } from '../store.svelte';
-import { AddFlow } from './addtask.svelte';
+import { AddFlow } from './addflow.svelte';
 import { applyDone, canMarkDone, submitDone } from './done';
 import { parseRecord } from './parse';
 import { FixtureSource, guardState } from './source';
