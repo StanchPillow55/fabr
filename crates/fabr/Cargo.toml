@@ -15,6 +15,7 @@ path = "src/main.rs"
 
 [dependencies]
 fabr-core.workspace = true
+fabr-agent.workspace = true
 clap.workspace = true
 tiny_http.workspace = true
 include_dir.workspace = true

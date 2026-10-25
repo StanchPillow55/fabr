@@ -73,6 +73,15 @@ enum Cmd {
         #[command(subcommand)]
         what: TelegramCmd,
     },
+    #[command(about = "Run the agent backend against the default folder until Ctrl-C")]
+    Agent {
+        #[arg(long, default_value_t = 5, value_parser = clap::value_parser!(u64).range(1..))]
+        interval: u64,
+        #[arg(long, help = "Run one tick and exit")]
+        once: bool,
+        #[arg(long, help = "Also print the log to stderr")]
+        verbose: bool,
+    },
     #[command(about = "List items")]
     Ls {
         #[arg(long, conflicts_with_all = ["overdue", "wip"])]
@@ -116,6 +125,27 @@ fn run_check(what: CheckCmd) -> ExitCode {
         CheckCmd::Model { id } => setup::check_model(&ctx, &id),
         CheckCmd::TelegramToken => setup::check_telegram_token(&ctx),
     })
+}
+
+fn run_agent(interval_s: u64, once: bool, verbose: bool) -> ExitCode {
+    use fabr_agent::runner::{Options, Runner, Sink, install_signals, start_gate};
+    let ctx = fabr_core::setup::Ctx::from_env();
+    match fabr_core::logging::init_default(once || verbose) {
+        Ok(p) => log::info!("fabr {} (agent) log {}", env!("CARGO_PKG_VERSION"), p.display()),
+        Err(e) => eprintln!("fabr: logging disabled: {}", e.message()),
+    }
+    let started = start_gate(&ctx)
+        .and_then(|gate| AppDirs::resolve().workspace(Some(gate.default_folder)))
+        .and_then(|ws| Runner::new(&ctx, ws, Options { interval_s, once }, Sink::default()));
+    match started.and_then(|mut runner| runner.run(install_signals())) {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(e) => {
+            let msg = fabr_core::redact::redact(&e.message());
+            log::error!("{msg}");
+            eprintln!("fabr: {msg}");
+            ExitCode::FAILURE
+        }
+    }
 }
 
 fn workspace(root: Option<PathBuf>) -> Result<Workspace, FabrError> {
@@ -312,6 +342,7 @@ fn main() -> ExitCode {
     let cli = Cli::parse();
     match cli.cmd {
         Cmd::Check { what } => return run_check(what),
+        Cmd::Agent { interval, once, verbose } => return run_agent(interval, once, verbose),
         Cmd::Telegram { what: TelegramCmd::Link { timeout } } => {
             return print_check(fabr_core::setup::telegram_link(&fabr_core::setup::Ctx::from_env(), timeout));
         }
@@ -332,7 +363,7 @@ fn main() -> ExitCode {
         Cmd::Remove { path, yes } => cmd_remove(path, yes),
         Cmd::Add { path, title, due, pri, status } => cmd_add(path, title, due, pri, status),
         Cmd::Ls { all, overdue, wip, path } => cmd_ls(path, all, overdue, wip),
-        Cmd::Check { .. } | Cmd::Telegram { .. } => unreachable!(),
+        Cmd::Check { .. } | Cmd::Telegram { .. } | Cmd::Agent { .. } => unreachable!(),
     };
     match r {
         Ok(()) => ExitCode::SUCCESS,

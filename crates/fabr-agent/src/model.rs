@@ -100,22 +100,49 @@ impl Model for ScriptedModel {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq)]
+pub struct ModelCall {
+    pub step: &'static str,
+    pub model: String,
+    pub input_tokens: Option<u64>,
+    pub output_tokens: Option<u64>,
+}
+
+pub type CallObserver = std::sync::Arc<dyn Fn(&ModelCall) + Send + Sync>;
+
 pub struct AnthropicModel {
     api_key: Secret,
     model: String,
+    base_url: String,
+    observer: Option<CallObserver>,
+}
+
+impl std::fmt::Debug for AnthropicModel {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AnthropicModel").field("model", &self.model).finish_non_exhaustive()
+    }
 }
 
 impl AnthropicModel {
     pub fn new(api_key: Secret, model: impl Into<String>) -> Self {
-        Self { api_key, model: model.into() }
+        Self { api_key, model: model.into(), base_url: "https://api.anthropic.com".into(), observer: None }
     }
 
-    fn post(&self, body: serde_json::Value) -> Result<serde_json::Value, FabrError> {
+    pub fn with_base_url(mut self, url: &str) -> Self {
+        self.base_url = url.trim_end_matches('/').to_string();
+        self
+    }
+
+    pub fn with_observer(mut self, observer: CallObserver) -> Self {
+        self.observer = Some(observer);
+        self
+    }
+
+    fn post(&self, step: &'static str, body: serde_json::Value) -> Result<serde_json::Value, FabrError> {
         let sent = ureq::AgentBuilder::new()
             .timeout(std::time::Duration::from_secs(60))
             .build()
-            .post("https://api.anthropic.com/v1/messages")
+            .post(&format!("{}/v1/messages", self.base_url))
             .set("x-api-key", self.api_key.expose())
             .set("anthropic-version", "2023-06-01")
             .set("content-type", "application/json")
@@ -129,7 +156,17 @@ impl AnthropicModel {
             Err(e) => return Err(FabrError::Remote(e.to_string())),
         };
         let text = resp.into_string().map_err(|e| FabrError::Remote(e.to_string()))?;
-        serde_json::from_str(&text).map_err(|e| FabrError::Remote(format!("anthropic response: {e}")))
+        let value: serde_json::Value = serde_json::from_str(&text).map_err(|e| FabrError::Remote(format!("anthropic response: {e}")))?;
+        if let Some(observer) = &self.observer {
+            let usage = |k: &str| value.get("usage").and_then(|u| u.get(k)).and_then(|n| n.as_u64());
+            observer(&ModelCall {
+                step,
+                model: self.model.clone(),
+                input_tokens: usage("input_tokens"),
+                output_tokens: usage("output_tokens"),
+            });
+        }
+        Ok(value)
     }
 }
 
@@ -148,7 +185,7 @@ impl Model for AnthropicModel {
             "system": "Reply with only a JSON object. No markdown.",
             "messages": [{"role": "user", "content": prompt}]
         });
-        let value = self.post(body)?;
+        let value = self.post("define", body)?;
         let text = text_of(&value)?;
         parse_define(&text)
     }
@@ -170,7 +207,7 @@ impl Model for AnthropicModel {
             "system": "Reply with only a JSON object. No markdown.",
             "messages": [{"role": "user", "content": prompt}]
         });
-        let value = self.post(body)?;
+        let value = self.post("plan", body)?;
         let text = text_of(&value)?;
         parse_plan(&text)
     }
@@ -183,7 +220,7 @@ impl Model for AnthropicModel {
             "tools": [tool_schema("read_file", "Read a file inside the node", false), tool_schema("write_file", "Write a file inside the node", true), tool_schema("list_dir", "List a directory inside the node", false)],
             "messages": [{"role": "user", "content": prompt}]
         });
-        let value = self.post(body)?;
+        let value = self.post("execute", body)?;
         tool_calls_of(&value)
     }
 }

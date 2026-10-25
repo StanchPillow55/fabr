@@ -2,13 +2,14 @@ pub mod lifecycle;
 pub mod link;
 pub mod model;
 pub mod run;
+pub mod runner;
 pub mod settings;
 pub mod tools;
 pub mod verify;
 
 pub use lifecycle::{approval_allows_execute, registry_path, task_path_key};
 pub use link::delegate;
-pub use model::{AnthropicModel, DefineDraft, Model, PlanDraft, ScriptedModel, ToolCall};
+pub use model::{AnthropicModel, CallObserver, DefineDraft, Model, ModelCall, PlanDraft, ScriptedModel, ToolCall};
 pub use run::run_once;
 pub use settings::{AgentSettings, load_agent_settings};
 pub use verify::spawn_allowed;

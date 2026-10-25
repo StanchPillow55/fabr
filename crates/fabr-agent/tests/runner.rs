@@ -1,0 +1,393 @@
+use fabr_agent::runner::{Options, Runner, Sink};
+use fabr_agent::task_path_key;
+use fabr_core::Workspace;
+use fabr_core::fabric::{self, FabricCreateReq};
+use fabr_core::setup::Ctx;
+use fabr_core::taskrec::{self, Answer, State, Step, TaskRecord};
+use serde_json::json;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
+
+const KEY: &str = "sk-ant-api03-FAKEFAKEFAKEFAKEFAKE-x9Qa";
+
+struct Fake {
+    url: String,
+    bodies: Arc<Mutex<Vec<String>>>,
+    questions: Arc<AtomicUsize>,
+    status: Arc<AtomicUsize>,
+    stop: Arc<AtomicBool>,
+    handle: Option<std::thread::JoinHandle<()>>,
+}
+
+impl Fake {
+    fn new(questions: usize) -> Fake {
+        let server = tiny_http::Server::http("127.0.0.1:0").unwrap();
+        let url = format!("http://{}", server.server_addr().to_ip().unwrap());
+        let bodies = Arc::new(Mutex::new(Vec::new()));
+        let questions = Arc::new(AtomicUsize::new(questions));
+        let status = Arc::new(AtomicUsize::new(200));
+        let stop = Arc::new(AtomicBool::new(false));
+        let (b, q, s, st) = (bodies.clone(), questions.clone(), status.clone(), stop.clone());
+        let handle = std::thread::spawn(move || {
+            while !st.load(Ordering::SeqCst) {
+                let Ok(Some(mut req)) = server.recv_timeout(std::time::Duration::from_millis(50)) else { continue };
+                let mut body = String::new();
+                std::io::Read::read_to_string(req.as_reader(), &mut body).unwrap();
+                b.lock().unwrap().push(body.clone());
+                let code = s.load(Ordering::SeqCst) as u16;
+                let text = if code != 200 {
+                    format!("bad key {KEY} in x-api-key: {KEY}")
+                } else if body.contains("keys spec, success, assertions, question") {
+                    let asked = q.load(Ordering::SeqCst) > 0;
+                    if asked {
+                        q.fetch_sub(1, Ordering::SeqCst);
+                    }
+                    let question = if asked { json!("Which filename?") } else { json!(null) };
+                    let inner = json!({"spec": "write greet.txt", "success": "greet.txt exists", "assertions": [{"id": "a1", "text": "greet.txt exists"}], "question": question});
+                    json!({"content": [{"type": "text", "text": inner.to_string()}], "usage": {"input_tokens": 120, "output_tokens": 45}})
+                        .to_string()
+                } else {
+                    let inner = json!({"spec": "write greet.txt", "success": "greet.txt exists", "plan": "1. write it", "assertions": [{"id": "a1", "text": "greet.txt exists"}],
+                        "plan_meta": {"reversibility": "reversible", "tools": ["write_file"], "checks": [{"cmd": "test", "args": ["-f", "greet.txt"]}]}});
+                    json!({"content": [{"type": "text", "text": inner.to_string()}], "usage": {"input_tokens": 300, "output_tokens": 80}})
+                        .to_string()
+                };
+                let resp = tiny_http::Response::from_string(text)
+                    .with_status_code(code)
+                    .with_header(tiny_http::Header::from_bytes("content-type", "application/json").unwrap());
+                let _ = req.respond(resp);
+            }
+        });
+        Fake { url, bodies, questions, status, stop, handle: Some(handle) }
+    }
+
+    fn calls(&self) -> usize {
+        self.bodies.lock().unwrap().len()
+    }
+}
+
+impl Drop for Fake {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::SeqCst);
+        if let Some(h) = self.handle.take() {
+            let _ = h.join();
+        }
+    }
+}
+
+struct Env {
+    tmp: tempfile::TempDir,
+    ctx: Ctx,
+    proj: PathBuf,
+}
+
+fn env(url: &str, completed: bool, key: Option<&str>, model: &str) -> Env {
+    let tmp = tempfile::tempdir().unwrap();
+    let home = tmp.path().join("home");
+    let proj = home.join("proj");
+    std::fs::create_dir_all(&proj).unwrap();
+    let space = home.join(".fabric-space");
+    std::fs::create_dir_all(&space).unwrap();
+    std::fs::write(
+        space.join("settings.toml"),
+        format!(
+            "default_folder = \"{}\"\nmodel = \"{model}\"\nheartbeat_interval_s = 10\n\n[setup]\ncompleted_steps = [\"folder\", \"api_key\", \"model\"]\ncompleted = {completed}\n",
+            proj.display()
+        ),
+    )
+    .unwrap();
+    std::fs::write(space.join("secrets.toml"), key.map(|k| format!("anthropic_api_key = \"{k}\"\n")).unwrap_or_default()).unwrap();
+    let mut ctx = Ctx::new(&home);
+    ctx.anthropic_url = url.to_string();
+    Env { tmp, ctx, proj }
+}
+
+fn runner(e: &Env) -> (Runner, Arc<Mutex<Vec<String>>>) {
+    let cfg = e.tmp.path().join("cfg");
+    let cache = e.tmp.path().join("cache");
+    std::fs::create_dir_all(&cfg).unwrap();
+    std::fs::create_dir_all(&cache).unwrap();
+    let ws = Workspace::from_config(&cfg, &cache, Some(e.proj.clone())).unwrap();
+    let (sink, lines) = Sink::capture();
+    (Runner::new(&e.ctx, ws, Options { interval_s: 5, once: false }, sink).unwrap(), lines)
+}
+
+fn ready(fake: &Fake) -> Env {
+    env(&fake.url, true, Some(KEY), "claude-sonnet-5-5")
+}
+
+fn new_record(e: &Env, title: &str) -> PathBuf {
+    let req = FabricCreateReq {
+        folder: e.proj.to_string_lossy().into_owned(),
+        title: title.into(),
+        due: Some("2026-11-01".into()),
+        context: Some("some context".into()),
+        spec: None,
+        success: None,
+    };
+    PathBuf::from(fabric::create_in(&req, &e.ctx.home).unwrap().path)
+}
+
+fn load(p: &Path) -> TaskRecord {
+    taskrec::parse(&std::fs::read_to_string(p).unwrap()).unwrap()
+}
+
+fn edit(p: &Path, f: impl FnOnce(&mut TaskRecord)) {
+    let mut rec = load(p);
+    let expected = rec.updated_at.clone();
+    f(&mut rec);
+    taskrec::write_record(p, &rec, Some(&expected)).unwrap();
+}
+
+fn events(e: &Env) -> Vec<String> {
+    std::fs::read_to_string(e.ctx.space().join("events.log")).unwrap_or_default().lines().map(String::from).collect()
+}
+
+fn registry_files(e: &Env) -> Vec<String> {
+    let rd = std::fs::read_dir(e.ctx.space().join("registry"))
+        .map(|rd| rd.flatten().map(|f| f.file_name().to_string_lossy().into_owned()).collect())
+        .unwrap_or_default();
+    let mut v: Vec<String> = rd;
+    v.retain(|n| n != "_backend.yaml");
+    v
+}
+
+fn refuses(e: &Env, needle: &str) {
+    let cfg = e.tmp.path().join("cfg");
+    std::fs::create_dir_all(&cfg).unwrap();
+    let ws = Workspace::from_config(&cfg, &e.tmp.path().join("cache"), Some(e.proj.clone())).unwrap();
+    let err = Runner::new(&e.ctx, ws, Options { interval_s: 5, once: true }, Sink::default()).err().expect("gate must refuse").message();
+    assert!(err.contains(needle), "{err}");
+    assert_eq!(err.matches(". ").count() + err.matches('\n').count(), 0, "one sentence: {err}");
+}
+
+#[test]
+fn start_gate_refuses_without_setup() {
+    refuses(&env("http://127.0.0.1:1", false, Some(KEY), "claude-sonnet-5-5"), "Setup is not complete");
+    refuses(&env("http://127.0.0.1:1", true, None, "claude-sonnet-5-5"), "API key");
+    refuses(&env("http://127.0.0.1:1", true, Some(KEY), ""), "model");
+    let e = env("http://127.0.0.1:1", true, Some(KEY), "claude-sonnet-5-5");
+    std::fs::remove_file(e.ctx.settings_path()).unwrap();
+    refuses(&e, "Setup has not been started");
+}
+
+#[test]
+fn heartbeat_is_written_and_removed() {
+    let fake = Fake::new(0);
+    let e = ready(&fake);
+    let (mut r, lines) = runner(&e);
+    r.start().unwrap();
+    let file = e.ctx.space().join("registry/_backend.yaml");
+    let doc: serde_yaml::Value = serde_yaml::from_str(&std::fs::read_to_string(&file).unwrap()).unwrap();
+    assert!(doc["heartbeat_at"].as_str().unwrap().ends_with('Z'));
+    assert_eq!(doc["heartbeat_interval_s"].as_u64(), Some(5));
+    assert_eq!(doc["pid"].as_u64(), Some(std::process::id() as u64));
+    assert!(doc["started_at"].as_str().unwrap().ends_with('Z'));
+    let start = lines.lock().unwrap().join("\n");
+    assert!(
+        start.contains("default_folder=") && start.contains("model=claude-sonnet-5-5") && start.contains("key=sk-ant-…x9Qa"),
+        "{start}"
+    );
+    r.shutdown(true);
+    assert!(!file.exists());
+    let (mut again, _) = runner(&e);
+    again.start().unwrap();
+    again.shutdown(false);
+    assert!(file.exists());
+}
+
+#[test]
+fn stale_registry_entries_are_removed_at_start() {
+    let fake = Fake::new(0);
+    let e = ready(&fake);
+    let reg = e.ctx.space().join("registry");
+    std::fs::create_dir_all(&reg).unwrap();
+    let entry =
+        |at: &str, path: &str| format!("task_path: {path}\ntask_id: t\nheartbeat_at: \"{at}\"\nheartbeat_interval_s: 10\npid: 999999\n");
+    let now = format!("{}Z", chrono::Utc::now().format("%Y-%m-%dT%H:%M:%S"));
+    std::fs::write(reg.join("dead--aaaaaaaa.yaml"), entry("2020-01-01T00:00:00Z", "/x/.fabric-space/tasks/dead.md")).unwrap();
+    std::fs::write(reg.join("live--bbbbbbbb.yaml"), entry(&now, "/x/.fabric-space/tasks/live.md")).unwrap();
+    let (mut r, lines) = runner(&e);
+    r.start().unwrap();
+    r.shutdown(true);
+    assert_eq!(registry_files(&e), ["live--bbbbbbbb.yaml"]);
+    assert!(lines.lock().unwrap().iter().any(|l| l.contains("removing stale registry entry") && l.contains("dead--aaaaaaaa.yaml")));
+    let ev = events(&e);
+    assert_eq!(ev.len(), 1);
+    assert!(ev[0].contains(" stuck   /x/.fabric-space/tasks/dead.md "), "{}", ev[0]);
+}
+
+#[test]
+fn delegate_advances_to_a_question_and_emits_waiting_once() {
+    let fake = Fake::new(1);
+    let e = ready(&fake);
+    let path = new_record(&e, "write a greeting");
+    edit(&path, |r| r.requests.delegate = true);
+    let (mut r, lines) = runner(&e);
+    r.start().unwrap();
+    r.tick();
+    let rec = load(&path);
+    assert!(!rec.requests.delegate);
+    assert_eq!((rec.state, rec.step), (State::Task, Some(Step::Define)));
+    assert!(rec.waiting);
+    assert_eq!(rec.question.as_ref().unwrap().text, "Which filename?");
+    assert!(rec.cost_usd > 0.0);
+    r.tick();
+    r.tick();
+    let ev = events(&e);
+    assert_eq!(ev.len(), 1, "{ev:?}");
+    assert!(ev[0].contains(" waiting ") && ev[0].contains(&task_path_key(&path)) && ev[0].ends_with("one question"), "{}", ev[0]);
+    assert_eq!(fake.calls(), 1);
+    let calls: Vec<String> = lines.lock().unwrap().iter().filter(|l| l.starts_with("model call")).cloned().collect();
+    assert_eq!(calls.len(), 1);
+    let l = &calls[0];
+    for part in [
+        "at=",
+        &format!("record={}", rec.id),
+        "step=define",
+        "model=claude-sonnet-5-5",
+        "in=120",
+        "out=45",
+        "cost_usd=0.00069",
+        "key=sk-ant-…x9Qa",
+    ] {
+        assert!(l.contains(part), "{part} missing from {l}");
+    }
+    r.shutdown(true);
+    assert!(!lines.lock().unwrap().join("\n").contains(KEY));
+    for ent in walk(e.tmp.path()) {
+        assert!(
+            !std::fs::read_to_string(&ent).map(|t| t.contains(KEY)).unwrap_or(false) || ent.ends_with("secrets.toml"),
+            "{}",
+            ent.display()
+        );
+    }
+}
+
+fn walk(dir: &Path) -> Vec<PathBuf> {
+    let mut out = Vec::new();
+    for ent in std::fs::read_dir(dir).unwrap().flatten() {
+        let p = ent.path();
+        if p.is_dir() { out.extend(walk(&p)) } else { out.push(p) }
+    }
+    out
+}
+
+#[test]
+fn answered_question_is_copied_to_answers_and_the_pipeline_advances() {
+    let fake = Fake::new(1);
+    let e = ready(&fake);
+    let path = new_record(&e, "write a greeting");
+    edit(&path, |r| r.requests.delegate = true);
+    let (mut r, _) = runner(&e);
+    r.start().unwrap();
+    r.tick();
+    edit(&path, |rec| {
+        rec.question.as_mut().unwrap().answer = Some(Answer {
+            value: Some("greet.txt".into()),
+            replacement: None,
+            granted: None,
+            by: Some("gui".into()),
+            at: Some("2026-10-24T18:05:02Z".into()),
+        });
+    });
+    r.tick();
+    let rec = load(&path);
+    assert!(rec.question.is_none());
+    assert_eq!(rec.answers.len(), 1);
+    assert_eq!(rec.answers[0].answer.as_ref().unwrap().value.as_deref(), Some("greet.txt"));
+    assert_eq!(rec.state, State::Defined);
+    assert!(rec.waiting);
+    assert_eq!(rec.approval.as_ref().unwrap().status, "pending");
+    let ev = events(&e);
+    assert_eq!(ev.len(), 2, "{ev:?}");
+    assert!(ev[1].contains(" waiting ") && ev[1].ends_with("plan awaiting approval"));
+    r.shutdown(true);
+}
+
+#[test]
+fn cancel_on_in_progress_ends_failed_without_a_registry_entry() {
+    let fake = Fake::new(0);
+    let e = ready(&fake);
+    let path = new_record(&e, "long job");
+    edit(&path, |r| {
+        r.state = State::InProgress;
+        r.step = Some(Step::Execute);
+        r.requests.cancel = true;
+    });
+    let rec = load(&path);
+    fabr_agent::lifecycle::write_registry(&e.ctx.space(), &e.proj, &path, &rec, 5).unwrap();
+    assert_eq!(registry_files(&e).len(), 1);
+    let (mut r, _) = runner(&e);
+    r.start().unwrap();
+    r.tick();
+    let rec = load(&path);
+    assert_eq!(rec.state, State::Failed);
+    assert!(!rec.requests.cancel);
+    assert!(rec.verdict.is_none());
+    assert!(rec.log.contains("cancelled by user"));
+    assert!(registry_files(&e).is_empty());
+    assert_eq!(fake.calls(), 0);
+    assert!(events(&e).iter().any(|l| l.contains(" failed  ") && l.ends_with("cancelled by user")));
+    r.shutdown(true);
+}
+
+#[test]
+fn redelegate_creates_the_linked_successor() {
+    let fake = Fake::new(1);
+    let e = ready(&fake);
+    let old = new_record(&e, "retry me");
+    edit(&old, |r| {
+        r.state = State::Failed;
+        r.requests.redelegate = true;
+    });
+    let (mut r, _) = runner(&e);
+    r.start().unwrap();
+    r.tick();
+    let old_rec = load(&old);
+    assert!(!old_rec.requests.redelegate);
+    let to = old_rec.links.redelegated_to.clone().expect("old links to successor");
+    let new = load(Path::new(&to));
+    assert_eq!(new.links.redelegated_from.as_deref(), Some(task_path_key(&old).as_str()));
+    assert_eq!((new.title.as_str(), new.due.as_deref()), ("retry me", Some("2026-11-01")));
+    assert!(new.context.contains("some context"));
+    assert_ne!(new.id, old_rec.id);
+    assert_eq!(new.state, State::Task);
+    assert!(!new.requests.delegate);
+    r.shutdown(true);
+}
+
+#[test]
+fn requests_that_do_not_apply_are_ignored_and_cleared() {
+    let fake = Fake::new(0);
+    let e = ready(&fake);
+    let path = new_record(&e, "nothing to cancel");
+    edit(&path, |r| r.requests.cancel = true);
+    let (mut r, _) = runner(&e);
+    r.start().unwrap();
+    r.tick();
+    let rec = load(&path);
+    assert!(!rec.requests.cancel);
+    assert_eq!(rec.state, State::Reminder);
+    assert!(rec.log.contains("ignored request cancel in state reminder"));
+    r.shutdown(true);
+}
+
+#[test]
+fn a_key_planted_in_an_error_comes_out_redacted() {
+    let fake = Fake::new(0);
+    fake.status.store(500, Ordering::SeqCst);
+    let e = ready(&fake);
+    let path = new_record(&e, "will fail");
+    edit(&path, |r| r.requests.delegate = true);
+    let (mut r, lines) = runner(&e);
+    r.start().unwrap();
+    r.tick();
+    r.shutdown(true);
+    let all = lines.lock().unwrap().join("\n");
+    assert!(all.contains("stopped at"), "{all}");
+    assert!(!all.contains(KEY) && !all.contains("FAKEFAKE"), "{all}");
+    assert!(all.contains("sk-ant-…x9Qa"));
+    assert_eq!(fake.questions.load(Ordering::SeqCst), 0);
+}

@@ -1167,9 +1167,10 @@ dependencies = [
 
 [[package]]
 name = "fabr"
-version = "0.2.4"
+version = "0.2.5"
 dependencies = [
  "clap",
+ "fabr-agent",
  "fabr-core",
  "include_dir",
  "log",
@@ -1181,21 +1182,23 @@ dependencies = [
 
 [[package]]
 name = "fabr-agent"
-version = "0.2.4"
+version = "0.2.5"
 dependencies = [
  "chrono",
  "fabr-core",
  "log",
  "serde",
  "serde_json",
+ "serde_yaml",
  "tempfile",
+ "tiny_http",
  "toml_edit 0.25.17+spec-1.1.0",
  "ureq",
 ]
 
 [[package]]
 name = "fabr-core"
-version = "0.2.4"
+version = "0.2.5"
 dependencies = [
  "base64 0.22.1",
  "chrono",
@@ -1218,7 +1221,7 @@ dependencies = [
 
 [[package]]
 name = "fabr-desktop"
-version = "0.2.4"
+version = "0.2.5"
 dependencies = [
  "fabr-core",
  "log",

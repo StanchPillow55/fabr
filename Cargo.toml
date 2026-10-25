@@ -4,13 +4,14 @@ members = ["crates/fabr-core", "crates/fabr", "crates/fabr-agent", "app/src-taur
 default-members = ["crates/fabr-core", "crates/fabr"]
 
 [workspace.package]
-version = "0.2.4"
+version = "0.2.5"
 edition = "2024"
 rust-version = "1.90"
 license = "GPL-3.0-only"
 
 [workspace.dependencies]
 fabr-core = { path = "crates/fabr-core" }
+fabr-agent = { path = "crates/fabr-agent" }
 serde = { version = "=1.0.229", features = ["derive"] }
 serde_json = "=1.0.154"
 toml_edit = "=0.25.17"

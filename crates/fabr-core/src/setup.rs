@@ -205,7 +205,7 @@ pub fn settings_write(ctx: &Ctx, req: SettingsWriteReq) -> Result<SettingsRead, 
     settings_read(ctx)
 }
 
-fn read_secret(ctx: &Ctx, key: &str) -> Option<String> {
+pub fn read_secret(ctx: &Ctx, key: &str) -> Option<String> {
     let doc = load_doc(&ctx.secrets_path()).ok().flatten()?;
     doc.get(key).and_then(Item::as_str).filter(|v| !v.is_empty()).map(String::from)
 }

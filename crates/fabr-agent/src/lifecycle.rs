@@ -489,7 +489,7 @@ fn state_name(state: State) -> &'static str {
     }
 }
 
-fn write_registry(
+pub fn write_registry(
     fabric_space: &Path,
     node_dir: &Path,
     record_path: &Path,

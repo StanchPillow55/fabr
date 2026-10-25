@@ -16,7 +16,9 @@ toml_edit.workspace = true
 chrono.workspace = true
 log.workspace = true
 ureq.workspace = true
+serde_yaml.workspace = true
 
 [dev-dependencies]
 fabr-core.workspace = true
 tempfile.workspace = true
+tiny_http.workspace = true

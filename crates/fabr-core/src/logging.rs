@@ -102,7 +102,7 @@ impl Log for Logger {
             return;
         }
         let ts = chrono::Local::now().format("%Y-%m-%dT%H:%M:%S%.3f%:z");
-        let line = format!("{ts} {:<5} {}: {}\n", r.level(), r.target(), r.args());
+        let line = crate::redact::redact(&format!("{ts} {:<5} {}: {}", r.level(), r.target(), r.args())) + "\n";
         if self.stderr {
             eprint!("{line}");
         }

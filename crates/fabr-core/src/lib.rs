@@ -8,6 +8,7 @@ pub mod meta;
 pub mod node;
 pub mod ops;
 pub mod paths;
+pub mod redact;
 pub mod remote;
 pub mod sample;
 pub mod scan;
