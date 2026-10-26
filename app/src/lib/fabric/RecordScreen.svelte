@@ -5,7 +5,8 @@
   import Page from '../ui/Page.svelte';
   import type { AnswerInput } from './answer';
   import ApprovalPanel from './ApprovalPanel.svelte';
-  import type { ApprovalDecision } from './approval';
+  import FinalConfirmPanel from './FinalConfirmPanel.svelte';
+  import { awaitingFinalConfirm, type ApprovalDecision, type FinalConfirmDecision } from './approval';
   import { describeAnswer } from './answer';
   import { splitContext } from './parse';
   import QuestionPanel from './QuestionPanel.svelte';
@@ -19,7 +20,7 @@
   import { minuteOf } from '../model';
   import type { TaskRecord } from './types';
 
-  let { record, path = '', name, backLabel = 'Records', agent, onback, onanswer, onapprove, onrequest, onedit, onfields, onsuspend, onunsuspend, now = new Date(), onreload, readonly = false }: {
+  let { record, path = '', name, backLabel = 'Records', agent, onback, onanswer, onapprove, onfinalconfirm, onrequest, onedit, onfields, onsuspend, onunsuspend, now = new Date(), onreload, readonly = false }: {
     record: TaskRecord;
     path?: string;
     name: string;
@@ -28,6 +29,7 @@
     onback?: () => void;
     onanswer?: (a: AnswerInput) => Promise<void>;
     onapprove?: (d: ApprovalDecision) => Promise<void>;
+    onfinalconfirm?: (d: FinalConfirmDecision) => Promise<void>;
     onrequest?: (key: RequestKey) => Promise<void>;
     onedit?: (section: Section | 'assertions', text: string) => Promise<void>;
     onfields?: (f: FieldsEdit) => Promise<void>;
@@ -135,6 +137,8 @@
   const q = $derived(record.question);
   const ap = $derived(record.approval);
   const pm = $derived(record.plan_meta);
+  const awaitingFinal = $derived(awaitingFinalConfirm(record));
+  const decidedFinal = $derived(record.final_confirm !== null && record.final_confirm.status !== 'pending');
 </script>
 
 {#snippet sechead(slot: Section | 'assertions')}
@@ -284,6 +288,12 @@
         {/if}
       </div>
     </Group>
+
+    {#if awaitingFinal && !readonly}
+      <FinalConfirmPanel {record} onsubmit={onfinalconfirm} {onreload} />
+    {:else if decidedFinal}
+      <FinalConfirmPanel {record} {onreload} />
+    {/if}
 
     {#if ap && !readonly}
       <ApprovalPanel approval={ap} grants={record.grants} planMeta={pm} plan={s.plan} assertions={record.assertions} onsubmit={onapprove} {onreload} />

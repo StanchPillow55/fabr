@@ -277,6 +277,10 @@ pub struct GuiPatch {
     pub requests: Option<Requests>,
     #[serde(default)]
     pub approval: Option<Approval>,
+    /// Second, final confirmation for an irreversible external-effect artifact.
+    /// Distinct from the initial plan `approval`; the user is the last layer.
+    #[serde(default)]
+    pub final_confirm: Option<Approval>,
     #[serde(default)]
     pub grants_granted: Option<Vec<Grant>>,
     #[serde(default)]
@@ -321,6 +325,10 @@ pub struct FrontMatter {
     pub assertions: Vec<Assertion>,
     #[serde(default)]
     pub approval: Option<Approval>,
+    /// Second confirmation gate for an irreversible external-effect artifact.
+    /// Optional and defaults to null so records predating M3 still parse.
+    #[serde(default)]
+    pub final_confirm: Option<Approval>,
     #[serde(default)]
     pub verdict: Option<Verdict>,
     #[serde(default)]
@@ -355,6 +363,7 @@ pub struct TaskRecord {
     pub plan_meta: Option<PlanMeta>,
     pub assertions: Vec<Assertion>,
     pub approval: Option<Approval>,
+    pub final_confirm: Option<Approval>,
     pub verdict: Option<Verdict>,
     pub cost_usd: f64,
     pub links: Links,
@@ -414,6 +423,7 @@ pub fn parse(text: &str) -> Result<TaskRecord, FabrError> {
         plan_meta: fm.plan_meta,
         assertions: fm.assertions,
         approval: fm.approval,
+        final_confirm: fm.final_confirm,
         verdict: fm.verdict,
         cost_usd: fm.cost_usd,
         links: fm.links,
@@ -472,6 +482,7 @@ pub fn render(rec: &TaskRecord) -> String {
         plan_meta: rec.plan_meta.clone(),
         assertions: rec.assertions.clone(),
         approval: rec.approval.clone(),
+        final_confirm: rec.final_confirm.clone(),
         verdict: rec.verdict.clone(),
         cost_usd: rec.cost_usd,
         links: rec.links.clone(),
@@ -659,6 +670,9 @@ pub fn apply_gui(rec: &mut TaskRecord, patch: &GuiPatch) {
     }
     if let Some(a) = &patch.approval {
         rec.approval = Some(a.clone());
+    }
+    if let Some(c) = &patch.final_confirm {
+        rec.final_confirm = Some(c.clone());
     }
     if let Some(g) = &patch.grants_granted {
         rec.grants.granted = g.clone();

@@ -1,7 +1,7 @@
 mod demo;
 mod sandbox;
 
-pub use demo::DemoTools;
+pub use demo::{DemoTools, DemoToolsWithReadRoot};
 pub use sandbox::Sandbox;
 
 pub fn read_node_bytes(node_dir: &Path, rel: &str) -> Result<Vec<u8>, String> {

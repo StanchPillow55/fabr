@@ -8,6 +8,7 @@ pub mod model;
 pub mod run;
 pub mod runner;
 pub mod settings;
+pub mod skills;
 pub mod sponsor_tools;
 pub mod state;
 pub mod store;
@@ -19,7 +20,7 @@ pub use caps::Harness;
 pub use lifecycle::{Ctl, advance_with, approval_allows_execute, registry_path, task_path_key};
 pub use model::{
     AnthropicModel, Block, CallObserver, DefineDraft, EvalVerdict, EvaluateInput, ExecuteInput, ExecuteTurn, JudgedItem, Judgement,
-    Message, Model, ModelCall, PlanDraft, PlanInput, ScriptedModel, ScriptedTurn, ToolCall, ToolUse, TurnOutcome,
+    LocalModel, Message, Model, ModelCall, PlanDraft, PlanInput, ScriptedModel, ScriptedTurn, ToolCall, ToolUse, TurnOutcome,
 };
 pub use run::run_once;
 pub use settings::{AgentSettings, load_agent_settings};

@@ -133,6 +133,7 @@ fn base(c: &Clock, title: &str, created: i64, state: State) -> TaskRecord {
         plan_meta: None,
         assertions: Vec::new(),
         approval: None,
+        final_confirm: None,
         verdict: None,
         cost_usd: 0.0,
         links: Links { redelegated_from: None, redelegated_to: None },

@@ -6,11 +6,11 @@ export type Step = (typeof STEPS)[number];
 
 export const FIELDS = [
   'schema', 'id', 'source', 'title', 'due', 'pri', 'state', 'step', 'waiting', 'paused', 'suspended', 'suspend_until', 'created_at', 'updated_at', 'requests',
-  'question', 'answers', 'grants', 'plan_meta', 'assertions', 'approval', 'verdict', 'cost_usd', 'links', 'by', 'needs',
+  'question', 'answers', 'grants', 'plan_meta', 'assertions', 'approval', 'final_confirm', 'verdict', 'cost_usd', 'links', 'by', 'needs',
 ] as const;
 
 export const SCHEMA = 6;
-export const OPTIONAL_FIELDS: readonly string[] = ['pri', 'paused', 'suspended', 'suspend_until', 'needs', 'by'];
+export const OPTIONAL_FIELDS: readonly string[] = ['pri', 'paused', 'suspended', 'suspend_until', 'needs', 'by', 'final_confirm'];
 
 export const SECTION_HEADINGS = ['Context', 'Spec', 'Success', 'Plan', 'Log'] as const;
 
@@ -107,6 +107,12 @@ export interface FrontMatter {
   assertions: Assertion[];
   by: By;
   approval: Approval | null;
+  /** Second, final confirmation gate for an irreversible external-effect
+   * artifact (send/commit/pay). Distinct from the plan `approval`; the user is
+   * the last layer. Null (and absent) on records predating M3. Its `digest`
+   * carries the invocation id that binds the confirmation to the exact
+   * artifact. */
+  final_confirm: Approval | null;
   verdict: Verdict | null;
   cost_usd: number;
   links: Links;

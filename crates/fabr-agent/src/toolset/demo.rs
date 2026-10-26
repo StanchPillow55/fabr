@@ -5,7 +5,66 @@ use std::path::Path;
 
 const READ_CAP: usize = 256 * 1024;
 
+/// Stateless tool set. `read_root`, when set, broadens the READ scope (read_file,
+/// list_dir) to the workspace root — an ancestor of the node — while writes stay
+/// contained to the node. `DemoTools` (no read root) keeps the historical behavior.
+#[derive(Default)]
 pub struct DemoTools;
+
+/// `DemoTools` with the READ scope broadened to a workspace root.
+pub struct DemoToolsWithReadRoot {
+    read_root: std::path::PathBuf,
+}
+
+impl DemoToolsWithReadRoot {
+    pub fn new(read_root: &Path) -> Self {
+        Self { read_root: read_root.to_path_buf() }
+    }
+}
+
+fn sandbox_for(node_dir: &Path, read_root: Option<&Path>) -> Result<Sandbox, String> {
+    match read_root {
+        Some(root) => Sandbox::with_read_root(node_dir, root),
+        None => Sandbox::new(node_dir),
+    }
+}
+
+fn dispatch(sb: &Sandbox, call: &ToolCall) -> ToolOutcome {
+    match call.name.as_str() {
+        "read_file" => read_file(sb, &call.path),
+        "list_dir" => list_dir(sb, &call.path),
+        "write_file" => write_file(sb, &call.path, call.content.as_deref()),
+        "make_dir" => make_dir(sb, &call.path),
+        other => Err(format!("unknown tool {other}")),
+    }
+}
+
+fn demo_specs() -> Vec<ToolSpec> {
+    let path = serde_json::json!({"type": "string"});
+    vec![
+        spec("read_file", "Read a file inside the workspace (up to 256 KiB)", serde_json::json!({"path": path}), &["path"], true),
+        spec("list_dir", "List a directory inside the workspace; folders end with /", serde_json::json!({"path": path}), &[], true),
+        spec(
+            "write_file",
+            "Write a Markdown (.md) file inside the node; the parent folder must exist",
+            serde_json::json!({"path": path, "content": {"type": "string"}}),
+            &["path", "content"],
+            false,
+        ),
+        spec("make_dir", "Create a folder, or nested folders, inside the node", serde_json::json!({"path": path}), &["path"], false),
+    ]
+}
+
+impl ToolSet for DemoToolsWithReadRoot {
+    fn specs(&self) -> Vec<ToolSpec> {
+        demo_specs()
+    }
+
+    fn call(&self, node_dir: &Path, call: &ToolCall) -> ToolOutcome {
+        let sb = sandbox_for(node_dir, Some(&self.read_root))?;
+        dispatch(&sb, call)
+    }
+}
 
 fn spec(name: &str, description: &str, properties: serde_json::Value, required: &[&str], read_only: bool) -> ToolSpec {
     ToolSpec {
@@ -18,35 +77,17 @@ fn spec(name: &str, description: &str, properties: serde_json::Value, required: 
 
 impl ToolSet for DemoTools {
     fn specs(&self) -> Vec<ToolSpec> {
-        let path = serde_json::json!({"type": "string"});
-        vec![
-            spec("read_file", "Read a file inside the node (up to 256 KiB)", serde_json::json!({"path": path}), &["path"], true),
-            spec("list_dir", "List a directory inside the node; folders end with /", serde_json::json!({"path": path}), &[], true),
-            spec(
-                "write_file",
-                "Write a Markdown (.md) file inside the node; the parent folder must exist",
-                serde_json::json!({"path": path, "content": {"type": "string"}}),
-                &["path", "content"],
-                false,
-            ),
-            spec("make_dir", "Create a folder, or nested folders, inside the node", serde_json::json!({"path": path}), &["path"], false),
-        ]
+        demo_specs()
     }
 
     fn call(&self, node_dir: &Path, call: &ToolCall) -> ToolOutcome {
-        let sb = Sandbox::new(node_dir)?;
-        match call.name.as_str() {
-            "read_file" => read_file(&sb, &call.path),
-            "list_dir" => list_dir(&sb, &call.path),
-            "write_file" => write_file(&sb, &call.path, call.content.as_deref()),
-            "make_dir" => make_dir(&sb, &call.path),
-            other => Err(format!("unknown tool {other}")),
-        }
+        let sb = sandbox_for(node_dir, None)?;
+        dispatch(&sb, call)
     }
 }
 
 fn read_file(sb: &Sandbox, rel: &str) -> ToolOutcome {
-    let path = sb.resolve(rel, Missing::No)?;
+    let path = sb.resolve_read(rel, Missing::No)?;
     if !path.is_file() {
         return Err(format!("no such file {rel}"));
     }
@@ -56,7 +97,7 @@ fn read_file(sb: &Sandbox, rel: &str) -> ToolOutcome {
 }
 
 fn list_dir(sb: &Sandbox, rel: &str) -> ToolOutcome {
-    let path = if rel.is_empty() || rel == "." { sb.root().to_path_buf() } else { sb.resolve(rel, Missing::No)? };
+    let path = if rel.is_empty() || rel == "." { sb.root().to_path_buf() } else { sb.resolve_read(rel, Missing::No)? };
     if !path.is_dir() {
         return Err(format!("no such directory {rel}"));
     }
@@ -148,5 +189,34 @@ mod tests {
         assert!(run(&node, "read_file", "data.csv", None).unwrap().starts_with("a,b"));
         assert!(run(&node, "read_file", ".fabr", None).is_err());
         assert_eq!(run(&node, "list_dir", "", None).unwrap(), "data.csv\nsub/");
+    }
+
+    #[test]
+    fn read_root_lets_reads_see_above_the_node_but_writes_stay_contained() {
+        // workspace/ (read_root) > workspace/node (the task's write-contained node)
+        let tmp = tempfile::tempdir().unwrap();
+        let workspace = tmp.path().join("workspace");
+        let node = workspace.join("node");
+        std::fs::create_dir_all(&node).unwrap();
+        std::fs::write(workspace.join("above.md"), b"from the workspace root").unwrap();
+
+        let tools = DemoToolsWithReadRoot::new(&workspace);
+        let call = |name: &str, path: &str, content: Option<&str>| {
+            tools.call(&node, &ToolCall { name: name.into(), path: path.into(), content: content.map(str::to_string), params: None })
+        };
+
+        // A read above the node but inside the read root succeeds.
+        assert_eq!(call("read_file", "../above.md", None).unwrap(), "from the workspace root");
+        // A read cannot escape past the read root.
+        assert!(call("read_file", "../../escape.md", None).is_err());
+        // A write above the node still fails (writes stay contained to the node).
+        assert!(call("write_file", "../above.md", Some("overwrite")).is_err());
+        assert_eq!(std::fs::read(workspace.join("above.md")).unwrap(), b"from the workspace root");
+        assert!(call("make_dir", "../sibling", None).is_err());
+        assert!(!workspace.join("sibling").exists());
+
+        // Back-compat: plain DemoTools cannot read above the node.
+        let plain = DemoTools;
+        assert!(plain.call(&node, &ToolCall { name: "read_file".into(), path: "../above.md".into(), content: None, params: None }).is_err());
     }
 }

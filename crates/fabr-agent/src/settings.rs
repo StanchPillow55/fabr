@@ -6,12 +6,17 @@ pub struct AgentSettings {
     pub default_folder: String,
     pub model: String,
     pub api_key: Secret,
+    pub provider: String,
+    pub local_base_url: String,
     pub heartbeat_interval_s: u64,
     pub check_timeout_s: u64,
     pub execute_max_turns: u32,
     pub evaluate_max_reads: usize,
     pub completed_steps: Vec<String>,
 }
+
+pub const DEFAULT_PROVIDER: &str = "anthropic";
+pub const DEFAULT_LOCAL_BASE_URL: &str = "http://localhost:11434/v1";
 
 pub fn load_agent_settings(dir: &Path) -> Result<AgentSettings, FabrError> {
     let settings_path = dir.join("settings.toml");
@@ -21,6 +26,14 @@ pub fn load_agent_settings(dir: &Path) -> Result<AgentSettings, FabrError> {
     let doc = settings_text.parse::<toml_edit::DocumentMut>().map_err(|e| FabrError::BadRequest(format!("settings.toml: {e}")))?;
     let secrets = secrets_text.parse::<toml_edit::DocumentMut>().map_err(|e| FabrError::BadRequest(format!("secrets.toml: {e}")))?;
     let model = doc.get("model").and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
+    let provider = {
+        let p = doc.get("provider").and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
+        if p.is_empty() { DEFAULT_PROVIDER.to_string() } else { p }
+    };
+    let local_base_url = {
+        let u = doc.get("local_base_url").and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
+        if u.is_empty() { DEFAULT_LOCAL_BASE_URL.to_string() } else { u }
+    };
     let default_folder = doc.get("default_folder").and_then(|v| v.as_str()).unwrap_or("").to_string();
     let heartbeat_interval_s =
         doc.get("heartbeat_interval_s").and_then(|v| v.as_integer()).filter(|n| *n > 0).map(|n| n as u64).unwrap_or(10);
@@ -36,6 +49,8 @@ pub fn load_agent_settings(dir: &Path) -> Result<AgentSettings, FabrError> {
         default_folder,
         model,
         api_key,
+        provider,
+        local_base_url,
         heartbeat_interval_s,
         check_timeout_s: read_check_timeout(&doc),
         execute_max_turns: read_limit(&doc, "execute_max_turns", DEFAULT_EXECUTE_MAX_TURNS as u64) as u32,
@@ -50,7 +65,12 @@ pub const DEFAULT_EXECUTE_MAX_TURNS: u32 = 12;
 pub const DEFAULT_EVALUATE_MAX_READS: usize = 6;
 
 pub fn require_ready(s: &AgentSettings) -> Result<(), FabrError> {
-    for step in ["folder", "api_key", "model"] {
+    let local = s.provider == "local";
+    // A local provider (Ollama / MLX) needs no Anthropic key, so neither the
+    // "api_key" setup step nor a saved key is required for it. The "model" value
+    // stays required for both providers.
+    let steps: &[&str] = if local { &["folder", "model"] } else { &["folder", "api_key", "model"] };
+    for step in steps {
         if !s.completed_steps.iter().any(|have| have == step) {
             return Err(FabrError::BadRequest(format!("setup is missing {step}")));
         }
@@ -58,7 +78,7 @@ pub fn require_ready(s: &AgentSettings) -> Result<(), FabrError> {
     if s.model.is_empty() {
         return Err(FabrError::BadRequest("model is required".into()));
     }
-    if s.api_key.is_empty() {
+    if !local && s.api_key.is_empty() {
         return Err(FabrError::BadRequest("api key is required".into()));
     }
     Ok(())

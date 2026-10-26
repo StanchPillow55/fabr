@@ -77,12 +77,13 @@ describe('mock api', () => {
     expect(Object.keys(createMockApi({ latency: 0 })).sort()).toEqual(Object.keys(COMMANDS).sort());
   });
 
-  it('completing all five setup steps flips setup.completed', async () => {
+  it('completing all setup steps flips setup.completed (anthropic flow)', async () => {
     const api = createMockApi({ latency: 0 });
     const first = await api.fabricSettingsRead();
     expect([first.exists, first.settings.setup.completed]).toEqual([false, false]);
-    let cur = first.settings;
-    for (const step of ['folder', 'api_key', 'model', 'telegram_bot', 'telegram_link'] as const) {
+    let cur: typeof first.settings = { ...first.settings, provider: 'anthropic' };
+    const steps = ['provider', 'folder', 'api_key', 'model', 'telegram_bot', 'telegram_link'] as const;
+    for (const step of steps) {
       cur = markStep(cur, step);
       const r = await api.fabricSettingsWrite(cur);
       expect(r.settings.setup.completed).toBe(step === 'telegram_link');
@@ -90,7 +91,7 @@ describe('mock api', () => {
     expect(await api.fabricSettingsRead()).toMatchObject({ exists: true, settings: { setup: { completed: true } } });
   });
 
-  it('a fresh config opens on setup and the five steps open tasks', async () => {
+  it('a fresh config opens on setup and the steps open tasks', async () => {
     const { shouldShowSetup } = await import('../lib/setup/gate');
     const { ApiSetupSource } = await import('../lib/setup/setup-source');
     const api = createMockApi({ today: '2026-10-19', latency: 0 });
@@ -98,7 +99,7 @@ describe('mock api', () => {
     expect(read.exists).toBe(false);
     expect(shouldShowSetup(read)).toBe(true);
     const src = new ApiSetupSource(api);
-    let s = read.settings;
+    let s = markStep({ ...read.settings, provider: 'anthropic' }, 'provider');
     for (const [step, kind] of [['folder', 'folder'], ['api_key', 'api_key'], ['model', 'model'], ['telegram_bot', 'telegram_token']] as const) {
       expect((await src.check(kind, { path: '~/' })).ok).toBe(true);
       s = markStep(s, step);

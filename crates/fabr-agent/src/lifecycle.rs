@@ -427,6 +427,13 @@ fn gather_stage(node_dir: &Path, record_path: &Path, ctl: &Ctl, rec: &mut TaskRe
     if rec.context.trim().is_empty() {
         rec.by.context = Some(Author::Agent);
     }
+    let skills_block = crate::skills::render_skills(&crate::skills::load_skills(node_dir));
+    if !skills_block.is_empty() {
+        if !rec.context.is_empty() && !rec.context.ends_with('\n') {
+            rec.context.push('\n');
+        }
+        rec.context.push_str(&skills_block);
+    }
     append_gathered(&mut rec.context, &gather_bundle(node_dir));
     rec.step = Some(Step::Define);
     rec.waiting = false;
@@ -812,6 +819,11 @@ fn execute_stage(
     if must_stop(rec) || (rec.waiting && question_open(rec)) {
         return Ok(());
     }
+    // A pending second confirmation holds execution. The user is the last layer:
+    // nothing is dispatched until the final_confirm gate is approved or refused.
+    if final_confirm_blocks(rec) {
+        return Ok(());
+    }
     if rec.question.as_ref().is_some_and(|q| q.answer.is_some())
         && let Some(q) = rec.question.take()
     {
@@ -1049,6 +1061,13 @@ fn external_call(
         }
         return Err(FabrError::BadRequest(format!("external {} is not replayed", call.name)));
     }
+    // The user is the last layer. An irreversible external effect or payment is
+    // not performed on the initial plan approval alone; it halts here for a
+    // SECOND explicit confirmation bound to this exact artifact. Reversible and
+    // local actions fall through untouched.
+    if crate::tools_contract::requires_final_confirm(&call.name) && !final_confirm_satisfied(rec, &id) {
+        return Ok(Some(park_for_final_confirm(node_dir, record_path, ctl, rec, base, &call.name, &id, &params)?));
+    }
     append_log(&mut rec.log, "execute", &crate::tools_contract::external_intent_message(&id, &call.name));
     persist(record_path, rec, base)?;
     match view.call(node_dir, call) {
@@ -1088,6 +1107,55 @@ fn unknown_label(text: &str) -> &'static str {
     if text.to_ascii_lowercase().contains("timeout") { "timeout" } else { "unavailable" }
 }
 
+/// A second-confirmation gate is recorded and still pending. Execution holds
+/// until the user approves or refuses it.
+fn final_confirm_blocks(rec: &TaskRecord) -> bool {
+    rec.final_confirm.as_ref().is_some_and(|c| c.status == "pending")
+}
+
+/// The second confirmation is approved and bound to this exact artifact. The
+/// digest is the invocation id, so a confirmation for one send can never be
+/// reused for a different send, amount, or recipient.
+fn final_confirm_satisfied(rec: &TaskRecord, invocation_id: &str) -> bool {
+    rec.final_confirm
+        .as_ref()
+        .is_some_and(|c| c.status == "approved" && c.digest.as_deref() == Some(invocation_id))
+}
+
+/// Halt before an irreversible external effect, surfacing the exact artifact so
+/// the user can confirm or refuse it. This reuses the `waiting` flag; the record
+/// stays `InProgress` on the `Execute` step so resuming after confirmation
+/// re-enters the same dispatch with the same invocation id. No effect has been
+/// performed.
+fn park_for_final_confirm(
+    node_dir: &Path,
+    record_path: &Path,
+    ctl: &Ctl,
+    rec: &mut TaskRecord,
+    base: &mut TaskRecord,
+    tool: &str,
+    invocation_id: &str,
+    params: &serde_json::Value,
+) -> Result<ExternalReport, FabrError> {
+    let destination = crate::tools_contract::destination_of(tool, params);
+    let artifact = crate::tools_contract::canonical_json(params);
+    // Record (or refresh) a pending gate bound to this artifact. The GUI fills in
+    // status/by/at via `final_confirm` to approve or refuse. A stale confirm for
+    // a different artifact, or a previously approved one, is reset to pending.
+    let already_pending_for_this =
+        rec.final_confirm.as_ref().is_some_and(|c| c.status == "pending" && c.digest.as_deref() == Some(invocation_id));
+    if !already_pending_for_this {
+        rec.final_confirm =
+            Some(Approval { status: "pending".into(), by: None, at: None, note: None, digest: Some(invocation_id.to_string()) });
+    }
+    rec.waiting = true;
+    let message = format!("final confirm required for {tool} -> {destination}: {artifact}");
+    append_log(&mut rec.log, "approve", &message);
+    persist(record_path, rec, base)?;
+    mark(ctl, node_dir, record_path, rec, Activity::Parked);
+    Ok(ExternalReport { content: message, is_error: false, stop: true })
+}
+
 fn park_unknown(record_path: &Path, rec: &mut TaskRecord, base: &mut TaskRecord, message: &str) -> Result<ExternalReport, FabrError> {
     append_log(&mut rec.log, "execute", message);
     append_log(&mut rec.log, "execute", "reconciliation required; external result is UNKNOWN");
@@ -1124,6 +1192,89 @@ fn ignore_request(path: &Path, rec: &mut TaskRecord, base: &mut TaskRecord, key:
 
 fn persist(path: &Path, rec: &mut TaskRecord, base: &mut TaskRecord) -> Result<(), FabrError> {
     update_record(path, rec, base)
+}
+
+#[cfg(test)]
+mod final_confirm_gate {
+    use super::*;
+    use crate::tools_contract::{invocation_id, requires_final_confirm};
+    use serde_json::json;
+
+    fn rec_with_confirm(confirm: Option<Approval>) -> TaskRecord {
+        let mut rec = crate::link::test_reminder("send the quote");
+        rec.final_confirm = confirm;
+        rec
+    }
+
+    /// The decision `external_call` makes right before dispatch: an irreversible
+    /// external effect is withheld unless a matching second confirmation exists.
+    fn would_dispatch(rec: &TaskRecord, tool: &str, id: &str) -> bool {
+        !(requires_final_confirm(tool) && !final_confirm_satisfied(rec, id))
+    }
+
+    #[test]
+    fn external_effect_halts_without_a_second_confirmation_but_local_write_proceeds() {
+        // An ExternalEffect tool (fo_action: send) with no final_confirm halts.
+        let send = json!({"tool": "send", "params": "{}", "destination": "ops@example.test"});
+        let rec = rec_with_confirm(None);
+        let send_id = invocation_id(&rec.id, "fo_action", &send);
+        assert!(requires_final_confirm("fo_action"), "send is an irreversible external effect");
+        assert!(!would_dispatch(&rec, "fo_action", &send_id), "no second confirmation: must halt");
+
+        // A LocalWrite is reversible and never reaches this gate.
+        let write = json!({"path": "greet.md", "content": "hi"});
+        let write_id = invocation_id(&rec.id, "write_file", &write);
+        assert!(!requires_final_confirm("write_file"), "write_file is a local write");
+        assert!(would_dispatch(&rec, "write_file", &write_id), "local write proceeds without a second gate");
+    }
+
+    #[test]
+    fn parking_records_a_pending_gate_bound_to_the_exact_artifact() {
+        let send = json!({"tool": "send", "params": "{}", "destination": "ops@example.test"});
+        let mut rec = rec_with_confirm(None);
+        let id = invocation_id(&rec.id, "fo_action", &send);
+        let tmp = tempfile::tempdir().unwrap();
+        let record_path = tmp.path().join("t.md");
+        fabr_core::taskrec::write_record(&record_path, &rec, None).unwrap();
+        let mut base = rec.clone();
+        let ctl = Ctl::new(tmp.path(), 10);
+        let report = park_for_final_confirm(tmp.path(), &record_path, &ctl, &mut rec, &mut base, "fo_action", &id, &send).unwrap();
+        assert!(report.stop, "parking stops this turn without performing the effect");
+        assert!(rec.waiting, "the record waits for the user");
+        let gate = rec.final_confirm.as_ref().expect("a pending gate is recorded");
+        assert_eq!(gate.status, "pending");
+        assert_eq!(gate.digest.as_deref(), Some(id.as_str()), "the gate is bound to this artifact");
+        assert!(rec.log.contains("final confirm required for fo_action -> ops@example.test"), "the exact artifact is surfaced");
+
+        // A pending gate blocks execute_stage from re-dispatching.
+        assert!(final_confirm_blocks(&rec));
+
+        // Approving the gate for this exact artifact lets the effect through.
+        rec.final_confirm = Some(Approval {
+            status: "approved".into(),
+            by: Some("gui".into()),
+            at: Some("2026-10-25T00:00:00Z".into()),
+            note: None,
+            digest: Some(id.clone()),
+        });
+        assert!(!final_confirm_blocks(&rec));
+        assert!(final_confirm_satisfied(&rec, &id), "an approved, matching confirmation satisfies the gate");
+
+        // The same approval does not cover a different artifact (new recipient).
+        let other = json!({"tool": "send", "params": "{}", "destination": "someone-else@example.test"});
+        let other_id = invocation_id(&rec.id, "fo_action", &other);
+        assert_ne!(other_id, id);
+        assert!(!final_confirm_satisfied(&rec, &other_id), "a confirmation for one send cannot be reused for another");
+    }
+
+    #[test]
+    fn payment_is_also_gated_but_reads_are_not() {
+        assert!(requires_final_confirm("visa_checkout"));
+        assert!(requires_final_confirm("nessie_sandbox"));
+        assert!(requires_final_confirm("cartesia_speak"));
+        assert!(!requires_final_confirm("bright_data_search"), "a remote read is not a second-gate effect");
+        assert!(!requires_final_confirm("read_file"));
+    }
 }
 
 #[cfg(test)]

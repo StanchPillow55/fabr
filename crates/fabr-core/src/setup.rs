@@ -8,6 +8,8 @@ use std::time::{Duration, Instant};
 use toml_edit::{Array, DocumentMut, Item, Table, value};
 
 pub const MODELS: [&str; 2] = ["claude-sonnet-5-5", "claude-haiku-5-5"];
+pub const DEFAULT_PROVIDER: &str = "local";
+pub const DEFAULT_LOCAL_BASE_URL: &str = "http://localhost:11434/v1";
 const ANTHROPIC_URL: &str = "https://api.anthropic.com";
 const TELEGRAM_URL: &str = "https://api.telegram.org";
 const NO_MESSAGE: &str = "No message arrived in time. Open your bot in Telegram and send it any text.";
@@ -98,6 +100,10 @@ impl Capabilities {
 pub struct FabricSettings {
     pub default_folder: String,
     pub model: String,
+    #[serde(default = "default_provider")]
+    pub provider: String,
+    #[serde(default = "default_local_base_url")]
+    pub local_base_url: String,
     pub telegram_user_id: Option<i64>,
     pub auto_mode: bool,
     pub question_budget: u32,
@@ -109,11 +115,20 @@ pub struct FabricSettings {
     pub capabilities: Capabilities,
 }
 
+fn default_provider() -> String {
+    DEFAULT_PROVIDER.into()
+}
+fn default_local_base_url() -> String {
+    DEFAULT_LOCAL_BASE_URL.into()
+}
+
 impl FabricSettings {
     pub fn defaults(home: &Path) -> FabricSettings {
         FabricSettings {
             default_folder: home.to_string_lossy().into_owned(),
             model: MODELS[0].into(),
+            provider: DEFAULT_PROVIDER.into(),
+            local_base_url: DEFAULT_LOCAL_BASE_URL.into(),
             telegram_user_id: None,
             auto_mode: false,
             question_budget: 5,
@@ -202,6 +217,12 @@ pub fn settings_read(ctx: &Ctx) -> Result<SettingsRead, FabrError> {
     if let Some(v) = doc.get("model").and_then(Item::as_str) {
         s.model = v.into();
     }
+    if let Some(v) = doc.get("provider").and_then(Item::as_str).map(str::trim).filter(|v| !v.is_empty()) {
+        s.provider = v.into();
+    }
+    if let Some(v) = doc.get("local_base_url").and_then(Item::as_str).map(str::trim).filter(|v| !v.is_empty()) {
+        s.local_base_url = v.into();
+    }
     s.telegram_user_id = doc.get("telegram_user_id").and_then(Item::as_integer);
     if let Some(v) = doc.get("auto_mode").and_then(Item::as_bool) {
         s.auto_mode = v;
@@ -235,13 +256,22 @@ pub fn settings_read(ctx: &Ctx) -> Result<SettingsRead, FabrError> {
 
 pub fn settings_write(ctx: &Ctx, req: SettingsWriteReq) -> Result<SettingsRead, FabrError> {
     let s = req.settings;
-    if !MODELS.contains(&s.model.as_str()) {
+    let local = s.provider == "local";
+    // Cloud (Anthropic) is limited to the known models; a local provider accepts
+    // any non-empty model name the user has pulled (e.g. "qwen2.5").
+    if local {
+        if s.model.trim().is_empty() {
+            return Err(FabrError::BadRequest("model is required".into()));
+        }
+    } else if !MODELS.contains(&s.model.as_str()) {
         return Err(FabrError::BadRequest(format!("model must be one of {}", MODELS.join(", "))));
     }
     let path = ctx.settings_path();
     let mut doc = load_doc(&path)?.unwrap_or_default();
     doc["default_folder"] = value(expand_home(&s.default_folder, &ctx.home).to_string_lossy().into_owned());
     doc["model"] = value(s.model);
+    doc["provider"] = value(s.provider);
+    doc["local_base_url"] = value(s.local_base_url);
     match s.telegram_user_id {
         Some(id) => doc["telegram_user_id"] = value(id),
         None => {
@@ -576,8 +606,16 @@ mod tests {
         settings_write(&c, SettingsWriteReq { settings: s }).unwrap();
         assert_eq!(settings_read(&c).unwrap().settings.telegram_user_id, None);
         let mut bad = settings_read(&c).unwrap().settings;
+        bad.provider = "anthropic".into();
         bad.model = "gpt".into();
         assert!(settings_write(&c, SettingsWriteReq { settings: bad }).is_err());
+        // A local provider accepts any non-empty model name.
+        let mut local = settings_read(&c).unwrap().settings;
+        local.provider = "local".into();
+        local.model = "qwen2.5".into();
+        let w = settings_write(&c, SettingsWriteReq { settings: local }).unwrap();
+        assert_eq!(w.settings.model, "qwen2.5");
+        assert_eq!(w.settings.provider, "local");
     }
 
     #[test]

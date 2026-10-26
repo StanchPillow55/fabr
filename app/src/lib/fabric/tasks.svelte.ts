@@ -3,7 +3,7 @@ import { createApi } from '../api/index';
 import type { Api } from '../api/commands';
 import type { Source } from '../api/types';
 import type { AnswerInput } from './answer';
-import { submitApproval, type ApprovalDecision } from './approval';
+import { submitApproval, submitFinalConfirm, type ApprovalDecision, type FinalConfirmDecision } from './approval';
 import { BACKEND_LABEL, backendState, heartbeatOf, type BackendState } from './backend';
 import { loadReadPosition, parseEvents, reconcileReadPosition, safeReadPosition, saveReadPosition, unreadCount, type FabricEvent } from './events';
 import { folderName, folderOf, nodeFolder, type Entry } from './folder';
@@ -427,6 +427,11 @@ export class FabricStore {
 
   async approve(h: Held, d: ApprovalDecision): Promise<void> {
     await submitApproval(this.#sourceFor(h.source), h.path, h.text, d);
+    await this.#reread(h.path);
+  }
+
+  async finalConfirm(h: Held, d: FinalConfirmDecision): Promise<void> {
+    await submitFinalConfirm(this.#sourceFor(h.source), h.path, h.text, d);
     await this.#reread(h.path);
   }
 

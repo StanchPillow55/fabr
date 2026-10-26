@@ -40,6 +40,7 @@ pub fn merge(disk: &mut TaskRecord, base: &TaskRecord, mine: &TaskRecord) {
     take(&mut disk.plan_meta, &base.plan_meta, &mine.plan_meta);
     take(&mut disk.assertions, &base.assertions, &mine.assertions);
     take(&mut disk.approval, &base.approval, &mine.approval);
+    take(&mut disk.final_confirm, &base.final_confirm, &mine.final_confirm);
     take(&mut disk.verdict, &base.verdict, &mine.verdict);
     take(&mut disk.cost_usd, &base.cost_usd, &mine.cost_usd);
     take(&mut disk.links, &base.links, &mine.links);

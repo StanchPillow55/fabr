@@ -149,6 +149,12 @@ export function serializeFrontMatter(r: TaskRecord): string[] {
         else add(`approval: ${flowMap(Object.fromEntries((['status', 'by', 'at', 'note', 'digest'] as const).filter((k) => k in a && a[k] !== undefined).map((k) => [k, a[k]])))}`);
         break;
       }
+      case 'final_confirm': {
+        const c = r.final_confirm;
+        if (c === null || c === undefined) add('final_confirm: null');
+        else add(`final_confirm: ${flowMap(Object.fromEntries((['status', 'by', 'at', 'note', 'digest'] as const).filter((k) => k in c && c[k] !== undefined).map((k) => [k, c[k]])))}`);
+        break;
+      }
       case 'verdict': {
         const v = r.verdict;
         if (v === null) { add('verdict: null'); break; }

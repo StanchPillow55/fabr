@@ -51,6 +51,10 @@ xattr -d com.apple.quarantine /Applications/Fabr.app
 
 Open Fabr. A 6-screen setup asks for a default folder, an Anthropic API key and a model. The agent runs in the background while the app is open.
 
+## Local-first (Ollama/MLX)
+
+Fabr runs fully local with no cloud key. The agent client speaks the OpenAI-compatible chat completions API, so Ollama (`http://localhost:11434/v1`) and LM Studio / MLX (`http://localhost:1234/v1`) both work, selected by `local_base_url` in `~/.fabric-space/settings.toml`. Set `provider = "local"` and `model = "qwen2.5"`, pull a tool-calling model (`ollama pull qwen2.5`) and an embedding model for local memory (`ollama pull nomic-embed-text`); no `anthropic_api_key` is needed in local mode. Full copy-pasteable guide, connector auth, and the honest gaps list: [docs/LOCAL_FIRST_SETUP.md](docs/LOCAL_FIRST_SETUP.md).
+
 ## Usage
 
 Add a todo in the folder it belongs to: type a title on the node, press Enter and fill the sheet. Save writes a reminder.

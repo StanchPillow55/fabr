@@ -11,7 +11,7 @@ pub use signal::install as install_signals;
 
 use crate::board::{Activity, Board, Extras};
 use crate::lifecycle::{Ctl, advance_with, apply_redo, task_path_key, trailing_error};
-use crate::model::AnthropicModel;
+use crate::model::{AnthropicModel, CallObserver};
 use crate::now_utc;
 use crate::settings::check_timeout_s;
 use crate::state::{
@@ -45,6 +45,8 @@ pub struct Gate {
     pub default_folder: PathBuf,
     pub model: String,
     pub key: Secret,
+    pub provider: String,
+    pub local_base_url: String,
     pub heartbeat_interval_s: u64,
 }
 
@@ -57,8 +59,17 @@ pub fn start_gate(ctx: &Ctx) -> Result<Gate, FabrError> {
     if !read.settings.setup.completed {
         return refuse("Setup is not complete, so finish the setup screens in the app before starting the agent.");
     }
-    let Some(key) = read_secret(ctx, "anthropic_api_key") else {
-        return refuse("No Anthropic API key is saved, so enter it in the app's setup first.");
+    // `provider` and `local_base_url` are read straight from settings.toml;
+    // `settings_read` does not carry them. They default to anthropic / the
+    // standard Ollama endpoint when absent.
+    let (provider, local_base_url) = read_provider(&ctx.settings_path());
+    let local = provider == "local";
+    // The Anthropic key is only required when the Anthropic provider is in use.
+    // A local-only setup (Ollama / MLX) runs with no key at all.
+    let key = match read_secret(ctx, "anthropic_api_key") {
+        Some(key) => key,
+        None if local => String::new(),
+        None => return refuse("No Anthropic API key is saved, so enter it in the app's setup first."),
     };
     if read.settings.model.trim().is_empty() {
         return refuse("No model is selected, so pick one in the app's setup first.");
@@ -70,7 +81,9 @@ pub fn start_gate(ctx: &Ctx) -> Result<Gate, FabrError> {
             folder.display()
         )));
     }
-    register_secret(&key, &fingerprint(&key));
+    if !key.is_empty() {
+        register_secret(&key, &fingerprint(&key));
+    }
     if let Some(token) = read_secret(ctx, "telegram_bot_token") {
         register_secret(&token, "[bot token]");
     }
@@ -78,14 +91,67 @@ pub fn start_gate(ctx: &Ctx) -> Result<Gate, FabrError> {
         default_folder: folder,
         model: read.settings.model.trim().to_string(),
         key: Secret::new(key),
+        provider,
+        local_base_url,
         heartbeat_interval_s: u64::from(read.settings.heartbeat_interval_s).clamp(1, 60),
     })
+}
+
+/// Read `provider` and `local_base_url` from settings.toml, each defaulted.
+/// A missing or unreadable file yields the anthropic / Ollama defaults.
+fn read_provider(settings_path: &Path) -> (String, String) {
+    use crate::settings::{DEFAULT_LOCAL_BASE_URL, DEFAULT_PROVIDER};
+    let doc = std::fs::read_to_string(settings_path).ok().and_then(|t| t.parse::<toml_edit::DocumentMut>().ok());
+    let pick = |key: &str, default: &str| {
+        doc.as_ref()
+            .and_then(|d| d.get(key))
+            .and_then(|v| v.as_str())
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .unwrap_or(default)
+            .to_string()
+    };
+    (pick("provider", DEFAULT_PROVIDER), pick("local_base_url", DEFAULT_LOCAL_BASE_URL))
+}
+
+/// The resolved backend selection, kept so the model can be rebuilt when a
+/// retry base is supplied after construction (see [`Runner::with_model_retry_base`]).
+struct ModelSpec {
+    provider: String,
+    anthropic_url: String,
+    local_base_url: String,
+    key: Secret,
+    model: String,
+}
+
+impl ModelSpec {
+    /// Build the backend the resolved provider selects. For `local`, the key is
+    /// attached only when present (Ollama needs none; LM Studio ignores it).
+    fn build(&self, observer: CallObserver, retry_base: Option<Duration>) -> Box<dyn crate::model::Model + Send + Sync> {
+        if self.provider == "local" {
+            let mut m = crate::model::LocalModel::new(self.local_base_url.clone(), self.model.clone()).with_observer(observer);
+            if !self.key.is_empty() {
+                m = m.with_api_key(self.key.clone());
+            }
+            if let Some(base) = retry_base {
+                m = m.with_retry_base(base);
+            }
+            Box::new(m)
+        } else {
+            let mut m = AnthropicModel::new(self.key.clone(), self.model.clone()).with_base_url(&self.anthropic_url).with_observer(observer);
+            if let Some(base) = retry_base {
+                m = m.with_retry_base(base);
+            }
+            Box::new(m)
+        }
+    }
 }
 
 pub struct Runner {
     space: PathBuf,
     root: PathBuf,
-    model: AnthropicModel,
+    model: Box<dyn crate::model::Model + Send + Sync>,
+    model_spec: ModelSpec,
     calls: Arc<CallLog>,
     board: Arc<Board>,
     ctl: Ctl,
@@ -111,8 +177,14 @@ impl Runner {
         let gate = start_gate(ctx)?;
         let fp = fingerprint(gate.key.expose());
         let calls = CallLog::new(sink.clone(), fp.clone());
-        let model =
-            AnthropicModel::new(gate.key.clone(), gate.model.clone()).with_base_url(&ctx.anthropic_url).with_observer(calls.observer());
+        let model_spec = ModelSpec {
+            provider: gate.provider.clone(),
+            anthropic_url: ctx.anthropic_url.clone(),
+            local_base_url: gate.local_base_url.clone(),
+            key: gate.key.clone(),
+            model: gate.model.clone(),
+        };
+        let model = model_spec.build(calls.observer(), None);
         let space = ctx.space();
         let board = Board::new(&space, gate.heartbeat_interval_s, Some(calls.clone()));
         let mut ctl = Ctl::with_board(board.clone(), check_timeout_s(&space));
@@ -123,6 +195,7 @@ impl Runner {
             space,
             root: gate.default_folder,
             model,
+            model_spec,
             calls,
             board,
             ctl,
@@ -149,7 +222,7 @@ impl Runner {
     }
 
     pub fn with_model_retry_base(mut self, base: Duration) -> Runner {
-        self.model = self.model.with_retry_base(base);
+        self.model = self.model_spec.build(self.calls.observer(), Some(base));
         self
     }
 
@@ -544,7 +617,7 @@ impl Runner {
             if parked(&rec) || rec.paused || rec.requests.pause || suspended_now(&rec) {
                 break;
             }
-            advance_with(node_dir, path, &self.ctl, &self.model)?;
+            advance_with(node_dir, path, &self.ctl, &&*self.model)?;
             let after = std::fs::read_to_string(path).map_err(|e| FabrError::Io(e.to_string()))?;
             if after == before {
                 break;
@@ -645,6 +718,7 @@ impl Runner {
                     plan_meta: None,
                     assertions: Vec::new(),
                     approval: None,
+                    final_confirm: None,
                     verdict: None,
                     cost_usd: 0.0,
                     links: Links { redelegated_from: Some(task_path_key(path)), redelegated_to: None },

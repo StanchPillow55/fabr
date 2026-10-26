@@ -27,6 +27,7 @@ export function createMockApi(opts: MockOpts = {}): Api {
   let fabSettings: FabricSettings = {
     default_folder: '~/', model: 'claude-sonnet-5-5', telegram_user_id: null, auto_mode: false,
     question_budget: 5, heartbeat_interval_s: 10, execute: 'full', capabilities: { tools: ['read_file', 'write_file', 'run_command'], checks: ['git', 'cargo'] }, setup: { completed_steps: [], completed: false },
+    provider: 'local', local_base_url: 'http://localhost:11434/v1',
   };
   let fabSettingsExist = false;
   const fabSecrets: FabricSecretsStatus = { anthropic_api_key: false, telegram_bot_token: false };

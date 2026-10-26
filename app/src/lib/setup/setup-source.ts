@@ -35,6 +35,7 @@ export function emptySettings(): FabricSettings {
   return {
     default_folder: '', model: 'claude-sonnet-5-5', telegram_user_id: null, auto_mode: false,
     question_budget: 5, heartbeat_interval_s: 10, execute: 'full', capabilities: { tools: [], checks: [] }, setup: { completed_steps: [], completed: false },
+    provider: 'local', local_base_url: 'http://localhost:11434/v1',
   };
 }
 

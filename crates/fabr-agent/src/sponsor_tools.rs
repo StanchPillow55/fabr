@@ -6,22 +6,38 @@
 use crate::connectors::{self, memory};
 use crate::model::ToolCall;
 use crate::tools_contract;
-use crate::toolset::{DemoTools, ToolOutcome, ToolSet, ToolSpec};
+use crate::toolset::{DemoTools, DemoToolsWithReadRoot, ToolOutcome, ToolSet, ToolSpec};
 use std::path::Path;
 
 pub struct WorkspaceTools {
     space: std::path::PathBuf,
+    /// Optional workspace root for the broadened READ scope (M2 "agentic IDE").
+    /// `None` keeps reads contained to the node. Writes always stay in the node.
+    read_root: Option<std::path::PathBuf>,
 }
 
 impl WorkspaceTools {
     pub fn new(space: &Path) -> Self {
-        Self { space: space.to_path_buf() }
+        Self { space: space.to_path_buf(), read_root: None }
+    }
+
+    /// Broaden the READ scope of the demo tools to `read_root`, an ancestor of
+    /// the node. Writes stay contained to the node.
+    pub fn with_read_root(space: &Path, read_root: &Path) -> Self {
+        Self { space: space.to_path_buf(), read_root: Some(read_root.to_path_buf()) }
+    }
+
+    fn demo(&self) -> Box<dyn ToolSet> {
+        match &self.read_root {
+            Some(root) => Box::new(DemoToolsWithReadRoot::new(root)),
+            None => Box::new(DemoTools),
+        }
     }
 }
 
 impl ToolSet for WorkspaceTools {
     fn specs(&self) -> Vec<ToolSpec> {
-        let mut specs = DemoTools.specs();
+        let mut specs = self.demo().specs();
         let keys = tools_contract::load_sponsor_keys(&self.space);
         for tool in tools_contract::catalog(&keys) {
             if !tool.executable || !tool.availability.enabled || specs.iter().any(|spec| spec.name == tool.name) {
@@ -38,8 +54,9 @@ impl ToolSet for WorkspaceTools {
     }
 
     fn call(&self, node_dir: &Path, call: &ToolCall) -> ToolOutcome {
-        if DemoTools.names().contains(&call.name) {
-            return DemoTools.call(node_dir, call);
+        let demo = self.demo();
+        if demo.names().contains(&call.name) {
+            return demo.call(node_dir, call);
         }
         dispatch(&self.space, node_dir, call)
     }
@@ -69,6 +86,38 @@ fn dispatch(space: &Path, node_dir: &Path, call: &ToolCall) -> ToolOutcome {
             let id = text(&params, "id").ok_or_else(|| "missing param id".to_string())?;
             let memory = memory::delete(space, id).map_err(|e| e.message())?;
             Ok(format!("delete_memory {} deleted", memory.id))
+        }
+        "granola_list" => {
+            let limit = params.get("limit").and_then(|v| v.as_u64()).unwrap_or(20) as usize;
+            connectors::granola::granola_list(limit).map_err(|e| e.message())
+        }
+        "granola_search" => {
+            let query = text(&params, "query").ok_or_else(|| "missing param query".to_string())?;
+            connectors::granola::granola_search(query).map_err(|e| e.message())
+        }
+        "granola_get" => {
+            let id = text(&params, "id").ok_or_else(|| "missing param id".to_string())?;
+            connectors::granola::granola_get(id).map_err(|e| e.message())
+        }
+        "localmem_remember" => {
+            let body = text(&params, "text").ok_or_else(|| "missing param text".to_string())?;
+            let meta = text(&params, "meta").unwrap_or("");
+            let rec = connectors::localmem::localmem_remember(&connectors::localmem::embeddings_path(node_dir), body, meta)
+                .map_err(|e| e.message())?;
+            Ok(format!("localmem_remember {} stored", rec.id))
+        }
+        "localmem_recall" => {
+            let query = text(&params, "query").ok_or_else(|| "missing param query".to_string())?;
+            let k = params.get("k").and_then(|v| v.as_u64()).unwrap_or(5) as usize;
+            let hits = connectors::localmem::localmem_recall(&connectors::localmem::embeddings_path(node_dir), query, k)
+                .map_err(|e| e.message())?;
+            Ok(connectors::localmem::recall_log(&hits))
+        }
+        "localmem_forget" => {
+            let id = text(&params, "id").ok_or_else(|| "missing param id".to_string())?;
+            let removed = connectors::localmem::localmem_forget(&connectors::localmem::embeddings_path(node_dir), id)
+                .map_err(|e| e.message())?;
+            Ok(format!("localmem_forget {id} removed={removed}"))
         }
         "bright_data_search" | "bright_data_extract" => bright_data(node_dir, space, &call.name, &params),
         "moss_list" => connectors::moss::list_indexes(space).map_err(|e| e.message()),

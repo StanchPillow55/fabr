@@ -186,9 +186,11 @@ export function errText(e: unknown): string {
 export interface SetupState { completed_steps: string[]; completed: boolean }
 export type ExecuteMode = 'full' | 'read_only' | 'off';
 export interface Capabilities { tools: string[]; checks: string[] }
+export type Provider = 'local' | 'anthropic';
 export interface FabricSettings {
   default_folder: string; model: string; telegram_user_id: number | null; auto_mode: boolean;
   question_budget: number; heartbeat_interval_s: number; execute: ExecuteMode; capabilities: Capabilities; setup: SetupState;
+  provider: Provider; local_base_url: string;
 }
 export interface FabricSettingsRead { exists: boolean; settings: FabricSettings }
 export interface FabricSecretsWriteReq { anthropic_api_key?: string; telegram_bot_token?: string }

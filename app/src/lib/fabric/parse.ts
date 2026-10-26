@@ -87,5 +87,6 @@ export function parseRecord(text: string): TaskRecord {
   const req = data.requests as Record<string, unknown>;
   const requests = { ...req, pause: req.pause === true, resume: req.resume === true, complete: req.complete === true, redo: (req.redo === 'define' || req.redo === 'plan' ? req.redo : null) as Redo | null };
   const until = typeof data.suspend_until === 'string' && data.suspend_until !== '' ? data.suspend_until : null;
-  return { ...(data as unknown as FrontMatter), pri, requests: requests as unknown as FrontMatter['requests'], needs: typeof data.needs === 'string' && data.needs !== '' ? data.needs : null, by: parseBy(data.by), plan_meta: parsePlanMeta(data.plan_meta), paused: data.paused === true, suspended: data.suspended === true, suspend_until: until, sections: parseSections(body) };
+  const final_confirm = typeof data.final_confirm === 'object' && data.final_confirm !== null && !Array.isArray(data.final_confirm) ? (data.final_confirm as FrontMatter['final_confirm']) : null;
+  return { ...(data as unknown as FrontMatter), pri, requests: requests as unknown as FrontMatter['requests'], needs: typeof data.needs === 'string' && data.needs !== '' ? data.needs : null, by: parseBy(data.by), plan_meta: parsePlanMeta(data.plan_meta), paused: data.paused === true, suspended: data.suspended === true, suspend_until: until, final_confirm, sections: parseSections(body) };
 }

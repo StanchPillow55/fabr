@@ -376,6 +376,84 @@ fn catalog_specs() -> &'static [Spec] {
             schema: || object_schema(&[("id", "string")], &["id"]),
         },
         Spec {
+            name: "granola_list",
+            provider: Provider::Local,
+            grant: GrantClass::LocalRead,
+            effect: Effect::LocalRead,
+            data_egress: false,
+            reversible: true,
+            idempotency: Idempotency::Proven,
+            evidence: Evidence::FileContent,
+            description: "List recent Granola meeting notes (title, date, id) from the local cache",
+            executable: true,
+            schema: || object_schema(&[("limit", "number")], &[]),
+        },
+        Spec {
+            name: "granola_search",
+            provider: Provider::Local,
+            grant: GrantClass::LocalRead,
+            effect: Effect::LocalRead,
+            data_egress: false,
+            reversible: true,
+            idempotency: Idempotency::Proven,
+            evidence: Evidence::FileContent,
+            description: "Case-insensitive substring search over local Granola note titles and bodies",
+            executable: true,
+            schema: || object_schema(&[("query", "string")], &["query"]),
+        },
+        Spec {
+            name: "granola_get",
+            provider: Provider::Local,
+            grant: GrantClass::LocalRead,
+            effect: Effect::LocalRead,
+            data_egress: false,
+            reversible: true,
+            idempotency: Idempotency::Proven,
+            evidence: Evidence::FileContent,
+            description: "Return the full text/transcript of one local Granola note by id",
+            executable: true,
+            schema: || object_schema(&[("id", "string")], &["id"]),
+        },
+        Spec {
+            name: "localmem_remember",
+            provider: Provider::Local,
+            grant: GrantClass::LocalWrite,
+            effect: Effect::LocalWrite,
+            data_egress: false,
+            reversible: true,
+            idempotency: Idempotency::Never,
+            evidence: Evidence::FileContent,
+            description: "Remember text in the local semantic memory for this folder",
+            executable: true,
+            schema: || object_schema(&[("text", "string"), ("meta", "string")], &["text"]),
+        },
+        Spec {
+            name: "localmem_recall",
+            provider: Provider::Local,
+            grant: GrantClass::LocalRead,
+            effect: Effect::LocalRead,
+            data_egress: false,
+            reversible: true,
+            idempotency: Idempotency::Proven,
+            evidence: Evidence::FileContent,
+            description: "Recall the most similar remembered texts from local semantic memory",
+            executable: true,
+            schema: || object_schema(&[("query", "string"), ("k", "number")], &["query"]),
+        },
+        Spec {
+            name: "localmem_forget",
+            provider: Provider::Local,
+            grant: GrantClass::LocalWrite,
+            effect: Effect::LocalWrite,
+            data_egress: false,
+            reversible: true,
+            idempotency: Idempotency::Proven,
+            evidence: Evidence::FileContent,
+            description: "Forget one remembered item by id",
+            executable: true,
+            schema: || object_schema(&[("id", "string")], &["id"]),
+        },
+        Spec {
             name: "moss_upload",
             provider: Provider::Moss,
             grant: GrantClass::ExternalUpload,
@@ -604,6 +682,30 @@ pub fn must_bind(name: &str) -> bool {
     catalog(&SponsorKeys::empty()).iter().any(|tool| tool.executable && tool.name == name && tool.provider != Provider::Local)
 }
 
+/// The effect class of a tool, independent of credentials. Returns `None` for
+/// a tool that is not in the catalog.
+pub fn effect_of(name: &str) -> Option<Effect> {
+    catalog(&SponsorKeys::empty()).into_iter().find(|tool| tool.name == name).map(|tool| tool.effect)
+}
+
+/// An irreversible, external-effect action (send, post, pay) is the last layer:
+/// it needs a second explicit user confirmation before it is performed. Reads
+/// and local writes do not. The effect label comes straight from the catalog so
+/// a `BoundAction.effect` string can be checked the same way.
+pub fn effect_needs_final_confirm(effect: Effect) -> bool {
+    matches!(effect, Effect::ExternalEffect | Effect::Payment)
+}
+
+/// Whether this tool, by effect, requires a second confirmation gate.
+pub fn requires_final_confirm(name: &str) -> bool {
+    effect_of(name).is_some_and(effect_needs_final_confirm)
+}
+
+/// Whether a persisted `BoundAction.effect` label is an irreversible external effect.
+pub fn effect_label_needs_final_confirm(effect_label: &str) -> bool {
+    effect_label == Effect::ExternalEffect.label() || effect_label == Effect::Payment.label()
+}
+
 /// Names, enabled/disabled, and input schemas. Secret values and secret paths are omitted.
 pub fn planner_view(keys: &SponsorKeys) -> String {
     catalog(keys)
@@ -625,6 +727,9 @@ pub fn destination_of(tool: &str, params: &Value) -> String {
         "recall_preferences" => "query",
         "propose_memory" => "text",
         "confirm_memory" | "delete_memory" => "id",
+        "granola_search" | "localmem_recall" => "query",
+        "granola_get" | "localmem_forget" => "id",
+        "localmem_remember" => "text",
         "moss_upload" => "memory_id",
         "moss_retrieve" => "index",
         "cartesia_speak" => "transcript",
@@ -756,7 +861,16 @@ pub fn execution_allowed(
         if !action_covers(bound, tool_name, params) {
             return Err(FabrError::BadRequest(format!("approval does not cover this {tool_name} action")));
         }
-    } else if matches!(tool_name, "recall_preferences" | "propose_memory" | "confirm_memory" | "delete_memory") {
+    } else if matches!(
+        tool_name,
+        "recall_preferences"
+            | "propose_memory"
+            | "confirm_memory"
+            | "delete_memory"
+            | "localmem_remember"
+            | "localmem_recall"
+            | "localmem_forget"
+    ) {
         schema_ok(&tool.input_schema, params)?;
     }
     Ok(())

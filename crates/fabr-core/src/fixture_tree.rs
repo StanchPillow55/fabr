@@ -216,6 +216,7 @@ fn write_records(node: &Path, todos: &[Todo], today: chrono::NaiveDate) -> io::R
             plan_meta: None,
             assertions: Vec::new(),
             approval: None,
+            final_confirm: None,
             verdict: None,
             cost_usd: 0.0,
             links: Links { redelegated_from: None, redelegated_to: None },
