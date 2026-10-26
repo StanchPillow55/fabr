@@ -3,6 +3,7 @@ pub mod brightdata;
 pub mod cartesia;
 pub mod fo;
 pub mod granola;
+pub mod gsuite;
 pub mod localmem;
 pub mod memory;
 pub mod moss;

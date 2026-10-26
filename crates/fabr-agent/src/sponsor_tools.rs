@@ -132,6 +132,27 @@ fn dispatch(space: &Path, node_dir: &Path, call: &ToolCall) -> ToolOutcome {
         "apify_lookup" => connectors::apify::run(space, &params).map_err(|e| e.message()),
         "nessie_sandbox" => connectors::nessie::sandbox_accounts(space).map_err(|e| e.message()),
         "visa_checkout" => Err("visa is not integrated".into()),
+        "gmail_list" => {
+            let query = text(&params, "query").unwrap_or("");
+            let limit = params.get("limit").and_then(|v| v.as_u64()).unwrap_or(20) as usize;
+            connectors::gsuite::gmail_list(query, limit).map_err(|e| e.message())
+        }
+        "gmail_get" => {
+            let id = text(&params, "id").ok_or_else(|| "missing param id".to_string())?;
+            connectors::gsuite::gmail_get(id).map_err(|e| e.message())
+        }
+        "calendar_list" => {
+            let time_min = text(&params, "time_min").unwrap_or("");
+            let time_max = text(&params, "time_max").unwrap_or("");
+            let limit = params.get("limit").and_then(|v| v.as_u64()).unwrap_or(20) as usize;
+            connectors::gsuite::calendar_list(time_min, time_max, limit).map_err(|e| e.message())
+        }
+        "gmail_send" => {
+            let to = text(&params, "to").ok_or_else(|| "missing param to".to_string())?;
+            let subject = text(&params, "subject").unwrap_or("");
+            let body = text(&params, "body").unwrap_or("");
+            connectors::gsuite::gmail_send(to, subject, body).map_err(|e| e.message())
+        }
         other => Err(format!("unknown tool {other}")),
     }
 }

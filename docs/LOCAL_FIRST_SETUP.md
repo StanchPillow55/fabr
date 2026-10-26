@@ -388,3 +388,69 @@ Do these, in order, to run fully local:
     open Fabr, create a reminder, Delegate, approve the plan, and watch it
     execute — approving the two-pass final confirmation if an outbound effect is
     ever requested.
+
+## Google Workspace (Gmail/Calendar)
+
+The Google Workspace connector adds four tools — `gmail_search`,
+`gmail_read`, and `calendar_list` (read-only) plus `gmail_send` (outbound).
+fabr performs **no interactive OAuth flow**: you mint a token once outside of
+fabr and drop it on disk. With a `refresh_token` present, fabr auto-refreshes
+the access token when it expires.
+
+### One-time setup — mint a Google OAuth token (no interactive flow in fabr)
+
+1. **Google Cloud project** — create (or pick) a project at
+   <https://console.cloud.google.com>.
+2. **Enable APIs** — in *APIs & Services > Library*, enable the **Gmail API**
+   and the **Google Calendar API**.
+3. **OAuth consent screen** — configure it (External or Internal). If the app
+   is in *Testing*, add your account as a **test user**.
+4. **OAuth client** — create an **OAuth 2.0 Client ID** of type **Desktop
+   app**. Note the `client_id` and `client_secret`.
+5. **Scopes** — grant these three when minting the token:
+   - `https://www.googleapis.com/auth/gmail.readonly`
+   - `https://www.googleapis.com/auth/gmail.send`
+   - `https://www.googleapis.com/auth/calendar.readonly`
+6. **Mint an access token** (pick one):
+   - **(a) OAuth 2.0 Playground** — <https://developers.google.com/oauthplayground>:
+     click the gear icon, check *"Use your own OAuth credentials"*, enter your
+     client id/secret, select the three scopes, authorize, and exchange the
+     code for tokens.
+   - **(b) gcloud** —
+     `gcloud auth application-default login --scopes=https://www.googleapis.com/auth/gmail.readonly,https://www.googleapis.com/auth/gmail.send,https://www.googleapis.com/auth/calendar.readonly`
+     then read the token with
+     `gcloud auth application-default print-access-token`.
+7. **Provide the token to fabr** by EITHER:
+   - set env `GOOGLE_OAUTH_TOKEN=<access_token>` (simplest, but access tokens
+     expire in ~1h), OR
+   - write a JSON file so fabr can auto-refresh (preferred, below).
+8. **Preferred durable setup** — create `~/.fabric-space/google_token.json`
+   containing:
+
+   ```json
+   {
+     "access_token": "ya29....",
+     "refresh_token": "1//...",
+     "client_id": "<id>.apps.googleusercontent.com",
+     "client_secret": "<secret>",
+     "expiry": "2026-10-26T12:00:00Z"
+   }
+   ```
+
+   With `refresh_token` + `client_id` + `client_secret` present, fabr performs
+   a single refresh against <https://oauth2.googleapis.com/token> when the
+   access token is expired and caches the new one back to the file.
+9. **(Optional)** override the file location with env
+   `GOOGLE_TOKEN_PATH=/custom/path/google_token.json` (default is
+   `~/.fabric-space/google_token.json`).
+10. **(If wiring availability via the sponsor key)** add
+    `google_oauth_token = "<access_token>"` to `<fabric-space>/secrets.toml`,
+    or set `GOOGLE_OAUTH_TOKEN`, so `configured()` / the planner view reports
+    the four tools as enabled.
+
+### Confirmation gate
+
+`gmail_send` requires the `gmail.send` scope **and** passes the **M3 two-pass
+final-confirm gate** before any mail leaves the machine. The three read tools
+(`gmail_search`, `gmail_read`, `calendar_list`) only need their respective
+`*.readonly` scopes and do not trigger the outbound-effect gate.

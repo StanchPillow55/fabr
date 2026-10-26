@@ -23,9 +23,20 @@ pub const NESSIE_KEY: &str = "nessie_api_key";
 pub const CARTESIA_KEY: &str = "cartesia_api_key";
 pub const VISA_CERT_PATH: &str = "visa_cert_path";
 pub const VISA_KEY_PATH: &str = "visa_key_path";
+pub const GOOGLE_OAUTH_TOKEN: &str = "google_oauth_token";
 
-const SPONSOR_KEYS: &[&str] =
-    &[MOSS_PROJECT_ID, MOSS_PROJECT_KEY, FO_KEY, APIFY_TOKEN, BRIGHTDATA_TOKEN, NESSIE_KEY, CARTESIA_KEY, VISA_CERT_PATH, VISA_KEY_PATH];
+const SPONSOR_KEYS: &[&str] = &[
+    MOSS_PROJECT_ID,
+    MOSS_PROJECT_KEY,
+    FO_KEY,
+    APIFY_TOKEN,
+    BRIGHTDATA_TOKEN,
+    NESSIE_KEY,
+    CARTESIA_KEY,
+    VISA_CERT_PATH,
+    VISA_KEY_PATH,
+    GOOGLE_OAUTH_TOKEN,
+];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Provider {
@@ -37,6 +48,7 @@ pub enum Provider {
     Visa,
     Nessie,
     Cartesia,
+    GSuite,
 }
 
 impl Provider {
@@ -52,6 +64,7 @@ impl Provider {
             Provider::Visa => keys.has(VISA_CERT_PATH) && keys.has(VISA_KEY_PATH),
             Provider::Nessie => keys.has(NESSIE_KEY),
             Provider::Cartesia => keys.has(CARTESIA_KEY),
+            Provider::GSuite => keys.has(GOOGLE_OAUTH_TOKEN),
         }
     }
 }
@@ -189,6 +202,7 @@ fn env_names(canonical: &str) -> &'static [&'static str] {
         name if name == CARTESIA_KEY => &["CARTESIA_API_KEY"],
         name if name == APIFY_TOKEN => &["APIFY_API_TOKEN"],
         name if name == NESSIE_KEY => &["NESSIE_API_KEY", "NESSI_API_KEY"],
+        name if name == GOOGLE_OAUTH_TOKEN => &["GOOGLE_OAUTH_TOKEN"],
         _ => &[],
     }
 }
@@ -602,12 +616,69 @@ fn catalog_specs() -> &'static [Spec] {
             executable: true,
             schema: || object_schema(&[("path", "string")], &["path"]),
         },
+        Spec {
+            name: "gmail_list",
+            provider: Provider::GSuite,
+            grant: GrantClass::ExternalAction,
+            effect: Effect::RemoteRead,
+            data_egress: false,
+            reversible: true,
+            idempotency: Idempotency::Proven,
+            evidence: Evidence::IndependentProviderRecord,
+            description: "List Gmail messages matching a query (from, subject, date, snippet, id)",
+            executable: true,
+            schema: || object_schema(&[("query", "string"), ("limit", "number")], &[]),
+        },
+        Spec {
+            name: "gmail_get",
+            provider: Provider::GSuite,
+            grant: GrantClass::ExternalAction,
+            effect: Effect::RemoteRead,
+            data_egress: false,
+            reversible: true,
+            idempotency: Idempotency::Proven,
+            evidence: Evidence::IndependentProviderRecord,
+            description: "Return the decoded plain-text body of one Gmail message by id",
+            executable: true,
+            schema: || object_schema(&[("id", "string")], &["id"]),
+        },
+        Spec {
+            name: "calendar_list",
+            provider: Provider::GSuite,
+            grant: GrantClass::ExternalAction,
+            effect: Effect::RemoteRead,
+            data_egress: false,
+            reversible: true,
+            idempotency: Idempotency::Proven,
+            evidence: Evidence::IndependentProviderRecord,
+            description: "List primary-calendar events in a time window (summary, start, end, attendees)",
+            executable: true,
+            schema: || object_schema(&[("time_min", "string"), ("time_max", "string"), ("limit", "number")], &[]),
+        },
+        Spec {
+            name: "gmail_send",
+            provider: Provider::GSuite,
+            grant: GrantClass::ExternalAction,
+            effect: Effect::ExternalEffect,
+            data_egress: true,
+            reversible: false,
+            idempotency: Idempotency::Never,
+            evidence: Evidence::IndependentProviderRecord,
+            description: "Send a Gmail message. Irreversible external effect; requires a second confirmation.",
+            executable: true,
+            schema: || object_schema(&[("to", "string"), ("subject", "string"), ("body", "string")], &["to", "subject", "body"]),
+        },
     ]
 }
 
 fn availability_for(provider: Provider, keys: &SponsorKeys) -> Availability {
     if provider == Provider::Local {
         return Availability { configured: true, enabled: true, healthy: true, detail: "local" };
+    }
+    // GSuite resolves its token from env, secrets.toml, OR the token file. Probe
+    // the connector so a file-only setup (no env/secret) still reports available.
+    if provider == Provider::GSuite && !provider.configured(keys) && crate::connectors::gsuite::access_token().is_some() {
+        return Availability { configured: true, enabled: true, healthy: true, detail: "google token file present; provider health not probed" };
     }
     if provider.configured(keys) {
         Availability { configured: true, enabled: true, healthy: true, detail: "credential present; provider health not probed" }
@@ -736,6 +807,10 @@ pub fn destination_of(tool: &str, params: &Value) -> String {
         "cartesia_transcribe" | "read_file" | "write_file" | "list_dir" | "make_dir" => "path",
         "nessie_sandbox" => "account_id",
         "apify_lookup" => "actor",
+        "gmail_send" => "to",
+        "gmail_list" => "query",
+        "gmail_get" => "id",
+        "calendar_list" => "time_min",
         _ => "destination",
     };
     let fallback = if key == "destination" { None } else { params.get("destination").and_then(|v| v.as_str()) };
